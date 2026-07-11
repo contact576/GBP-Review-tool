@@ -1,0 +1,115 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background-color: theme("colors.paper");
+    color: theme("colors.ink");
+    font-family: theme("fontFamily.sans");
+    font-feature-settings: "ss01", "cv01";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Visible focus ring — never remove without replacement (WCAG AA). */
+  :focus-visible {
+    outline: 2px solid theme("colors.primary.DEFAULT");
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* On deep-green surfaces, use gold focus ring for contrast. */
+  .on-hero :focus-visible {
+    outline-color: theme("colors.gold.DEFAULT");
+  }
+
+  ::selection {
+    background: theme("colors.primary.tint");
+    color: theme("colors.primary.dark");
+  }
+}
+
+@layer components {
+  /* Mono kicker — Spline Sans Mono, caps, tracked. */
+  .kicker {
+    font-family: theme("fontFamily.mono");
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: theme("colors.faint");
+  }
+
+  .data-chip {
+    font-family: theme("fontFamily.mono");
+    font-weight: 500;
+    font-size: 12px;
+  }
+
+  /* Skip link for keyboard users. */
+  .skip-link {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    z-index: 100;
+  }
+  .skip-link:focus {
+    left: 8px;
+    top: 8px;
+    padding: 8px 12px;
+    background: theme("colors.card");
+    border: 1px solid theme("colors.hairline");
+    border-radius: theme("borderRadius.btn");
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .shimmer {
+    position: relative;
+    overflow: hidden;
+    background: theme("colors.hairline");
+  }
+  .shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.55),
+      transparent
+    );
+    animation: shimmer 1.5s infinite;
+  }
+}
+
+/* Respect reduced motion everywhere — no sweeps, count-ups, confetti. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
