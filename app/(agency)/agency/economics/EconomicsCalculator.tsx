@@ -60,8 +60,12 @@ export function EconomicsCalculator({
           <Field label={`Wholesale rate (${currencySymbol} / location / mo)`} hint="What you pay Foundly per location.">
             <Input type="number" min={0} inputMode="decimal" value={wholesale} onChange={(e) => setWholesale(e.target.value)} />
           </Field>
-          <Field label={`Retail price (${currencySymbol} / location / mo)`} hint="What you charge the client.">
-            <Input type="number" min={0} inputMode="decimal" value={retail} onChange={(e) => setRetail(e.target.value)} invalid={underwater} error={underwater ? "Retail is below wholesale — you'd lose money per location." : undefined} />
+          <Field
+            label={`Retail price (${currencySymbol} / location / mo)`}
+            hint={underwater ? undefined : "What you charge the client."}
+            error={underwater ? "Retail is below wholesale — you'd lose money per location." : undefined}
+          >
+            <Input type="number" min={0} inputMode="decimal" value={retail} onChange={(e) => setRetail(e.target.value)} invalid={underwater} />
           </Field>
         </div>
         <div className="mt-4 rounded-btn bg-primary-wash p-3 text-[12px] text-sub">
