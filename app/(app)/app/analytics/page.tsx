@@ -32,7 +32,7 @@ export default async function AnalyticsPage() {
       icon: "eye",
       value: last?.foundYou ?? since.foundYou.now,
       delta: since.foundYou.delta,
-      blurb: "Impressions on your Google Business Profile in search and maps.",
+      blurb: "How many people saw your Business Profile in Google Search and Maps.",
       source: "Google Business Profile insights",
     },
     {

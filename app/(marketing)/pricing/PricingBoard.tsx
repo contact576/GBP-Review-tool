@@ -186,7 +186,7 @@ function Segmented<T extends string>({
           onClick={() => onChange(o.key)}
           aria-pressed={value === o.key}
           className={cn(
-            "rounded-chip px-3.5 py-1.5 text-[13px] font-semibold transition-colors min-h-[36px]",
+            "rounded-chip px-4 py-1.5 text-[13px] font-semibold transition-colors min-h-[44px]",
             value === o.key ? "bg-primary text-white" : "text-sub hover:text-ink",
           )}
         >

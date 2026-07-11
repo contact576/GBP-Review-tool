@@ -13,7 +13,7 @@ const LOOP: { icon: IconName; label: string; caption: string }[] = [
   { icon: "star", label: "Reviews", caption: "Happy customers post real, durable Google reviews — never incentivized." },
   { icon: "sparkles", label: "Optimized profile", caption: "The Co-Pilot keeps your Google profile fresh with weekly tasks." },
   { icon: "trend", label: "Rank", caption: "More reviews plus a live profile lift you in the local map pack." },
-  { icon: "users", label: "New customers", caption: "People find you, read the proof, and choose you over the block." },
+  { icon: "users", label: "They choose you", caption: "People find you, read the proof, and choose you over the block." },
   { icon: "refresh", label: "Come back", caption: "Consent-based winbacks bring them in again — and the loop spins." },
 ];
 

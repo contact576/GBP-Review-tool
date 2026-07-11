@@ -24,6 +24,11 @@ export default async function ReviewPage({ params }: { params: Promise<{ token: 
   const { location } = result;
   const seeds = ATTRS[location.vertical] ?? ATTRS.physiotherapy;
 
+  // Resolve the capturing staff member's first name (used to ground the draft).
+  const data = await provider.getData();
+  const staff = data.staff.find((s) => s.id === result.request.staffId);
+  const staffName = staff ? staff.displayName.split(" ")[0] : undefined;
+
   return (
     <>
       <header className="flex items-center justify-between border-b border-hairline py-4">
@@ -43,7 +48,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ token: 
         business={location.name}
         category={location.category}
         reviewUrl={location.reviewUrl}
-        staffName={result.request.staffId ? undefined : undefined}
+        staffName={staffName}
         attributeSeeds={seeds}
       />
 

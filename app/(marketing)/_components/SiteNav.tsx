@@ -59,7 +59,7 @@ export function SiteNav() {
             onClick={() => setOpen((v) => !v)}
             aria-label={open ? "Close menu" : "Open menu"}
             aria-expanded={open}
-            className="grid size-10 place-items-center rounded-btn text-sub hover:bg-primary-wash md:hidden"
+            className="grid size-11 place-items-center rounded-btn text-sub hover:bg-primary-wash md:hidden"
           >
             <Icon name={open ? "x" : "menu"} size={22} />
           </button>

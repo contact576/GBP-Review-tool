@@ -22,7 +22,7 @@ const badgeTones: Record<BadgeTone, string> = {
   primary: "bg-primary-tint text-primary-dark",
   gold: "bg-gold-tint text-gold-deep",
   danger: "bg-danger-tint text-danger",
-  sub: "bg-[#EFEEE9] text-sub",
+  sub: "bg-hairline/60 text-sub",
 };
 export function Badge({
   children, tone = "neutral", icon, className,
