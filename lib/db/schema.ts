@@ -5,9 +5,12 @@ import {
   boolean,
   doublePrecision,
   jsonb,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import type {
   WhiteLabelConfig,
+  IndustryConfig,
+  WorkspaceSettings,
   Subscription,
   Campaign,
   AuditLog,
@@ -67,6 +70,9 @@ export const workspace = pgTable("workspace", {
   plan: text("plan").notNull(),
   createdAt: text("created_at").notNull(),
   whiteLabel: jsonb("white_label").$type<WhiteLabelConfig>(),
+  industryConfig: jsonb("industry_config").$type<IndustryConfig | null>(),
+  settings: jsonb("settings").$type<WorkspaceSettings | null>(),
+  isDemo: boolean("is_demo").notNull().default(false),
 });
 
 export const location = pgTable("location", {
@@ -112,6 +118,21 @@ export const appUser = pgTable("app_user", {
   role: text("role").notNull(),
   twoFactorEnabled: boolean("two_factor_enabled").notNull(),
   avatarInitials: text("avatar_initials").notNull(),
+  passwordHash: text("password_hash"),
+  emailVerified: boolean("email_verified").notNull().default(false),
+  googleSub: text("google_sub"),
+  createdAt: text("created_at"),
+});
+
+export const staffInvite = pgTable("staff_invite", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+  email: text("email").notNull(),
+  role: text("role").notNull(),
+  token: text("token").notNull(),
+  status: text("status").notNull(),
+  createdAt: text("created_at").notNull(),
+  seq: doublePrecision("seq").notNull(),
 });
 
 export const staffMember = pgTable("staff_member", {

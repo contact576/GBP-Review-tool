@@ -1,7 +1,10 @@
+import { getData } from "@/lib/data";
 import { Step } from "../_components/Step";
 import { BusinessTypePicker } from "./BusinessTypePicker";
 
-export default function BusinessTypePage() {
+export default async function BusinessTypePage() {
+  const data = await getData();
+
   return (
     <Step
       current={2}
@@ -11,7 +14,7 @@ export default function BusinessTypePage() {
       continueHref="/onboarding/connect"
       skipHref="/onboarding/connect"
     >
-      <BusinessTypePicker />
+      <BusinessTypePicker initial={data.workspace.vertical} />
     </Step>
   );
 }

@@ -1,15 +1,23 @@
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { getDb, type FoundlyDb } from "../db/client";
 import * as t from "../db/schema";
-import { buildSeed } from "./seed";
+import { emptyFoundlyData, makeSlug } from "./empty";
+import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import type {
   DataProvider,
   CaptureCustomerInput,
+  AddCustomerInput,
   SendRequestInput,
   RecordDraftInput,
   PostReplyInput,
   CreateCampaignInput,
   SubmitPrivateFeedbackInput,
+  RegisterInput,
+  RegisterResult,
+  AuthUser,
+  GoogleLocationPatch,
+  CreateTaskInput,
 } from "./provider";
 import type {
   FoundlyData,
@@ -17,6 +25,7 @@ import type {
   Workspace,
   Location,
   User,
+  StaffInvite,
   StaffMember,
   Customer,
   CustomerConsent,
@@ -30,16 +39,30 @@ import type {
   PrivateFeedback,
   Notification,
   AuditLog,
+  QrAsset,
+  Integration,
+  WorkspaceSettings,
 } from "./types";
 
 /**
  * Postgres/Drizzle DataProvider — the real persistence path (DATABASE_URL set).
  *
+ * MULTI-TENANT: every scoped read and mutation filters by `workspace_id` so a
+ * tenant can never see or touch another tenant's rows. Token- and slug-keyed
+ * lookups (`getRequestByToken`, `advanceRequest`, `submitPrivateFeedback`,
+ * `mintRequestFromQrSlug`) are global — tokens/slugs are unguessable public
+ * identifiers — but every row they touch is resolved to (and then scoped by)
+ * the owning row's workspace.
+ *
  * Every mutation mirrors memory-provider.ts semantics exactly, including its
  * side effects (staff capture++/streak activity, subscription usage counters,
  * audit rows, notifications, consent-filtered campaign audiences, and profile
  * completeness / response-rate bumps). Reads reassemble the identical
- * FoundlyData shape produced by buildSeed().
+ * FoundlyData shape produced by emptyFoundlyData()/buildSeed().
+ *
+ * The neon-http driver does not support interactive transactions, so the
+ * multi-statement registration path uses `db.batch([...])` (single atomic
+ * round-trip) instead of `db.transaction()`.
  */
 
 // ── Row type aliases ────────────────────────────────────────
@@ -60,6 +83,8 @@ type OrgRow = typeof t.organization.$inferSelect;
 type WorkspaceRow = typeof t.workspace.$inferSelect;
 type UserRow = typeof t.appUser.$inferSelect;
 type LocationRow = typeof t.location.$inferSelect;
+type InviteRow = typeof t.staffInvite.$inferSelect;
+type QrRow = typeof t.qrAsset.$inferSelect;
 
 // ── Small helpers ───────────────────────────────────────────
 function nowIso(): string {
@@ -72,11 +97,15 @@ function id(prefix: string): string {
 function front(): number {
   return -Date.now();
 }
+/** Append ordering key (mirrors `push`) — sorts after every seed seq. */
+function back(): number {
+  return Date.now();
+}
 function one<T>(rows: T[], name: string): T {
   const row = rows[0];
   if (!row) {
     throw new Error(
-      `Foundly DB not seeded: missing ${name}. Run "npm run db:seed".`,
+      `Foundly DB is missing ${name}. Run "npm run db:seed" or re-register.`,
     );
   }
   return row;
@@ -84,17 +113,19 @@ function one<T>(rows: T[], name: string): T {
 
 interface Ctx {
   workspaceId: string;
-  locationId: string;
-  region: Location["region"];
+  location: LocationRow;
 }
-async function loadContext(db: FoundlyDb): Promise<Ctx> {
-  const ws = one(await db.select().from(t.workspace).limit(1), "workspace");
-  const loc = one(await db.select().from(t.location).limit(1), "location");
-  return {
-    workspaceId: ws.id,
-    locationId: loc.id,
-    region: loc.region as Location["region"],
-  };
+/** Loads the workspace's single location row (throws when absent). */
+async function loadContext(db: FoundlyDb, workspaceId: string): Promise<Ctx> {
+  const loc = one(
+    await db
+      .select()
+      .from(t.location)
+      .where(eq(t.location.workspaceId, workspaceId))
+      .limit(1),
+    `location for workspace ${workspaceId}`,
+  );
+  return { workspaceId, location: loc };
 }
 
 async function bumpUsage(
@@ -112,7 +143,36 @@ async function bumpUsage(
   await db
     .update(t.subscription)
     .set({ usage: fn(sub.usage) })
-    .where(eq(t.subscription.id, sub.id));
+    .where(
+      and(
+        eq(t.subscription.id, sub.id),
+        eq(t.subscription.workspaceId, workspaceId),
+      ),
+    );
+}
+
+async function findUserRowByEmail(
+  db: FoundlyDb,
+  email: string,
+): Promise<UserRow | null> {
+  const key = email.trim().toLowerCase();
+  const rows = await db
+    .select()
+    .from(t.appUser)
+    .where(sql`lower(${t.appUser.email}) = ${key}`)
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+function toAuthUser(row: UserRow): AuthUser {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    role: row.role as AuthUser["role"],
+    workspaceId: row.workspaceId,
+    isDemo: false, // the database never holds demo data
+  };
 }
 
 // ── Row → domain mappers ────────────────────────────────────
@@ -133,11 +193,14 @@ function mapWorkspace(row: WorkspaceRow): Workspace {
     organizationId: row.organizationId,
     name: row.name,
     vertical: row.vertical as Workspace["vertical"],
+    industryConfig: row.industryConfig ?? undefined,
     region: row.region as Workspace["region"],
     timezone: row.timezone,
     plan: row.plan as Workspace["plan"],
     createdAt: row.createdAt,
+    isDemo: row.isDemo,
     whiteLabel: row.whiteLabel ?? undefined,
+    settings: row.settings ?? undefined,
   };
 }
 
@@ -175,6 +238,7 @@ function mapLocation(row: LocationRow): Location {
   };
 }
 
+/** Domain user WITHOUT credential material (passwordHash never leaves auth). */
 function mapUser(row: UserRow): User {
   return {
     id: row.id,
@@ -184,6 +248,18 @@ function mapUser(row: UserRow): User {
     workspaceId: row.workspaceId,
     twoFactorEnabled: row.twoFactorEnabled,
     avatarInitials: row.avatarInitials,
+  };
+}
+
+function mapInvite(row: InviteRow): StaffInvite {
+  return {
+    id: row.id,
+    workspaceId: row.workspaceId,
+    email: row.email,
+    role: row.role as StaffInvite["role"],
+    token: row.token,
+    status: row.status as StaffInvite["status"],
+    createdAt: row.createdAt,
   };
 }
 
@@ -392,7 +468,54 @@ function mapAudit(row: AuditRow): AuditLog {
   };
 }
 
+function mapQr(row: QrRow): QrAsset {
+  return {
+    id: row.id,
+    locationId: row.locationId,
+    scope: row.scope as QrAsset["scope"],
+    staffId: row.staffId ?? undefined,
+    label: row.label,
+    slug: row.slug,
+    targetUrl: row.targetUrl,
+    scans: row.scans,
+    pageOpens: row.pageOpens,
+    degraded: row.degraded,
+  };
+}
+
 // ── Domain → insert-row builders (shared by seed + mutations) ─
+function buildOrgRow(
+  o: Organization,
+  workspaceId: string,
+): typeof t.organization.$inferInsert {
+  return {
+    id: o.id,
+    workspaceId,
+    name: o.name,
+    legalName: o.legalName,
+    region: o.region,
+    orgType: o.orgType,
+    billingEmail: o.billingEmail,
+  };
+}
+
+function buildWorkspaceRow(w: Workspace): typeof t.workspace.$inferInsert {
+  return {
+    id: w.id,
+    organizationId: w.organizationId,
+    name: w.name,
+    vertical: w.vertical,
+    region: w.region,
+    timezone: w.timezone,
+    plan: w.plan,
+    createdAt: w.createdAt,
+    whiteLabel: w.whiteLabel,
+    industryConfig: w.industryConfig ?? null,
+    settings: w.settings ?? null,
+    isDemo: w.isDemo ?? false,
+  };
+}
+
 function buildLocationRow(l: Location): typeof t.location.$inferInsert {
   return {
     id: l.id,
@@ -422,6 +545,46 @@ function buildLocationRow(l: Location): typeof t.location.$inferInsert {
     profileServicesTotal: l.profile.servicesTotal,
     profileResponseRate: l.profile.responseRate,
     profileCompleteness: l.profile.completeness,
+  };
+}
+
+function buildUserRow(
+  u: User,
+  auth: {
+    passwordHash?: string | null;
+    googleSub?: string | null;
+    emailVerified?: boolean;
+    createdAt?: string | null;
+  } = {},
+): typeof t.appUser.$inferInsert {
+  return {
+    id: u.id,
+    workspaceId: u.workspaceId,
+    email: u.email,
+    name: u.name,
+    role: u.role,
+    twoFactorEnabled: u.twoFactorEnabled,
+    avatarInitials: u.avatarInitials,
+    passwordHash: auth.passwordHash ?? u.passwordHash ?? null,
+    emailVerified: auth.emailVerified ?? u.emailVerified ?? true,
+    googleSub: auth.googleSub ?? u.googleSub ?? null,
+    createdAt: auth.createdAt ?? null,
+  };
+}
+
+function buildInviteRow(
+  i: StaffInvite,
+  seq: number,
+): typeof t.staffInvite.$inferInsert {
+  return {
+    id: i.id,
+    workspaceId: i.workspaceId,
+    email: i.email,
+    role: i.role,
+    token: i.token,
+    status: i.status,
+    createdAt: i.createdAt,
+    seq,
   };
 }
 
@@ -635,6 +798,19 @@ function buildCampaignRow(
   };
 }
 
+function buildSubscriptionRow(s: Subscription): typeof t.subscription.$inferInsert {
+  return {
+    id: s.id,
+    workspaceId: s.workspaceId,
+    tier: s.tier,
+    interval: s.interval,
+    status: s.status,
+    trialEndsAt: s.trialEndsAt,
+    currency: s.currency,
+    usage: s.usage,
+  };
+}
+
 function buildPrivateFeedbackRow(
   p: PrivateFeedback,
   workspaceId: string,
@@ -688,6 +864,82 @@ function buildAuditRow(
   };
 }
 
+function buildQrRow(
+  q: QrAsset,
+  workspaceId: string,
+  seq: number,
+): typeof t.qrAsset.$inferInsert {
+  return {
+    id: q.id,
+    workspaceId,
+    locationId: q.locationId,
+    scope: q.scope,
+    staffId: q.staffId,
+    label: q.label,
+    slug: q.slug,
+    targetUrl: q.targetUrl,
+    scans: q.scans,
+    pageOpens: q.pageOpens,
+    degraded: q.degraded,
+    seq,
+  };
+}
+
+/** dataset_meta row. `qrAssets` is the legacy JSONB column — always `[]` now. */
+function buildMetaRow(data: FoundlyData): typeof t.datasetMeta.$inferInsert {
+  return {
+    workspaceId: data.workspace.id,
+    metrics: data.metrics,
+    competitors: data.competitors,
+    aeo: data.aeo,
+    rankScans: data.rankScans,
+    qrAssets: [],
+    widgets: data.widgets,
+    milestones: data.milestones,
+    suppression: data.suppression,
+    integrations: data.integrations,
+    featureFlags: data.featureFlags,
+    invoices: data.invoices,
+    reports: data.reports,
+    agency: data.agency,
+    platform: data.platform,
+  };
+}
+
+// ── Atomic workspace creation (register / Google sign-up) ────
+// neon-http has no interactive transactions; db.batch() executes all
+// statements in a single atomic request.
+async function createWorkspaceWithOwner(
+  db: FoundlyDb,
+  data: FoundlyData,
+  auth: { passwordHash?: string; googleSub?: string },
+): Promise<void> {
+  const ws = data.workspace.id;
+  const now = nowIso();
+  const statements: BatchItem<"pg">[] = [
+    db.insert(t.organization).values(buildOrgRow(data.organization, ws)),
+    db.insert(t.workspace).values(buildWorkspaceRow(data.workspace)),
+    db.insert(t.location).values(buildLocationRow(data.location)),
+    db.insert(t.appUser).values(
+      buildUserRow(data.owner, {
+        passwordHash: auth.passwordHash ?? null,
+        googleSub: auth.googleSub ?? null,
+        emailVerified: true, // auto-verified until email sending is configured
+        createdAt: now,
+      }),
+    ),
+    db.insert(t.subscription).values(buildSubscriptionRow(data.subscription)),
+    db.insert(t.datasetMeta).values(buildMetaRow(data)),
+  ];
+  data.qrAssets.forEach((q, i) => {
+    statements.push(db.insert(t.qrAsset).values(buildQrRow(q, ws, i)));
+  });
+  data.notifications.forEach((n, i) => {
+    statements.push(db.insert(t.notification).values(buildNotificationRow(n, ws, i)));
+  });
+  await db.batch(statements as [BatchItem<"pg">, ...BatchItem<"pg">[]]);
+}
+
 // ── Clear + seed (shared with the seed-runner) ──────────────
 export async function clearAllTables(): Promise<void> {
   const db = getDb();
@@ -703,6 +955,8 @@ export async function clearAllTables(): Promise<void> {
   await db.delete(t.auditLog);
   await db.delete(t.customer);
   await db.delete(t.staffMember);
+  await db.delete(t.staffInvite);
+  await db.delete(t.qrAsset);
   await db.delete(t.subscription);
   await db.delete(t.appUser);
   await db.delete(t.location);
@@ -715,39 +969,18 @@ export async function seedDatabase(data: FoundlyData): Promise<void> {
   const db = getDb();
   const ws = data.workspace.id;
 
-  await db.insert(t.organization).values({
-    id: data.organization.id,
-    workspaceId: ws,
-    name: data.organization.name,
-    legalName: data.organization.legalName,
-    region: data.organization.region,
-    orgType: data.organization.orgType,
-    billingEmail: data.organization.billingEmail,
-  });
-
-  await db.insert(t.workspace).values({
-    id: data.workspace.id,
-    organizationId: data.workspace.organizationId,
-    name: data.workspace.name,
-    vertical: data.workspace.vertical,
-    region: data.workspace.region,
-    timezone: data.workspace.timezone,
-    plan: data.workspace.plan,
-    createdAt: data.workspace.createdAt,
-    whiteLabel: data.workspace.whiteLabel,
-  });
-
+  await db.insert(t.organization).values(buildOrgRow(data.organization, ws));
+  await db.insert(t.workspace).values(buildWorkspaceRow(data.workspace));
   await db.insert(t.location).values(buildLocationRow(data.location));
+  await db.insert(t.appUser).values(
+    buildUserRow(data.owner, { createdAt: data.workspace.createdAt }),
+  );
 
-  await db.insert(t.appUser).values({
-    id: data.owner.id,
-    workspaceId: data.owner.workspaceId,
-    email: data.owner.email,
-    name: data.owner.name,
-    role: data.owner.role,
-    twoFactorEnabled: data.owner.twoFactorEnabled,
-    avatarInitials: data.owner.avatarInitials,
-  });
+  if (data.invites.length) {
+    await db
+      .insert(t.staffInvite)
+      .values(data.invites.map((inv, i) => buildInviteRow(inv, i)));
+  }
 
   if (data.staff.length) {
     await db
@@ -804,16 +1037,14 @@ export async function seedDatabase(data: FoundlyData): Promise<void> {
       .values(data.campaigns.map((c, i) => buildCampaignRow(c, ws, i)));
   }
 
-  await db.insert(t.subscription).values({
-    id: data.subscription.id,
-    workspaceId: data.subscription.workspaceId,
-    tier: data.subscription.tier,
-    interval: data.subscription.interval,
-    status: data.subscription.status,
-    trialEndsAt: data.subscription.trialEndsAt,
-    currency: data.subscription.currency,
-    usage: data.subscription.usage,
-  });
+  await db.insert(t.subscription).values(buildSubscriptionRow(data.subscription));
+
+  // QR assets now live in their own table (unique slugs + atomic scans).
+  if (data.qrAssets.length) {
+    await db
+      .insert(t.qrAsset)
+      .values(data.qrAssets.map((q, i) => buildQrRow(q, ws, i)));
+  }
 
   if (data.privateFeedback.length) {
     await db
@@ -833,36 +1064,21 @@ export async function seedDatabase(data: FoundlyData): Promise<void> {
       .values(data.auditLog.map((a, i) => buildAuditRow(a, i)));
   }
 
-  await db.insert(t.datasetMeta).values({
-    workspaceId: ws,
-    metrics: data.metrics,
-    competitors: data.competitors,
-    aeo: data.aeo,
-    rankScans: data.rankScans,
-    qrAssets: data.qrAssets,
-    widgets: data.widgets,
-    milestones: data.milestones,
-    suppression: data.suppression,
-    integrations: data.integrations,
-    featureFlags: data.featureFlags,
-    invoices: data.invoices,
-    reports: data.reports,
-    agency: data.agency,
-    platform: data.platform,
-  });
+  await db.insert(t.datasetMeta).values(buildMetaRow(data));
 }
 
 // ── The provider ────────────────────────────────────────────
 export const drizzleProvider: DataProvider = {
   backed: "postgres",
 
-  async getData(): Promise<FoundlyData> {
+  async getData(workspaceId): Promise<FoundlyData | null> {
     const db = getDb();
     const [
-      orgRows,
       wsRows,
+      orgRows,
       locRows,
-      userRows,
+      ownerRows,
+      inviteRows,
       staffRows,
       customerRows,
       consentRows,
@@ -876,29 +1092,109 @@ export const drizzleProvider: DataProvider = {
       pfRows,
       notifRows,
       auditRows,
+      qrRows,
       metaRows,
     ] = await Promise.all([
-      db.select().from(t.organization).limit(1),
-      db.select().from(t.workspace).limit(1),
-      db.select().from(t.location).limit(1),
-      db.select().from(t.appUser).limit(1),
-      db.select().from(t.staffMember).orderBy(t.staffMember.seq),
-      db.select().from(t.customer).orderBy(t.customer.seq),
-      db.select().from(t.customerConsent),
-      db.select().from(t.reviewRequest).orderBy(t.reviewRequest.seq),
-      db.select().from(t.review).orderBy(t.review.seq),
-      db.select().from(t.reviewReply),
-      db.select().from(t.reviewDraft).orderBy(t.reviewDraft.seq),
-      db.select().from(t.gbpTask).orderBy(t.gbpTask.seq),
-      db.select().from(t.campaign).orderBy(t.campaign.seq),
-      db.select().from(t.subscription).limit(1),
-      db.select().from(t.privateFeedback).orderBy(t.privateFeedback.seq),
-      db.select().from(t.notification).orderBy(t.notification.seq),
-      db.select().from(t.auditLog).orderBy(t.auditLog.seq),
-      db.select().from(t.datasetMeta).limit(1),
+      db.select().from(t.workspace).where(eq(t.workspace.id, workspaceId)).limit(1),
+      db
+        .select()
+        .from(t.organization)
+        .where(eq(t.organization.workspaceId, workspaceId))
+        .limit(1),
+      db
+        .select()
+        .from(t.location)
+        .where(eq(t.location.workspaceId, workspaceId))
+        .limit(1),
+      db
+        .select()
+        .from(t.appUser)
+        .where(and(eq(t.appUser.workspaceId, workspaceId), eq(t.appUser.role, "owner")))
+        .limit(1),
+      db
+        .select()
+        .from(t.staffInvite)
+        .where(eq(t.staffInvite.workspaceId, workspaceId))
+        .orderBy(t.staffInvite.seq),
+      db
+        .select()
+        .from(t.staffMember)
+        .where(eq(t.staffMember.workspaceId, workspaceId))
+        .orderBy(t.staffMember.seq),
+      db
+        .select()
+        .from(t.customer)
+        .where(eq(t.customer.workspaceId, workspaceId))
+        .orderBy(t.customer.seq),
+      db
+        .select()
+        .from(t.customerConsent)
+        .where(eq(t.customerConsent.workspaceId, workspaceId)),
+      db
+        .select()
+        .from(t.reviewRequest)
+        .where(eq(t.reviewRequest.workspaceId, workspaceId))
+        .orderBy(t.reviewRequest.seq),
+      db
+        .select()
+        .from(t.review)
+        .where(eq(t.review.workspaceId, workspaceId))
+        .orderBy(t.review.seq),
+      db
+        .select()
+        .from(t.reviewReply)
+        .where(eq(t.reviewReply.workspaceId, workspaceId)),
+      db
+        .select()
+        .from(t.reviewDraft)
+        .where(eq(t.reviewDraft.workspaceId, workspaceId))
+        .orderBy(t.reviewDraft.seq),
+      db
+        .select()
+        .from(t.gbpTask)
+        .where(eq(t.gbpTask.workspaceId, workspaceId))
+        .orderBy(t.gbpTask.seq),
+      db
+        .select()
+        .from(t.campaign)
+        .where(eq(t.campaign.workspaceId, workspaceId))
+        .orderBy(t.campaign.seq),
+      db
+        .select()
+        .from(t.subscription)
+        .where(eq(t.subscription.workspaceId, workspaceId))
+        .limit(1),
+      db
+        .select()
+        .from(t.privateFeedback)
+        .where(eq(t.privateFeedback.workspaceId, workspaceId))
+        .orderBy(t.privateFeedback.seq),
+      db
+        .select()
+        .from(t.notification)
+        .where(eq(t.notification.workspaceId, workspaceId))
+        .orderBy(t.notification.seq),
+      db
+        .select()
+        .from(t.auditLog)
+        .where(eq(t.auditLog.workspaceId, workspaceId))
+        .orderBy(t.auditLog.seq),
+      db
+        .select()
+        .from(t.qrAsset)
+        .where(eq(t.qrAsset.workspaceId, workspaceId))
+        .orderBy(t.qrAsset.seq),
+      db
+        .select()
+        .from(t.datasetMeta)
+        .where(eq(t.datasetMeta.workspaceId, workspaceId))
+        .limit(1),
     ]);
 
-    const meta = one(metaRows, "dataset_meta");
+    const wsRow = wsRows[0];
+    if (!wsRow) return null; // unknown workspace — not an error
+
+    const meta = one(metaRows, `dataset_meta for workspace ${workspaceId}`);
     const consentByCustomer = new Map<string, ConsentRow>(
       consentRows.map((c) => [c.customerId, c]),
     );
@@ -908,9 +1204,10 @@ export const drizzleProvider: DataProvider = {
 
     return {
       organization: mapOrg(one(orgRows, "organization")),
-      workspace: mapWorkspace(one(wsRows, "workspace")),
+      workspace: mapWorkspace(wsRow),
       location: mapLocation(one(locRows, "location")),
-      owner: mapUser(one(userRows, "owner")),
+      owner: mapUser(one(ownerRows, "owner")),
+      invites: inviteRows.map(mapInvite),
       staff: staffRows.map(mapStaff),
       customers: customerRows.map((c) =>
         mapCustomer(c, consentByCustomer.get(c.id)),
@@ -926,7 +1223,7 @@ export const drizzleProvider: DataProvider = {
       metrics: meta.metrics,
       aeo: meta.aeo,
       rankScans: meta.rankScans,
-      qrAssets: meta.qrAssets,
+      qrAssets: qrRows.map(mapQr),
       widgets: meta.widgets,
       milestones: meta.milestones,
       suppression: meta.suppression,
@@ -941,24 +1238,120 @@ export const drizzleProvider: DataProvider = {
     };
   },
 
-  async getCustomer(customerId) {
+  // ── Auth ──────────────────────────────────────────────────
+  async registerUser(input: RegisterInput): Promise<RegisterResult> {
+    const db = getDb();
+    const email = input.email.trim().toLowerCase();
+    const existing = await findUserRowByEmail(db, email);
+    if (existing) {
+      return { ok: false, error: "An account with this email already exists." };
+    }
+    const userId = id("usr");
+    const workspaceId = id("ws");
+    const organizationId = id("org");
+    const passwordHash = await hashPassword(input.password);
+
+    const data = emptyFoundlyData({
+      workspaceId,
+      organizationId,
+      userId,
+      businessName: input.businessName,
+      ownerName: input.name,
+      email,
+      industryKey: input.industryKey,
+      category: input.industryKey.replace(/_/g, " "),
+      region: input.region,
+    });
+    await createWorkspaceWithOwner(db, data, { passwordHash });
+
+    return {
+      ok: true,
+      user: {
+        id: userId,
+        name: input.name,
+        email,
+        role: "owner",
+        workspaceId,
+        isDemo: false,
+      },
+    };
+  },
+
+  async verifyCredentials(email, password) {
+    const db = getDb();
+    const user = await findUserRowByEmail(db, email);
+    if (!user?.passwordHash) return null;
+    const ok = await verifyPassword(password, user.passwordHash);
+    return ok ? toAuthUser(user) : null;
+  },
+
+  async getUserByEmail(email) {
+    const db = getDb();
+    const user = await findUserRowByEmail(db, email);
+    return user ? toAuthUser(user) : null;
+  },
+
+  async upsertGoogleUser({ googleSub, email, name }) {
+    const db = getDb();
+    const key = email.trim().toLowerCase();
+    const existing = await findUserRowByEmail(db, key);
+    if (existing) {
+      await db
+        .update(t.appUser)
+        .set({ googleSub, emailVerified: true })
+        .where(eq(t.appUser.id, existing.id));
+      return toAuthUser(existing);
+    }
+    // New Google user → workspace pending onboarding details.
+    const userId = id("usr");
+    const workspaceId = id("ws");
+    const data = emptyFoundlyData({
+      workspaceId,
+      organizationId: id("org"),
+      userId,
+      businessName: name ? `${name.split(" ")[0]}'s Business` : "My Business",
+      ownerName: name || key,
+      email: key,
+      industryKey: "professional_services",
+      category: "Local business",
+      region: "US",
+    });
+    await createWorkspaceWithOwner(db, data, { googleSub });
+    return {
+      id: userId,
+      name: name || key,
+      email: key,
+      role: "owner",
+      workspaceId,
+      isDemo: false,
+    };
+  },
+
+  // ── Focused reads ─────────────────────────────────────────
+  async getCustomer(workspaceId, customerId) {
     const db = getDb();
     const custRows = await db
       .select()
       .from(t.customer)
-      .where(eq(t.customer.id, customerId))
+      .where(and(eq(t.customer.id, customerId), eq(t.customer.workspaceId, workspaceId)))
       .limit(1);
     const cust = custRows[0];
     if (!cust) return null;
     const consRows = await db
       .select()
       .from(t.customerConsent)
-      .where(eq(t.customerConsent.customerId, customerId))
+      .where(
+        and(
+          eq(t.customerConsent.customerId, customerId),
+          eq(t.customerConsent.workspaceId, workspaceId),
+        ),
+      )
       .limit(1);
     return mapCustomer(cust, consRows[0]);
   },
 
   async getRequestByToken(token) {
+    // Global by token (tokens are unguessable public identifiers).
     const db = getDb();
     const reqRows = await db
       .select()
@@ -967,13 +1360,26 @@ export const drizzleProvider: DataProvider = {
       .limit(1);
     const req = reqRows[0];
     if (!req) return null;
-    const loc = one(await db.select().from(t.location).limit(1), "location");
+    // Resolve the request's OWN location — never "any" location row.
+    const locRows = await db
+      .select()
+      .from(t.location)
+      .where(
+        and(
+          eq(t.location.id, req.locationId),
+          eq(t.location.workspaceId, req.workspaceId),
+        ),
+      )
+      .limit(1);
+    const loc = locRows[0];
+    if (!loc) return null;
     return { request: mapRequest(req), location: mapLocation(loc) };
   },
 
-  async captureCustomer(input: CaptureCustomerInput) {
+  // ── Core loop mutations ───────────────────────────────────
+  async captureCustomer(workspaceId, input: CaptureCustomerInput) {
     const db = getDb();
-    const ctx = await loadContext(db);
+    const ctx = await loadContext(db, workspaceId);
     const now = nowIso();
     const seq = front();
 
@@ -984,11 +1390,11 @@ export const drizzleProvider: DataProvider = {
       marketingConsentAt: input.marketingConsent ? now : undefined,
       consentChannel: "in_person",
       consentSourceText: input.consentSourceText,
-      caslCaptured: ctx.region === "CA",
+      caslCaptured: ctx.location.region === "CA",
     };
     const customer: Customer = {
       id: id("cus"),
-      locationId: input.locationId,
+      locationId: ctx.location.id,
       name: input.name,
       email: input.email,
       phone: input.phone,
@@ -1006,7 +1412,7 @@ export const drizzleProvider: DataProvider = {
     };
     const request: ReviewRequest = {
       id: id("req"),
-      locationId: input.locationId,
+      locationId: ctx.location.id,
       customerId: customer.id,
       customerName: customer.name,
       staffId: input.staffId,
@@ -1019,19 +1425,24 @@ export const drizzleProvider: DataProvider = {
       attributes: [],
     };
 
-    await db.insert(t.customer).values(buildCustomerRow(customer, ctx.workspaceId, seq));
+    await db.insert(t.customer).values(buildCustomerRow(customer, workspaceId, seq));
     await db
       .insert(t.customerConsent)
-      .values(buildConsentRow(customer.id, customer.locationId, ctx.workspaceId, consent));
-    await db.insert(t.reviewRequest).values(buildRequestRow(request, ctx.workspaceId, seq));
+      .values(buildConsentRow(customer.id, customer.locationId, workspaceId, consent));
+    await db.insert(t.reviewRequest).values(buildRequestRow(request, workspaceId, seq));
 
-    // Attribution + streak activity bump.
+    // Attribution + streak activity bump (workspace-scoped).
     let actor = "Owner";
     if (input.staffId) {
       const staffRows = await db
         .select()
         .from(t.staffMember)
-        .where(eq(t.staffMember.id, input.staffId))
+        .where(
+          and(
+            eq(t.staffMember.id, input.staffId),
+            eq(t.staffMember.workspaceId, workspaceId),
+          ),
+        )
         .limit(1);
       const staff = staffRows[0];
       if (staff) {
@@ -1039,18 +1450,23 @@ export const drizzleProvider: DataProvider = {
         await db
           .update(t.staffMember)
           .set({ captures: staff.captures + 1, lastActiveAt: now })
-          .where(eq(t.staffMember.id, staff.id));
+          .where(
+            and(
+              eq(t.staffMember.id, staff.id),
+              eq(t.staffMember.workspaceId, workspaceId),
+            ),
+          );
       }
     }
 
-    await bumpUsage(db, ctx.workspaceId, (u) => ({
+    await bumpUsage(db, workspaceId, (u) => ({
       ...u,
       requestsSent: u.requestsSent + 1,
     }));
 
     await db.insert(t.auditLog).values({
       id: id("aud"),
-      workspaceId: ctx.workspaceId,
+      workspaceId,
       actor,
       action: "customer.captured",
       targetType: "customer",
@@ -1062,22 +1478,78 @@ export const drizzleProvider: DataProvider = {
     return { customer, request };
   },
 
-  async sendRequest(input: SendRequestInput) {
+  async addCustomer(workspaceId, input: AddCustomerInput) {
     const db = getDb();
-    const ctx = await loadContext(db);
+    const ctx = await loadContext(db, workspaceId);
+    const now = nowIso();
+    const seq = front();
+
+    const consent: CustomerConsent = {
+      serviceConsent: input.serviceConsent,
+      serviceConsentAt: input.serviceConsent ? now : undefined,
+      marketingConsent: input.marketingConsent,
+      marketingConsentAt: input.marketingConsent ? now : undefined,
+      consentChannel: "in_person",
+      consentSourceText: input.consentSourceText,
+      caslCaptured: ctx.location.region === "CA",
+    };
+    const customer: Customer = {
+      id: id("cus"),
+      locationId: ctx.location.id,
+      name: input.name,
+      email: input.email,
+      phone: input.phone,
+      createdAt: now,
+      source: "walk_in",
+      visitCount: 1,
+      lastVisitAt: now,
+      services: input.services,
+      sentiment: "neutral",
+      lifecycleStage: "new",
+      consent,
+      tags: [],
+    };
+
+    await db.insert(t.customer).values(buildCustomerRow(customer, workspaceId, seq));
+    await db
+      .insert(t.customerConsent)
+      .values(buildConsentRow(customer.id, customer.locationId, workspaceId, consent));
+
+    await db.insert(t.auditLog).values({
+      id: id("aud"),
+      workspaceId,
+      actor: "Owner",
+      action: "customer.added",
+      targetType: "customer",
+      targetId: customer.id,
+      at: now,
+      seq,
+    });
+
+    return customer;
+  },
+
+  async sendRequest(workspaceId, input: SendRequestInput) {
+    const db = getDb();
+    const ctx = await loadContext(db, workspaceId);
     const now = nowIso();
     const seq = front();
 
     const custRows = await db
       .select()
       .from(t.customer)
-      .where(eq(t.customer.id, input.customerId))
+      .where(
+        and(
+          eq(t.customer.id, input.customerId),
+          eq(t.customer.workspaceId, workspaceId),
+        ),
+      )
       .limit(1);
     const customer = custRows[0];
 
     const request: ReviewRequest = {
       id: id("req"),
-      locationId: input.locationId,
+      locationId: ctx.location.id,
       customerId: input.customerId,
       customerName: customer?.name ?? "Customer",
       staffId: input.staffId,
@@ -1089,7 +1561,7 @@ export const drizzleProvider: DataProvider = {
       sentAt: now,
       attributes: [],
     };
-    await db.insert(t.reviewRequest).values(buildRequestRow(request, ctx.workspaceId, seq));
+    await db.insert(t.reviewRequest).values(buildRequestRow(request, workspaceId, seq));
 
     if (customer) {
       const nextStage =
@@ -1097,10 +1569,12 @@ export const drizzleProvider: DataProvider = {
       await db
         .update(t.customer)
         .set({ lastRequestAt: now, lifecycleStage: nextStage })
-        .where(eq(t.customer.id, customer.id));
+        .where(
+          and(eq(t.customer.id, customer.id), eq(t.customer.workspaceId, workspaceId)),
+        );
     }
 
-    await bumpUsage(db, ctx.workspaceId, (u) => ({
+    await bumpUsage(db, workspaceId, (u) => ({
       ...u,
       requestsSent: u.requestsSent + 1,
     }));
@@ -1109,6 +1583,8 @@ export const drizzleProvider: DataProvider = {
   },
 
   async advanceRequest(token, to, meta) {
+    // Token-keyed global lookup; every write below is scoped to the found
+    // request's OWN workspace.
     const db = getDb();
     const reqRows = await db
       .select()
@@ -1117,6 +1593,7 @@ export const drizzleProvider: DataProvider = {
       .limit(1);
     const req = reqRows[0];
     if (!req) return null;
+    const ws = req.workspaceId;
     const now = nowIso();
 
     const set: Partial<typeof t.reviewRequest.$inferInsert> = { status: to };
@@ -1126,12 +1603,15 @@ export const drizzleProvider: DataProvider = {
     }
     if (meta?.rating) set.rating = meta.rating;
     if (meta?.attributes) set.attributes = meta.attributes;
-    await db.update(t.reviewRequest).set(set).where(eq(t.reviewRequest.id, req.id));
+    await db
+      .update(t.reviewRequest)
+      .set(set)
+      .where(and(eq(t.reviewRequest.id, req.id), eq(t.reviewRequest.workspaceId, ws)));
 
     const custRows = await db
       .select()
       .from(t.customer)
-      .where(eq(t.customer.id, req.customerId))
+      .where(and(eq(t.customer.id, req.customerId), eq(t.customer.workspaceId, ws)))
       .limit(1);
     const customer = custRows[0];
     if (customer) {
@@ -1147,25 +1627,51 @@ export const drizzleProvider: DataProvider = {
         custSet.sentiment = "unhappy";
       }
       if (Object.keys(custSet).length > 0) {
-        await db.update(t.customer).set(custSet).where(eq(t.customer.id, customer.id));
+        await db
+          .update(t.customer)
+          .set(custSet)
+          .where(and(eq(t.customer.id, customer.id), eq(t.customer.workspaceId, ws)));
       }
+    }
+
+    if (to === "posted_google") {
+      if (req.staffId) {
+        const staffRows = await db
+          .select()
+          .from(t.staffMember)
+          .where(
+            and(eq(t.staffMember.id, req.staffId), eq(t.staffMember.workspaceId, ws)),
+          )
+          .limit(1);
+        const staff = staffRows[0];
+        if (staff) {
+          await db
+            .update(t.staffMember)
+            .set({ detectedReviews: staff.detectedReviews + 1 })
+            .where(
+              and(eq(t.staffMember.id, staff.id), eq(t.staffMember.workspaceId, ws)),
+            );
+        }
+      }
+      await bumpUsage(db, ws, (u) => ({
+        ...u,
+        reviewsCaptured: u.reviewsCaptured + 1,
+      }));
     }
 
     const updatedRows = await db
       .select()
       .from(t.reviewRequest)
-      .where(eq(t.reviewRequest.id, req.id))
+      .where(and(eq(t.reviewRequest.id, req.id), eq(t.reviewRequest.workspaceId, ws)))
       .limit(1);
     const updated = updatedRows[0];
     return updated ? mapRequest(updated) : null;
   },
 
   async submitPrivateFeedback(input: SubmitPrivateFeedbackInput) {
+    // Token-keyed global lookup; writes are scoped to the request's workspace.
     const db = getDb();
-    const ctx = await loadContext(db);
     const now = nowIso();
-    const seq = front();
-
     const reqRows = await db
       .select()
       .from(t.reviewRequest)
@@ -1173,35 +1679,49 @@ export const drizzleProvider: DataProvider = {
       .limit(1);
     const req = reqRows[0];
 
+    if (!req) {
+      // Token not found — record nothing, but return a shell so the customer
+      // flow never dead-ends (mirrors the memory provider).
+      return {
+        id: id("pf"),
+        locationId: "unknown",
+        customerName: "Customer",
+        rating: input.rating,
+        text: input.text,
+        createdAt: now,
+        resolved: false,
+      };
+    }
+
+    const ws = req.workspaceId;
+    const seq = front();
     const fb: PrivateFeedback = {
       id: id("pf"),
-      locationId: ctx.locationId,
-      customerName: req?.customerName ?? "Customer",
+      locationId: req.locationId,
+      customerName: req.customerName,
       rating: input.rating,
       text: input.text,
       createdAt: now,
       resolved: false,
     };
-    await db.insert(t.privateFeedback).values(buildPrivateFeedbackRow(fb, ctx.workspaceId, seq));
+    await db.insert(t.privateFeedback).values(buildPrivateFeedbackRow(fb, ws, seq));
 
-    if (req) {
-      await db
-        .update(t.reviewRequest)
-        .set({
-          status: "private_feedback",
-          rating: input.rating,
-          privateFeedback: input.text,
-        })
-        .where(eq(t.reviewRequest.id, req.id));
-    }
+    await db
+      .update(t.reviewRequest)
+      .set({
+        status: "private_feedback",
+        rating: input.rating,
+        privateFeedback: input.text,
+      })
+      .where(and(eq(t.reviewRequest.id, req.id), eq(t.reviewRequest.workspaceId, ws)));
 
     await db.insert(t.notification).values({
       id: id("ntf"),
-      workspaceId: ctx.workspaceId,
-      locationId: ctx.locationId,
+      workspaceId: ws,
+      locationId: req.locationId,
       kind: "feedback",
       title: "Private feedback needs attention",
-      body: `A ${input.rating}★ private note came in.`,
+      body: `A ${input.rating}-star private note came in from ${req.customerName}.`,
       createdAt: now,
       read: false,
       seq,
@@ -1210,9 +1730,22 @@ export const drizzleProvider: DataProvider = {
     return fb;
   },
 
-  async recordDraft(input: RecordDraftInput) {
+  async resolvePrivateFeedback(workspaceId, feedbackId) {
     const db = getDb();
-    const ctx = await loadContext(db);
+    await db
+      .update(t.privateFeedback)
+      .set({ resolved: true })
+      .where(
+        and(
+          eq(t.privateFeedback.id, feedbackId),
+          eq(t.privateFeedback.workspaceId, workspaceId),
+        ),
+      );
+  },
+
+  async recordDraft(workspaceId, input: RecordDraftInput) {
+    const db = getDb();
+    const ctx = await loadContext(db, workspaceId);
     const now = nowIso();
     const seq = front();
 
@@ -1227,9 +1760,9 @@ export const drizzleProvider: DataProvider = {
     };
     await db
       .insert(t.reviewDraft)
-      .values(buildDraftRow(draft, ctx.workspaceId, ctx.locationId, seq));
+      .values(buildDraftRow(draft, workspaceId, ctx.location.id, seq));
 
-    await bumpUsage(db, ctx.workspaceId, (u) => ({
+    await bumpUsage(db, workspaceId, (u) => ({
       ...u,
       aiDraftsUsed: u.aiDraftsUsed + 1,
     }));
@@ -1237,35 +1770,38 @@ export const drizzleProvider: DataProvider = {
     return draft;
   },
 
-  async approveTask(taskId) {
+  async approveTask(workspaceId, taskId) {
     const db = getDb();
-    const ctx = await loadContext(db);
+    const ctx = await loadContext(db, workspaceId);
     const now = nowIso();
 
     const taskRows = await db
       .select()
       .from(t.gbpTask)
-      .where(eq(t.gbpTask.id, taskId))
+      .where(and(eq(t.gbpTask.id, taskId), eq(t.gbpTask.workspaceId, workspaceId)))
       .limit(1);
     const task = taskRows[0];
     if (!task) return null;
 
-    await db.update(t.gbpTask).set({ status: "done" }).where(eq(t.gbpTask.id, task.id));
+    await db
+      .update(t.gbpTask)
+      .set({ status: "done" })
+      .where(and(eq(t.gbpTask.id, task.id), eq(t.gbpTask.workspaceId, workspaceId)));
 
-    const locRows = await db.select().from(t.location).limit(1);
-    const loc = locRows[0];
-    if (loc) {
-      const locSet: Partial<typeof t.location.$inferInsert> = {
-        profileCompleteness: Math.min(100, loc.profileCompleteness + 3),
-      };
-      if (task.kind === "post") locSet.profilePostCount = loc.profilePostCount + 1;
-      if (task.kind === "qna") locSet.profileQnaCount = loc.profileQnaCount + 1;
-      await db.update(t.location).set(locSet).where(eq(t.location.id, loc.id));
-    }
+    const loc = ctx.location;
+    const locSet: Partial<typeof t.location.$inferInsert> = {
+      profileCompleteness: Math.min(100, loc.profileCompleteness + 3),
+    };
+    if (task.kind === "post") locSet.profilePostCount = loc.profilePostCount + 1;
+    if (task.kind === "qna") locSet.profileQnaCount = loc.profileQnaCount + 1;
+    await db
+      .update(t.location)
+      .set(locSet)
+      .where(and(eq(t.location.id, loc.id), eq(t.location.workspaceId, workspaceId)));
 
     await db.insert(t.auditLog).values({
       id: id("aud"),
-      workspaceId: ctx.workspaceId,
+      workspaceId,
       actor: "Owner",
       action: "task.approved",
       targetType: "gbp_task",
@@ -1277,28 +1813,53 @@ export const drizzleProvider: DataProvider = {
     return mapTask({ ...task, status: "done" });
   },
 
-  async snoozeTask(taskId) {
+  async snoozeTask(workspaceId, taskId) {
     const db = getDb();
     const taskRows = await db
       .select()
       .from(t.gbpTask)
-      .where(eq(t.gbpTask.id, taskId))
+      .where(and(eq(t.gbpTask.id, taskId), eq(t.gbpTask.workspaceId, workspaceId)))
       .limit(1);
     const task = taskRows[0];
     if (!task) return null;
-    await db.update(t.gbpTask).set({ status: "snoozed" }).where(eq(t.gbpTask.id, task.id));
+    await db
+      .update(t.gbpTask)
+      .set({ status: "snoozed" })
+      .where(and(eq(t.gbpTask.id, task.id), eq(t.gbpTask.workspaceId, workspaceId)));
     return mapTask({ ...task, status: "snoozed" });
   },
 
-  async postReply(input: PostReplyInput) {
+  async createGbpTask(workspaceId, input: CreateTaskInput) {
     const db = getDb();
-    const ctx = await loadContext(db);
+    const ctx = await loadContext(db, workspaceId);
+    const now = nowIso();
+
+    const task: GbpTask = {
+      id: id("task"),
+      locationId: ctx.location.id,
+      isoWeek: "",
+      kind: input.kind,
+      title: input.title,
+      rationale: input.rationale,
+      preview: input.preview,
+      status: "suggested",
+      impact: input.impact,
+      effortMins: 2,
+      createdAt: now,
+    };
+    await db.insert(t.gbpTask).values(buildTaskRow(task, workspaceId, front()));
+    return task;
+  },
+
+  async postReply(workspaceId, input: PostReplyInput) {
+    const db = getDb();
+    const ctx = await loadContext(db, workspaceId);
     const now = nowIso();
 
     const revRows = await db
       .select()
       .from(t.review)
-      .where(eq(t.review.id, input.reviewId))
+      .where(and(eq(t.review.id, input.reviewId), eq(t.review.workspaceId, workspaceId)))
       .limit(1);
     const rev = revRows[0];
     if (!rev) return null;
@@ -1311,7 +1872,7 @@ export const drizzleProvider: DataProvider = {
       postedAt: now,
       approvedBy: "Owner",
     };
-    const replyRow = buildReplyRow(rev.id, reply, ctx.workspaceId, rev.locationId);
+    const replyRow = buildReplyRow(rev.id, reply, workspaceId, rev.locationId);
     await db
       .insert(t.reviewReply)
       .values(replyRow)
@@ -1327,20 +1888,26 @@ export const drizzleProvider: DataProvider = {
         },
       });
 
-    await db.update(t.review).set({ needsReply: false }).where(eq(t.review.id, rev.id));
+    await db
+      .update(t.review)
+      .set({ needsReply: false })
+      .where(and(eq(t.review.id, rev.id), eq(t.review.workspaceId, workspaceId)));
 
-    const locRows = await db.select().from(t.location).limit(1);
-    const loc = locRows[0];
-    if (loc) {
-      await db
-        .update(t.location)
-        .set({ profileResponseRate: Math.min(1, loc.profileResponseRate + 0.02) })
-        .where(eq(t.location.id, loc.id));
-    }
+    await db
+      .update(t.location)
+      .set({
+        profileResponseRate: Math.min(1, ctx.location.profileResponseRate + 0.02),
+      })
+      .where(
+        and(
+          eq(t.location.id, ctx.location.id),
+          eq(t.location.workspaceId, workspaceId),
+        ),
+      );
 
     await db.insert(t.auditLog).values({
       id: id("aud"),
-      workspaceId: ctx.workspaceId,
+      workspaceId,
       actor: "Owner",
       action: "review.replied",
       targetType: "review",
@@ -1352,13 +1919,19 @@ export const drizzleProvider: DataProvider = {
     return mapReview({ ...rev, needsReply: false }, replyRow);
   },
 
-  async createCampaign(input: CreateCampaignInput) {
+  async createCampaign(workspaceId, input: CreateCampaignInput) {
     const db = getDb();
-    const ctx = await loadContext(db);
+    const ctx = await loadContext(db, workspaceId);
     const now = nowIso();
 
-    const customerRows = await db.select().from(t.customer);
-    const consentRows = await db.select().from(t.customerConsent);
+    const customerRows = await db
+      .select()
+      .from(t.customer)
+      .where(eq(t.customer.workspaceId, workspaceId));
+    const consentRows = await db
+      .select()
+      .from(t.customerConsent)
+      .where(eq(t.customerConsent.workspaceId, workspaceId));
     const consentByCustomer = new Map<string, ConsentRow>(
       consentRows.map((c) => [c.customerId, c]),
     );
@@ -1375,7 +1948,7 @@ export const drizzleProvider: DataProvider = {
 
     const campaign: Campaign = {
       id: id("camp"),
-      locationId: input.locationId,
+      locationId: ctx.location.id,
       name: input.name,
       type: input.type,
       isAutomation: false,
@@ -1399,17 +1972,27 @@ export const drizzleProvider: DataProvider = {
       stats: { sent: input.scheduledAt ? 0 : consented, opened: 0, clicked: 0 },
       createdAt: now,
     };
-    await db.insert(t.campaign).values(buildCampaignRow(campaign, ctx.workspaceId, front()));
+    await db.insert(t.campaign).values(buildCampaignRow(campaign, workspaceId, front()));
 
     return campaign;
   },
 
-  async updateConsent(customerId, consent) {
+  async setCampaignStatus(workspaceId, campaignId, status) {
+    const db = getDb();
+    await db
+      .update(t.campaign)
+      .set({ status })
+      .where(
+        and(eq(t.campaign.id, campaignId), eq(t.campaign.workspaceId, workspaceId)),
+      );
+  },
+
+  async updateConsent(workspaceId, customerId, consent) {
     const db = getDb();
     const custRows = await db
       .select()
       .from(t.customer)
-      .where(eq(t.customer.id, customerId))
+      .where(and(eq(t.customer.id, customerId), eq(t.customer.workspaceId, workspaceId)))
       .limit(1);
     const cust = custRows[0];
     if (!cust) return null;
@@ -1417,7 +2000,12 @@ export const drizzleProvider: DataProvider = {
     const consRows = await db
       .select()
       .from(t.customerConsent)
-      .where(eq(t.customerConsent.customerId, customerId))
+      .where(
+        and(
+          eq(t.customerConsent.customerId, customerId),
+          eq(t.customerConsent.workspaceId, workspaceId),
+        ),
+      )
       .limit(1);
     const cons = consRows[0];
     if (!cons) return null;
@@ -1446,13 +2034,365 @@ export const drizzleProvider: DataProvider = {
         caslCaptured: mergedRow.caslCaptured,
         withdrawnAt: mergedRow.withdrawnAt,
       })
-      .where(eq(t.customerConsent.customerId, customerId));
+      .where(
+        and(
+          eq(t.customerConsent.customerId, customerId),
+          eq(t.customerConsent.workspaceId, workspaceId),
+        ),
+      );
 
     return mapCustomer(cust, mergedRow);
   },
 
+  // ── QR ────────────────────────────────────────────────────
+  async mintRequestFromQrSlug(slug) {
+    // Slug-keyed global lookup (slugs are globally unique); all writes are
+    // scoped to the asset's OWN workspace.
+    const db = getDb();
+    const assetRows = await db
+      .select()
+      .from(t.qrAsset)
+      .where(eq(t.qrAsset.slug, slug))
+      .limit(1);
+    const asset = assetRows[0];
+    if (!asset) return null;
+    if (asset.degraded) return null;
+    const ws = asset.workspaceId;
+    const now = nowIso();
+    const seq = front();
+
+    // Atomic in-database increments — no read-modify-write race.
+    await db
+      .update(t.qrAsset)
+      .set({
+        scans: sql`${t.qrAsset.scans} + 1`,
+        pageOpens: sql`${t.qrAsset.pageOpens} + 1`,
+      })
+      .where(and(eq(t.qrAsset.id, asset.id), eq(t.qrAsset.workspaceId, ws)));
+
+    const locRows = await db
+      .select()
+      .from(t.location)
+      .where(and(eq(t.location.id, asset.locationId), eq(t.location.workspaceId, ws)))
+      .limit(1);
+    const loc = locRows[0];
+    if (!loc) return null;
+
+    const consent: CustomerConsent = {
+      // Self-initiated scan: no contact captured, no messaging consent
+      // implied — nothing will ever be sent to this record.
+      serviceConsent: false,
+      marketingConsent: false,
+      consentChannel: "in_person",
+      consentSourceText: "Self-initiated in-store QR scan — no contact captured.",
+      caslCaptured: false,
+    };
+    const customer: Customer = {
+      id: id("cus"),
+      locationId: loc.id,
+      name: "Walk-in customer",
+      createdAt: now,
+      source: "walk_in",
+      staffId: asset.staffId ?? undefined,
+      visitCount: 1,
+      lastVisitAt: now,
+      services: [],
+      sentiment: "neutral",
+      lifecycleStage: "requested",
+      consent,
+      tags: ["QR scan"],
+    };
+    const request: ReviewRequest = {
+      id: id("req"),
+      locationId: loc.id,
+      customerId: customer.id,
+      customerName: customer.name,
+      staffId: asset.staffId ?? undefined,
+      channel: "email",
+      token: id("tok"),
+      status: "opened",
+      isTest: false,
+      createdAt: now,
+      sentAt: now,
+      openedAt: now,
+      attributes: [],
+    };
+
+    await db.insert(t.customer).values(buildCustomerRow(customer, ws, seq));
+    await db
+      .insert(t.customerConsent)
+      .values(buildConsentRow(customer.id, customer.locationId, ws, consent));
+    await db.insert(t.reviewRequest).values(buildRequestRow(request, ws, seq));
+
+    return { token: request.token, business: loc.name };
+  },
+
+  // ── Workspace configuration ───────────────────────────────
+  async updateIndustry(workspaceId, industryKey, config) {
+    const db = getDb();
+    const wsSet: Partial<typeof t.workspace.$inferInsert> = { vertical: industryKey };
+    if (config) wsSet.industryConfig = config;
+    await db.update(t.workspace).set(wsSet).where(eq(t.workspace.id, workspaceId));
+    await db
+      .update(t.location)
+      .set({ vertical: industryKey })
+      .where(eq(t.location.workspaceId, workspaceId));
+  },
+
+  async updateWorkspaceSettings(workspaceId, patch) {
+    const db = getDb();
+    const wsRow = one(
+      await db.select().from(t.workspace).where(eq(t.workspace.id, workspaceId)).limit(1),
+      `workspace ${workspaceId}`,
+    );
+    const settings: WorkspaceSettings = {
+      serviceConsentDefault: true,
+      marketingOptInVisible: true,
+      quietHours: true,
+      leaderboardVisible: true,
+      ...(wsRow.settings ?? {}),
+      ...patch,
+    };
+    await db.update(t.workspace).set({ settings }).where(eq(t.workspace.id, workspaceId));
+  },
+
+  async updateLocationGoogle(workspaceId, patch: GoogleLocationPatch) {
+    const db = getDb();
+    const ctx = await loadContext(db, workspaceId);
+    const reviewUrl = `https://search.google.com/local/writereview?placeid=${patch.placeId}`;
+
+    const set: Partial<typeof t.location.$inferInsert> = {
+      googlePlaceId: patch.placeId,
+      reviewUrl,
+    };
+    if (patch.name) set.name = patch.name;
+    if (patch.address) set.address = patch.address;
+    if (patch.city) set.city = patch.city;
+    if (typeof patch.rating === "number") set.rating = patch.rating;
+    if (typeof patch.reviewCount === "number") set.reviewCount = patch.reviewCount;
+    if (patch.category) {
+      set.category = patch.category;
+      set.profilePrimaryCategory = patch.category;
+    }
+    await db
+      .update(t.location)
+      .set(set)
+      .where(
+        and(
+          eq(t.location.id, ctx.location.id),
+          eq(t.location.workspaceId, workspaceId),
+        ),
+      );
+
+    // Update QR targets to the (now real) Google review URL.
+    await db
+      .update(t.qrAsset)
+      .set({ targetUrl: reviewUrl })
+      .where(eq(t.qrAsset.workspaceId, workspaceId));
+
+    // Mark the google_places integration connected (JSONB read-modify-write).
+    const metaRows = await db
+      .select()
+      .from(t.datasetMeta)
+      .where(eq(t.datasetMeta.workspaceId, workspaceId))
+      .limit(1);
+    const meta = metaRows[0];
+    if (meta) {
+      const integrations = meta.integrations.map((i) =>
+        i.provider === "google_places"
+          ? {
+              ...i,
+              status: "connected" as const,
+              detail: "Business matched on Google",
+              lastSyncAt: nowIso(),
+            }
+          : i,
+      );
+      await db
+        .update(t.datasetMeta)
+        .set({ integrations })
+        .where(eq(t.datasetMeta.workspaceId, workspaceId));
+    }
+  },
+
+  async updateWhiteLabel(workspaceId, config) {
+    const db = getDb();
+    const metaRows = await db
+      .select()
+      .from(t.datasetMeta)
+      .where(eq(t.datasetMeta.workspaceId, workspaceId))
+      .limit(1);
+    const meta = metaRows[0];
+    if (meta) {
+      await db
+        .update(t.datasetMeta)
+        .set({ agency: { ...meta.agency, whiteLabel: config } })
+        .where(eq(t.datasetMeta.workspaceId, workspaceId));
+    }
+    // Mirror memory: only overwrite workspace.whiteLabel when already set.
+    const wsRows = await db
+      .select()
+      .from(t.workspace)
+      .where(eq(t.workspace.id, workspaceId))
+      .limit(1);
+    const wsRow = wsRows[0];
+    if (wsRow?.whiteLabel) {
+      await db
+        .update(t.workspace)
+        .set({ whiteLabel: config })
+        .where(eq(t.workspace.id, workspaceId));
+    }
+  },
+
+  async setIntegrationStatus(workspaceId, provider, status, detail) {
+    const db = getDb();
+    const ctx = await loadContext(db, workspaceId);
+    const meta = one(
+      await db
+        .select()
+        .from(t.datasetMeta)
+        .where(eq(t.datasetMeta.workspaceId, workspaceId))
+        .limit(1),
+      `dataset_meta for workspace ${workspaceId}`,
+    );
+    const now = nowIso();
+    const list: Integration[] = [...meta.integrations];
+    const idx = list.findIndex((i) => i.provider === provider);
+    const existing = idx >= 0 ? list[idx] : undefined;
+    if (existing) {
+      list[idx] = { ...existing, status, detail, lastSyncAt: now };
+    } else {
+      list.push({
+        id: id("int"),
+        locationId: ctx.location.id,
+        provider,
+        label: provider,
+        status,
+        detail,
+        lastSyncAt: now,
+      });
+    }
+    await db
+      .update(t.datasetMeta)
+      .set({ integrations: list })
+      .where(eq(t.datasetMeta.workspaceId, workspaceId));
+  },
+
+  // ── Team ──────────────────────────────────────────────────
+  async createStaffInvite(workspaceId, email, role) {
+    const db = getDb();
+    const key = email.trim().toLowerCase();
+
+    const dupRows = await db
+      .select()
+      .from(t.staffInvite)
+      .where(
+        and(
+          eq(t.staffInvite.workspaceId, workspaceId),
+          eq(t.staffInvite.email, key),
+          eq(t.staffInvite.status, "pending"),
+        ),
+      )
+      .limit(1);
+    if (dupRows[0]) {
+      return { error: "An invite for this email is already pending." };
+    }
+
+    const ownerRows = await db
+      .select()
+      .from(t.appUser)
+      .where(and(eq(t.appUser.workspaceId, workspaceId), eq(t.appUser.role, "owner")))
+      .limit(1);
+    const owner = ownerRows[0];
+    if (owner && owner.email.trim().toLowerCase() === key) {
+      return { error: "That's the owner's email." };
+    }
+
+    const invite: StaffInvite = {
+      id: id("inv"),
+      workspaceId,
+      email: key,
+      role,
+      token: id("invtok"),
+      status: "pending",
+      createdAt: nowIso(),
+    };
+    await db.insert(t.staffInvite).values(buildInviteRow(invite, front()));
+
+    await db.insert(t.auditLog).values({
+      id: id("aud"),
+      workspaceId,
+      actor: "Owner",
+      action: "staff.invited",
+      targetType: "staff_invite",
+      targetId: invite.id,
+      at: invite.createdAt,
+      seq: front(),
+    });
+
+    return invite;
+  },
+
+  async addStaffMember(workspaceId, displayName) {
+    const db = getDb();
+    const ctx = await loadContext(db, workspaceId);
+
+    const member: StaffMember = {
+      id: id("stf"),
+      locationId: ctx.location.id,
+      displayName,
+      role: "staff",
+      qrToken: id("qrt"),
+      active: true,
+      streakDays: 0,
+      captures: 0,
+      detectedReviews: 0,
+      avatarInitials: displayName
+        .split(/\s+/)
+        .map((w) => w[0])
+        .join("")
+        .slice(0, 2)
+        .toUpperCase(),
+    };
+    // Staff are appended (memory `push`) — back() sorts after every seed seq.
+    await db.insert(t.staffMember).values(buildStaffRow(member, workspaceId, back()));
+
+    // Personal QR for attribution, appended after the workspace's existing QRs.
+    const maxRows = await db
+      .select({ value: sql<number | null>`max(${t.qrAsset.seq})` })
+      .from(t.qrAsset)
+      .where(eq(t.qrAsset.workspaceId, workspaceId));
+    const nextSeq = (maxRows[0]?.value ?? -1) + 1;
+    const first = displayName.split(" ")[0];
+    const qr: QrAsset = {
+      id: id("qr"),
+      locationId: ctx.location.id,
+      scope: "staff",
+      staffId: member.id,
+      label: `${first}'s QR`,
+      slug: makeSlug(`${ctx.location.name}-${first ?? "staff"}`, member.id),
+      targetUrl: ctx.location.reviewUrl,
+      scans: 0,
+      pageOpens: 0,
+      degraded: false,
+    };
+    await db.insert(t.qrAsset).values(buildQrRow(qr, workspaceId, nextSeq));
+
+    return member;
+  },
+
+  // ── Notifications ─────────────────────────────────────────
+  async markNotificationsRead(workspaceId) {
+    const db = getDb();
+    await db
+      .update(t.notification)
+      .set({ read: true })
+      .where(eq(t.notification.workspaceId, workspaceId));
+  },
+
+  // ── Demo ──────────────────────────────────────────────────
   async resetDemo() {
-    await clearAllTables();
-    await seedDatabase(buildSeed());
+    // No-op: the demo workspace is served entirely by the memory provider —
+    // the database never holds demo data, so there is nothing to reset here.
   },
 };

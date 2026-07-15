@@ -3,8 +3,11 @@
  *
  * Loads env from the process (Vercel/Neon style) and, if a local `.env` file
  * exists, does a tiny manual parse of it (no dotenv dependency). Then clears
- * every table and inserts the full demo dataset (core tables + the single
- * dataset_meta JSONB row). Exits 0 on success, 1 on failure.
+ * every table and inserts the full demo dataset (core tables — including the
+ * relational qr_asset rows — + the single dataset_meta JSONB row). The demo
+ * workspace is written with is_demo = true. Exits 0 on success, 1 on failure.
+ *
+ * Dev convenience only: at runtime the demo is served by the memory provider.
  */
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -57,7 +60,8 @@ async function main(): Promise<void> {
   console.log(
     `[seed] Done. Inserted ${data.staff.length} staff, ${data.customers.length} customers, ` +
       `${data.requests.length} requests, ${data.reviews.length} reviews, ` +
-      `${data.campaigns.length} campaigns, and 1 dataset_meta row.`,
+      `${data.campaigns.length} campaigns, ${data.qrAssets.length} QR assets, ` +
+      `and 1 dataset_meta row.`,
   );
 }
 

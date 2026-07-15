@@ -1,39 +1,41 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Badge, Button, Card, Field, Input } from "@/components/ds";
 import { Icon } from "@/components/icons";
 import { initials } from "@/lib/utils/format";
+import { inviteStaffAction } from "@/lib/actions";
+import type { StaffInvite, StaffMember } from "@/lib/data/types";
 
-interface Member {
-  name: string;
-  email: string;
-  status: "invited" | "pending";
-}
-
-const SEED: Member[] = [
-  { name: "Priya Nair", email: "priya@harbourview.ca", status: "invited" },
-  { name: "Dan Okafor", email: "dan@harbourview.ca", status: "invited" },
-  { name: "Jonah Reyes", email: "jonah@harbourview.ca", status: "invited" },
-];
-
-export function TeamInvitePanel() {
-  const [members, setMembers] = useState<Member[]>(SEED);
+export function TeamInvitePanel({
+  invites,
+  staff,
+}: {
+  invites: StaffInvite[];
+  staff: StaffMember[];
+}) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   function add() {
     const value = email.trim().toLowerCase();
     if (!value) return;
-    if (members.some((m) => m.email.toLowerCase() === value)) {
-      setError(`${value} is already on your team.`);
-      return;
-    }
-    const handle = value.split("@")[0]?.replace(/[._]/g, " ") ?? value;
-    setMembers((prev) => [...prev, { name: handle, email: value, status: "pending" }]);
-    setEmail("");
-    setError(null);
+    start(async () => {
+      const result = await inviteStaffAction(value);
+      if (!result.ok) {
+        setError(result.error ?? "Couldn't save that invite.");
+        return;
+      }
+      setEmail("");
+      setError(null);
+      router.refresh();
+    });
   }
+
+  const hasRows = invites.length > 0 || staff.length > 0;
 
   return (
     <div className="space-y-4">
@@ -57,7 +59,7 @@ export function TeamInvitePanel() {
             }}
           />
         </Field>
-        <Button variant="secondary" size="md" icon="plus" onClick={add}>
+        <Button variant="secondary" size="md" icon="plus" onClick={add} loading={pending}>
           Add
         </Button>
       </div>
@@ -67,28 +69,44 @@ export function TeamInvitePanel() {
         </p>
       ) : null}
 
-      <Card padded={false} className="divide-y divide-hairline overflow-hidden">
-        {members.map((m) => (
-          <div key={m.email} className="flex items-center gap-3 px-4 py-3">
-            <div className="grid size-9 shrink-0 place-items-center rounded-chip bg-hero text-[12px] font-bold text-white">
-              {initials(m.name)}
+      {hasRows ? (
+        <Card padded={false} className="divide-y divide-hairline overflow-hidden">
+          {staff.map((s) => (
+            <div key={s.id} className="flex items-center gap-3 px-4 py-3">
+              <div className="grid size-9 shrink-0 place-items-center rounded-chip bg-hero text-[12px] font-bold text-white">
+                {s.avatarInitials}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[14px] font-semibold text-ink">{s.displayName}</div>
+                <div className="truncate text-[12px] capitalize text-sub">{s.role}</div>
+              </div>
+              <Badge tone="primary" icon="check">On the team</Badge>
             </div>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-[14px] font-semibold capitalize text-ink">{m.name}</div>
-              <div className="truncate text-[12px] text-sub">{m.email}</div>
+          ))}
+          {invites.map((inv) => (
+            <div key={inv.id} className="flex items-center gap-3 px-4 py-3">
+              <div className="grid size-9 shrink-0 place-items-center rounded-chip bg-hero text-[12px] font-bold text-white">
+                {initials(inv.email.split("@")[0]?.replace(/[._]/g, " ") ?? inv.email)}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[14px] font-semibold text-ink">{inv.email}</div>
+                <div className="truncate text-[12px] capitalize text-sub">{inv.role}</div>
+              </div>
+              <Badge tone="gold" icon="clock">Invited</Badge>
             </div>
-            <Badge
-              tone={m.status === "invited" ? "primary" : "gold"}
-              icon={m.status === "invited" ? "check" : "clock"}
-            >
-              {m.status === "invited" ? "Invited" : "Sending"}
-            </Badge>
-          </div>
-        ))}
-      </Card>
+          ))}
+        </Card>
+      ) : (
+        <Card>
+          <p className="py-4 text-center text-[13px] text-faint">
+            No team members yet — add a teammate&apos;s email above.
+          </p>
+        </Card>
+      )}
 
       <p className="text-[12px] text-faint">
-        Try adding a teammate who&apos;s already listed — Foundly blocks duplicate invites.
+        Invites are saved to your workspace now; invite emails go out once the email service is
+        connected. Duplicates are blocked automatically.
       </p>
     </div>
   );

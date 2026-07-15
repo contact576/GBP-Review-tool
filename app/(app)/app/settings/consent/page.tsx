@@ -11,6 +11,12 @@ export default async function ConsentSettingsPage() {
   const region = data.location.region;
   const labels = consentLabels(region);
   const isCanada = region === "CA";
+  const settings = data.workspace.settings ?? {
+    serviceConsentDefault: true,
+    marketingOptInVisible: true,
+    quietHours: true,
+    leaderboardVisible: true,
+  };
 
   return (
     <div className="space-y-5">
@@ -26,7 +32,7 @@ export default async function ConsentSettingsPage() {
       {/* Configuration */}
       <Card>
         <CardHeader kicker="Configuration" title="Consent rules" />
-        <ConsentConfig isCanada={isCanada} />
+        <ConsentConfig settings={settings} isCanada={isCanada} />
       </Card>
 
       {/* Exact capture wording */}

@@ -1,17 +1,15 @@
-"use client";
-
-import { useState } from "react";
-import { Badge, Button, Card, Toggle } from "@/components/ds";
+import { Badge, Card } from "@/components/ds";
 import { Icon } from "@/components/icons";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
 
+/**
+ * Honest channel states — nothing here pretends to activate. Email is the
+ * default channel; SMS requires real carrier registration; WhatsApp is later.
+ */
 export function ChannelsPanel() {
-  const [email, setEmail] = useState(true);
-  const [smsRequested, setSmsRequested] = useState(false);
-
   return (
     <div className="space-y-3">
-      {/* Email — on by default */}
+      {/* Email — the default channel, on for every workspace */}
       <Card className="flex items-center gap-3">
         <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-primary-wash text-primary">
           <Icon name="mail" size={20} />
@@ -19,41 +17,28 @@ export function ChannelsPanel() {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-[14px] font-bold text-ink">Email</span>
-            <Badge tone="primary">Works instantly</Badge>
+            <Badge tone="primary" icon="check-circle">On — default channel</Badge>
           </div>
-          <div className="text-[13px] text-sub">Send review invites the moment a visit is logged.</div>
+          <div className="text-[13px] text-sub">
+            Review invites go out by email the moment a visit is logged.
+          </div>
         </div>
-        <Toggle checked={email} onChange={setEmail} label="Email invites" />
       </Card>
 
-      {/* SMS — pending carrier approval */}
-      <Card className="space-y-3">
-        <div className="flex items-center gap-3">
-          <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-primary-wash text-primary">
-            <Icon name="message" size={20} />
+      {/* SMS — honest: requires carrier registration, no pretend activation */}
+      <Card className="flex items-center gap-3">
+        <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-primary-wash text-primary">
+          <Icon name="message" size={20} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-[14px] font-bold text-ink">SMS</span>
+            <Badge tone="sub" icon="clock">Not yet available</Badge>
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="text-[14px] font-bold text-ink">SMS</span>
-              {smsRequested ? (
-                <Badge tone="gold" icon="clock">Pending approval</Badge>
-              ) : (
-                <Badge tone="sub">Not active</Badge>
-              )}
-            </div>
-            <div className="text-[13px] text-sub">Carrier approval takes 1–5 days (A2P 10DLC registration).</div>
+          <div className="text-[13px] text-sub">
+            Requires carrier registration (1–5 days) — available after launch setup.
           </div>
         </div>
-        <Button
-          variant={smsRequested ? "secondary" : "primary"}
-          size="md"
-          fullWidth
-          disabled={smsRequested}
-          icon={smsRequested ? "clock" : "phone"}
-          onClick={() => setSmsRequested(true)}
-        >
-          {smsRequested ? "Activation requested" : "Activate SMS"}
-        </Button>
       </Card>
 
       {/* WhatsApp — later phase */}

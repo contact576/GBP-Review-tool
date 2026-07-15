@@ -1,7 +1,12 @@
+import { getData } from "@/lib/data";
+import { googleSignInEnabled } from "@/lib/google/config";
 import { Step } from "../_components/Step";
 import { ConnectPanel } from "./ConnectPanel";
 
-export default function ConnectPage() {
+export default async function ConnectPage() {
+  const data = await getData();
+  const google = data.integrations?.find((i) => i.provider === "google") ?? null;
+
   return (
     <Step
       current={3}
@@ -11,7 +16,10 @@ export default function ConnectPage() {
       continueHref="/onboarding/channels"
       skipHref="/onboarding/channels"
     >
-      <ConnectPanel />
+      <ConnectPanel
+        integration={google ? { status: google.status, detail: google.detail } : null}
+        googleEnabled={googleSignInEnabled()}
+      />
     </Step>
   );
 }

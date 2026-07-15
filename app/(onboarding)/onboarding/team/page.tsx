@@ -1,7 +1,11 @@
+import { getData } from "@/lib/data";
 import { Step } from "../_components/Step";
 import { TeamInvitePanel } from "./TeamInvitePanel";
 
-export default function TeamPage() {
+export default async function TeamPage() {
+  const data = await getData();
+  const pendingInvites = data.invites.filter((i) => i.status === "pending");
+
   return (
     <Step
       current={7}
@@ -11,7 +15,7 @@ export default function TeamPage() {
       continueHref="/onboarding/finish"
       skipHref="/onboarding/finish"
     >
-      <TeamInvitePanel />
+      <TeamInvitePanel invites={pendingInvites} staff={data.staff} />
     </Step>
   );
 }

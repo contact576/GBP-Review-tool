@@ -36,6 +36,7 @@ interface Results {
   daysSinceLastReview: number;
   responseRate: number; // 0..1
   area: { rating: number; reviewCount: number; recencyDays: number; responseRate: number };
+  source: "real" | "synthetic";
 }
 
 function mulberry32(seed: number): () => number {
@@ -57,10 +58,18 @@ function seedFrom(s: string): number {
   return h >>> 0;
 }
 
-function compute(business: string, category: string): Results {
+function compute(
+  business: string,
+  category: string,
+  real?: { rating: number; reviewCount: number },
+): Results {
   const rnd = mulberry32(seedFrom(business.toLowerCase() + "|" + category));
-  const rating = Math.round((3.8 + rnd() * 0.9) * 10) / 10;
-  const reviewCount = 14 + Math.floor(rnd() * 66);
+  // Synthetic values are always drawn (keeps the seed sequence stable), then
+  // overridden with the actual public listing data when we have it.
+  const syntheticRating = Math.round((3.8 + rnd() * 0.9) * 10) / 10;
+  const syntheticCount = 14 + Math.floor(rnd() * 66);
+  const rating = real ? real.rating : syntheticRating;
+  const reviewCount = real ? real.reviewCount : syntheticCount;
   const daysSinceLastReview = 4 + Math.floor(rnd() * 22);
   const photoCount = 6 + Math.floor(rnd() * 26);
   const responseRate = Math.round((0.15 + rnd() * 0.7) * 100) / 100;
@@ -82,7 +91,17 @@ function compute(business: string, category: string): Results {
     responseRate: Math.round((0.55 + rnd() * 0.3) * 100) / 100,
   };
 
-  return { business, category, score, rating, reviewCount, daysSinceLastReview, responseRate, area };
+  return {
+    business,
+    category,
+    score,
+    rating,
+    reviewCount,
+    daysSinceLastReview,
+    responseRate,
+    area,
+    source: real ? "real" : "synthetic",
+  };
 }
 
 export function ScoreTool() {
@@ -119,6 +138,36 @@ export function ScoreTool() {
     }
   }
 
+  // Real-data path: when a Places key is configured server-side, the lookup
+  // returns the business's actual public rating/review count and the score is
+  // recomputed from it. Without a key (or no match) the synthetic preview
+  // stands, clearly labelled as an estimate.
+  async function lookupReal(business: string, cat: string, myRun: number) {
+    try {
+      const res = await fetch("/api/score/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ business, category: cat }),
+      });
+      const data: unknown = await res.json();
+      if (runRef.current !== myRun) return;
+      if (
+        data &&
+        typeof data === "object" &&
+        "real" in data &&
+        (data as { real: unknown }).real === true &&
+        "place" in data
+      ) {
+        const place = (data as { place: { rating?: unknown; reviewCount?: unknown } }).place;
+        if (place && typeof place.rating === "number" && typeof place.reviewCount === "number") {
+          setResults(compute(business, cat, { rating: place.rating, reviewCount: place.reviewCount }));
+        }
+      }
+    } catch {
+      // Lookup failed — keep the labelled synthetic preview.
+    }
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const business = name.trim();
@@ -131,6 +180,7 @@ export function ScoreTool() {
     setResults(res);
     setSample(null);
     const myRun = ++runRef.current;
+    void lookupReal(business, category, myRun);
 
     const reduce =
       typeof window !== "undefined" &&
@@ -266,6 +316,11 @@ export function ScoreTool() {
               <GapBar label="Days since last review" you={results.daysSinceLastReview} area={results.area.recencyDays} format={(n) => `${Math.round(n)}d`} goodWhenHigher={false} />
               <GapBar label="Reply rate" you={Math.round(results.responseRate * 100)} area={Math.round(results.area.responseRate * 100)} format={(n) => `${Math.round(n)}%`} />
             </div>
+            <p className="mt-4 text-[12px] text-faint">
+              {results.source === "real"
+                ? "Rating and review count from your public Google listing."
+                : "Estimated preview — connect your business for real data."}
+            </p>
           </Card>
 
           {/* Magic block — AI sample review */}
