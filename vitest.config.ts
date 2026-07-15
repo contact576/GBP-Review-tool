@@ -9,6 +9,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "."),
+      // `server-only` throws outside an RSC context; stub it so server modules
+      // with pure helpers (Google mappers, sync builders) are unit-testable.
+      "server-only": path.resolve(__dirname, "test/server-only-stub.ts"),
     },
   },
 });

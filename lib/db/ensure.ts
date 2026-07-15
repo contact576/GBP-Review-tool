@@ -1,4 +1,4 @@
-import { SCHEMA_STATEMENTS } from "./schema-sql";
+import { SCHEMA_STATEMENTS, ADDITIVE_STATEMENTS } from "./schema-sql";
 
 /**
  * Self-service schema setup — lets the deployed app initialize its own
@@ -6,7 +6,25 @@ import { SCHEMA_STATEMENTS } from "./schema-sql";
  * Runs via the neon-http driver, which works on Vercel serverless.
  */
 
-const globalRef = globalThis as unknown as { __foundlySchemaReady?: boolean };
+const globalRef = globalThis as unknown as {
+  __foundlySchemaReady?: boolean;
+  __foundlyAdditiveReady?: boolean;
+};
+
+type Sql = (statement: string) => Promise<unknown>;
+
+/**
+ * Run additive migrations (new tables/columns) even when the core schema
+ * already exists — the fast-path below skips the full list, so tenants created
+ * before a feature landed would otherwise miss its tables.
+ */
+async function runAdditive(sql: Sql): Promise<void> {
+  if (globalRef.__foundlyAdditiveReady) return;
+  for (const statement of ADDITIVE_STATEMENTS) {
+    await sql(statement);
+  }
+  globalRef.__foundlyAdditiveReady = true;
+}
 
 export interface EnsureResult {
   ok: boolean;
@@ -24,11 +42,13 @@ export async function ensureSchema(): Promise<EnsureResult> {
     const { neon } = await import("@neondatabase/serverless");
     const sql = neon(process.env.DATABASE_URL);
 
-    // Fast path: newest table already present → schema is current.
+    // Fast path: newest core table already present → schema is current. Still
+    // run additive migrations so pre-existing tenants pick up new tables.
     const probe = await sql`
       SELECT 1 FROM information_schema.tables
       WHERE table_name = 'qr_asset' LIMIT 1`;
     if (probe.length > 0) {
+      await runAdditive(sql);
       globalRef.__foundlySchemaReady = true;
       return { ok: true, ran: false };
     }
@@ -37,6 +57,7 @@ export async function ensureSchema(): Promise<EnsureResult> {
       // Ordinary function-call form executes a raw SQL string.
       await sql(statement);
     }
+    globalRef.__foundlyAdditiveReady = true; // full init already includes them
     globalRef.__foundlySchemaReady = true;
     return { ok: true, ran: true };
   } catch (err) {

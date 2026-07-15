@@ -24,5 +24,16 @@ export const SCHEMA_STATEMENTS: string[] = [
   "CREATE TABLE IF NOT EXISTS \"staff_member\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"workspace_id\" text NOT NULL,\n\t\"location_id\" text NOT NULL,\n\t\"display_name\" text NOT NULL,\n\t\"role\" text NOT NULL,\n\t\"qr_token\" text NOT NULL,\n\t\"active\" boolean NOT NULL,\n\t\"streak_days\" integer NOT NULL,\n\t\"captures\" integer NOT NULL,\n\t\"detected_reviews\" integer NOT NULL,\n\t\"last_active_at\" text,\n\t\"avatar_initials\" text NOT NULL,\n\t\"seq\" double precision NOT NULL\n);",
   "CREATE TABLE IF NOT EXISTS \"subscription\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"workspace_id\" text NOT NULL,\n\t\"tier\" text NOT NULL,\n\t\"interval\" text NOT NULL,\n\t\"status\" text NOT NULL,\n\t\"trial_ends_at\" text,\n\t\"currency\" text NOT NULL,\n\t\"usage\" jsonb NOT NULL\n);",
   "CREATE TABLE IF NOT EXISTS \"workspace\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"organization_id\" text NOT NULL,\n\t\"name\" text NOT NULL,\n\t\"vertical\" text NOT NULL,\n\t\"region\" text NOT NULL,\n\t\"timezone\" text NOT NULL,\n\t\"plan\" text NOT NULL,\n\t\"created_at\" text NOT NULL,\n\t\"white_label\" jsonb,\n\t\"industry_config\" jsonb,\n\t\"settings\" jsonb,\n\t\"is_demo\" boolean DEFAULT false NOT NULL\n);",
-  "CREATE UNIQUE INDEX IF NOT EXISTS \"qr_asset_slug_uq\" ON \"qr_asset\" USING btree (\"slug\");"
+  "CREATE UNIQUE INDEX IF NOT EXISTS \"qr_asset_slug_uq\" ON \"qr_asset\" USING btree (\"slug\");",
+  "CREATE TABLE IF NOT EXISTS \"google_credential\" (\n\t\"workspace_id\" text PRIMARY KEY NOT NULL,\n\t\"encrypted_refresh_token\" text NOT NULL,\n\t\"google_account\" text,\n\t\"scopes\" text NOT NULL,\n\t\"connected_at\" text NOT NULL,\n\t\"updated_at\" text NOT NULL\n);"
+];
+
+/**
+ * Additive statements that must run even on databases initialized by an earlier
+ * schema (the fast-path in ensureSchema() skips the full list once core tables
+ * exist). All are IF NOT EXISTS / ADD COLUMN IF NOT EXISTS — safe to run every
+ * cold start. New additive migrations go here so existing tenants self-heal.
+ */
+export const ADDITIVE_STATEMENTS: string[] = [
+  "CREATE TABLE IF NOT EXISTS \"google_credential\" (\n\t\"workspace_id\" text PRIMARY KEY NOT NULL,\n\t\"encrypted_refresh_token\" text NOT NULL,\n\t\"google_account\" text,\n\t\"scopes\" text NOT NULL,\n\t\"connected_at\" text NOT NULL,\n\t\"updated_at\" text NOT NULL\n);",
 ];

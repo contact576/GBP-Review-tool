@@ -129,6 +129,37 @@ export interface CreateTaskInput {
   impact: GbpTask["impact"];
 }
 
+// ── Google data sync ────────────────────────────────────────
+export interface GoogleSyncResult {
+  ok: boolean;
+  /** Aggregate star rating (all Google reviews). */
+  rating?: number;
+  /** Total Google review count (complete, not the sample size). */
+  reviewCount?: number;
+  /** How many sample reviews were stored (≤5 for public; full for GBP). */
+  reviewsImported?: number;
+  /** True when the deeper Business Profile sync is waiting on Google's API approval. */
+  pendingApproval?: boolean;
+  error?: string;
+}
+
+export interface SaveGoogleCredentialInput {
+  /** AES-256-GCM envelope of the OAuth refresh token — never plaintext. */
+  encryptedRefreshToken: string;
+  /** GBP account resource name once known, e.g. "accounts/123". */
+  googleAccount?: string;
+  scopes: string;
+}
+
+export interface GoogleCredential {
+  workspaceId: string;
+  encryptedRefreshToken: string;
+  googleAccount?: string;
+  scopes: string;
+  connectedAt: string;
+  updatedAt: string;
+}
+
 /**
  * The single data-access contract — now multi-tenant.
  * Scoped methods take the workspaceId (always resolved server-side from the
@@ -205,6 +236,17 @@ export interface DataProvider {
   ): Promise<void>;
   updateLocationGoogle(workspaceId: string, patch: GoogleLocationPatch): Promise<void>;
   updateWhiteLabel(workspaceId: string, config: WhiteLabelConfig): Promise<void>;
+
+  // Google data sync
+  /** Pull real public Google data (aggregate rating/count + review sample). */
+  syncGooglePublic(workspaceId: string): Promise<GoogleSyncResult>;
+  /** Pull owned-profile data via GBP API (no-ops honestly until approved). */
+  syncGoogleProfile(workspaceId: string): Promise<GoogleSyncResult>;
+  saveGoogleCredential(
+    workspaceId: string,
+    input: SaveGoogleCredentialInput,
+  ): Promise<void>;
+  getGoogleCredential(workspaceId: string): Promise<GoogleCredential | null>;
   setIntegrationStatus(
     workspaceId: string,
     provider: Integration["provider"],

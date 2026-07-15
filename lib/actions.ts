@@ -262,6 +262,67 @@ export async function updateLocationGoogleAction(patch: GoogleLocationPatch) {
   revalidatePath("/", "layout");
 }
 
+// ── Google data sync ────────────────────────────────────────
+export interface GoogleSyncActionResult {
+  ok: boolean;
+  message: string;
+  pendingApproval?: boolean;
+  rating?: number;
+  reviewCount?: number;
+}
+
+/**
+ * Pull real Google data into the workspace:
+ *  - public data (aggregate rating/count + review sample) via Places — works now
+ *  - full profile (all reviews + performance) via GBP — imports once Google
+ *    approves the project; reports honestly as pending until then.
+ */
+export async function syncGoogleAction(): Promise<GoogleSyncActionResult> {
+  const { provider, ws, session } = await scoped();
+  if (session.isDemo) {
+    return { ok: false, message: "The demo uses sample data — sign up to sync your real Google data." };
+  }
+
+  const pub = await provider.syncGooglePublic(ws);
+  const profile = await provider.syncGoogleProfile(ws);
+
+  revalidatePath("/app");
+  revalidatePath("/app/reviews");
+  revalidatePath("/app/settings/integrations");
+
+  if (!pub.ok) {
+    return { ok: false, message: pub.error ?? "Couldn't reach Google — please try again." };
+  }
+
+  const stars = typeof pub.rating === "number" ? pub.rating.toFixed(1) : "—";
+  const base = `Synced your public Google data: ${stars}★ from ${pub.reviewCount ?? 0} reviews.`;
+
+  if (profile.ok && profile.pendingApproval) {
+    return {
+      ok: true,
+      pendingApproval: true,
+      rating: pub.rating,
+      reviewCount: pub.reviewCount,
+      message: `${base} Your full review history and performance import automatically once Google approves your Business Profile connection (typically 1–2 weeks).`,
+    };
+  }
+  if (profile.ok) {
+    return {
+      ok: true,
+      rating: profile.rating ?? pub.rating,
+      reviewCount: profile.reviewCount ?? pub.reviewCount,
+      message: `Imported ${profile.reviewsImported ?? 0} reviews from your Google Business Profile (${(profile.rating ?? pub.rating ?? 0).toFixed(1)}★).`,
+    };
+  }
+  // Public worked; profile isn't connected yet (or a soft error) — stay honest.
+  return {
+    ok: true,
+    rating: pub.rating,
+    reviewCount: pub.reviewCount,
+    message: `${base} Connect your Google Business Profile to import your full review history and performance.`,
+  };
+}
+
 export async function updateWhiteLabelAction(config: WhiteLabelConfig) {
   const { provider, ws } = await scoped();
   await provider.updateWhiteLabel(ws, config);

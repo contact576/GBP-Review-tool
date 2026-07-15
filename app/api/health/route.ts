@@ -51,16 +51,33 @@ async function probeAi(): Promise<{ ok: boolean; error?: string }> {
   }
 }
 
-async function probePlaces(): Promise<{ ok: boolean; detail?: string; error?: string }> {
+async function probePlaces(): Promise<{
+  ok: boolean;
+  detail?: string;
+  rating?: number;
+  reviewCount?: number;
+  sampleReviews?: number;
+  error?: string;
+}> {
   if (!process.env.GOOGLE_MAPS_API_KEY) return { ok: false, error: "key_not_set" };
   try {
-    const { searchBusinesses } = await import("@/lib/google/places");
+    const { searchBusinesses, getPlaceDetails } = await import("@/lib/google/places");
     const result = await searchBusinesses("Starbucks Toronto", "CA");
-    if (result.ok && result.places.length > 0) {
-      const first = result.places[0];
-      return { ok: true, detail: first ? first.name : "results" };
+    if (!result.ok || result.places.length === 0) {
+      return { ok: false, error: result.ok ? "no_results" : "lookup_failed" };
     }
-    return { ok: false, error: result.ok ? "no_results" : "lookup_failed" };
+    const first = result.places[0];
+    if (!first) return { ok: false, error: "no_results" };
+    // Exercise the exact Place Details path syncGooglePublic uses.
+    const details = await getPlaceDetails(first.placeId);
+    if (!details.ok) return { ok: true, detail: first.name, error: `details_${details.reason}` };
+    return {
+      ok: true,
+      detail: details.details.name,
+      rating: details.details.rating,
+      reviewCount: details.details.reviewCount,
+      sampleReviews: details.details.reviews.length,
+    };
   } catch {
     return { ok: false, error: "request_failed" };
   }

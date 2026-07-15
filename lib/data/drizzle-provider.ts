@@ -1,10 +1,17 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, like, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDb, type FoundlyDb } from "../db/client";
 import { ensureSchema } from "../db/ensure";
 import * as t from "../db/schema";
 import { emptyFoundlyData, makeSlug } from "./empty";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import {
+  buildGooglePublicUpdate,
+  upsertSnapshot,
+  friendlyPlacesError,
+  PUBLIC_REVIEW_ID_PREFIX,
+  GBP_REVIEW_ID_PREFIX,
+} from "@/lib/google/public-sync";
 import type {
   DataProvider,
   CaptureCustomerInput,
@@ -19,6 +26,9 @@ import type {
   AuthUser,
   GoogleLocationPatch,
   CreateTaskInput,
+  GoogleSyncResult,
+  SaveGoogleCredentialInput,
+  GoogleCredential,
 } from "./provider";
 import type {
   FoundlyData,
@@ -2400,9 +2410,216 @@ export const drizzleProvider: DataProvider = {
       .where(eq(t.notification.workspaceId, workspaceId));
   },
 
+  // ── Google data sync ──────────────────────────────────────
+  async syncGooglePublic(workspaceId): Promise<GoogleSyncResult> {
+    const db = getDb();
+    const ctx = await loadContext(db, workspaceId);
+    const location = mapLocation(ctx.location);
+    if (!location.googlePlaceId) {
+      return { ok: false, error: "Find your business on Google first (Onboarding → Find your business)." };
+    }
+    const { getPlaceDetails } = await import("@/lib/google/places");
+    const res = await getPlaceDetails(location.googlePlaceId);
+    if (!res.ok) return { ok: false, error: friendlyPlacesError(res.reason) };
+
+    const update = buildGooglePublicUpdate(res.details, location, nowIso());
+
+    // 1) Real aggregate onto the location row.
+    await db
+      .update(t.location)
+      .set({ rating: update.rating, reviewCount: update.reviewCount })
+      .where(and(eq(t.location.id, ctx.location.id), eq(t.location.workspaceId, workspaceId)));
+
+    // 2) Replace the prior public sample (keep GBP/owner reviews).
+    await db
+      .delete(t.review)
+      .where(and(eq(t.review.workspaceId, workspaceId), like(t.review.id, `${PUBLIC_REVIEW_ID_PREFIX}%`)));
+    if (update.reviews.length) {
+      await db
+        .insert(t.review)
+        .values(update.reviews.map((r, i) => buildReviewRow(r, workspaceId, front() - i)));
+    }
+
+    // 3) dataset_meta: today's score snapshot + integration status.
+    const meta = one(
+      await db.select().from(t.datasetMeta).where(eq(t.datasetMeta.workspaceId, workspaceId)).limit(1),
+      `dataset_meta for workspace ${workspaceId}`,
+    );
+    const metrics = upsertSnapshot(meta.metrics, update.snapshot);
+    const integrations = meta.integrations.map((intg) =>
+      intg.provider === "google_places"
+        ? {
+            ...intg,
+            status: "connected" as const,
+            detail: `Public Google data synced — ${update.reviewCount} reviews, ${update.rating.toFixed(1)}★`,
+            lastSyncAt: update.syncedAt,
+          }
+        : intg,
+    );
+    await db
+      .update(t.datasetMeta)
+      .set({ metrics, integrations })
+      .where(eq(t.datasetMeta.workspaceId, workspaceId));
+
+    return {
+      ok: true,
+      rating: update.rating,
+      reviewCount: update.reviewCount,
+      reviewsImported: update.reviews.length,
+    };
+  },
+
+  async syncGoogleProfile(workspaceId): Promise<GoogleSyncResult> {
+    const db = getDb();
+    const ctx = await loadContext(db, workspaceId);
+    const location = mapLocation(ctx.location);
+    const credential = await loadGoogleCredential(db, workspaceId);
+    const { fetchGoogleProfile } = await import("@/lib/google/profile-sync");
+    const outcome = await fetchGoogleProfile(credential, location, nowIso());
+    if (!outcome.ok) return { ok: false, error: outcome.error };
+
+    if (outcome.pendingApproval) {
+      await setGoogleIntegration(
+        db,
+        workspaceId,
+        "needs_attention",
+        "Connected — Google Business Profile API approval pending (Google approves per-project; typically 1–2 weeks)",
+      );
+      return { ok: true, pendingApproval: true };
+    }
+
+    if (typeof outcome.rating === "number" || typeof outcome.reviewCount === "number") {
+      await db
+        .update(t.location)
+        .set({
+          rating: outcome.rating ?? location.rating,
+          reviewCount: outcome.reviewCount ?? location.reviewCount,
+          gbpConnected: true,
+        })
+        .where(and(eq(t.location.id, ctx.location.id), eq(t.location.workspaceId, workspaceId)));
+    }
+
+    // Full history supersedes both the public sample and any prior GBP import.
+    await db
+      .delete(t.review)
+      .where(and(eq(t.review.workspaceId, workspaceId), like(t.review.id, `${PUBLIC_REVIEW_ID_PREFIX}%`)));
+    await db
+      .delete(t.review)
+      .where(and(eq(t.review.workspaceId, workspaceId), like(t.review.id, `${GBP_REVIEW_ID_PREFIX}%`)));
+    const imported = outcome.reviews ?? [];
+    if (imported.length) {
+      await db
+        .insert(t.review)
+        .values(imported.map((r, i) => buildReviewRow(r, workspaceId, front() - i)));
+    }
+
+    if (outcome.snapshot) {
+      const meta = one(
+        await db.select().from(t.datasetMeta).where(eq(t.datasetMeta.workspaceId, workspaceId)).limit(1),
+        `dataset_meta for workspace ${workspaceId}`,
+      );
+      const metrics = upsertSnapshot(meta.metrics, outcome.snapshot);
+      await db
+        .update(t.datasetMeta)
+        .set({ metrics })
+        .where(eq(t.datasetMeta.workspaceId, workspaceId));
+    }
+    await setGoogleIntegration(
+      db,
+      workspaceId,
+      "connected",
+      `Google Business Profile synced — ${outcome.reviewCount ?? imported.length} reviews`,
+    );
+
+    return {
+      ok: true,
+      rating: outcome.rating,
+      reviewCount: outcome.reviewCount,
+      reviewsImported: imported.length,
+    };
+  },
+
+  async saveGoogleCredential(workspaceId, input: SaveGoogleCredentialInput) {
+    const db = getDb();
+    const now = nowIso();
+    const existing = await loadGoogleCredential(db, workspaceId);
+    const row: typeof t.googleCredential.$inferInsert = {
+      workspaceId,
+      encryptedRefreshToken: input.encryptedRefreshToken,
+      googleAccount: input.googleAccount ?? existing?.googleAccount ?? null,
+      scopes: input.scopes,
+      connectedAt: existing?.connectedAt ?? now,
+      updatedAt: now,
+    };
+    await db
+      .insert(t.googleCredential)
+      .values(row)
+      .onConflictDoUpdate({
+        target: t.googleCredential.workspaceId,
+        set: {
+          encryptedRefreshToken: row.encryptedRefreshToken,
+          googleAccount: row.googleAccount,
+          scopes: row.scopes,
+          updatedAt: row.updatedAt,
+        },
+      });
+  },
+
+  async getGoogleCredential(workspaceId) {
+    const db = getDb();
+    return loadGoogleCredential(db, workspaceId);
+  },
+
   // ── Demo ──────────────────────────────────────────────────
   async resetDemo() {
     // No-op: the demo workspace is served entirely by the memory provider —
     // the database never holds demo data, so there is nothing to reset here.
   },
 };
+
+/** Load + map a workspace's stored Google credential (null when absent). */
+async function loadGoogleCredential(
+  db: FoundlyDb,
+  workspaceId: string,
+): Promise<GoogleCredential | null> {
+  const rows = await db
+    .select()
+    .from(t.googleCredential)
+    .where(eq(t.googleCredential.workspaceId, workspaceId))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    workspaceId: row.workspaceId,
+    encryptedRefreshToken: row.encryptedRefreshToken,
+    googleAccount: row.googleAccount ?? undefined,
+    scopes: row.scopes,
+    connectedAt: row.connectedAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+/** Patch the `google` integration status inside dataset_meta. */
+async function setGoogleIntegration(
+  db: FoundlyDb,
+  workspaceId: string,
+  status: Integration["status"],
+  detail: string,
+): Promise<void> {
+  const rows = await db
+    .select()
+    .from(t.datasetMeta)
+    .where(eq(t.datasetMeta.workspaceId, workspaceId))
+    .limit(1);
+  const meta = rows[0];
+  if (!meta) return;
+  const integrations = meta.integrations.map((intg) =>
+    intg.provider === "google"
+      ? { ...intg, status, detail, lastSyncAt: nowIso() }
+      : intg,
+  );
+  await db
+    .update(t.datasetMeta)
+    .set({ integrations })
+    .where(eq(t.datasetMeta.workspaceId, workspaceId));
+}

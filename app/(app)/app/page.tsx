@@ -9,6 +9,7 @@ import { Icon, type IconName } from "@/components/icons";
 import { HeroCard } from "@/components/app/HeroCard";
 import { DashboardStats } from "@/components/app/DashboardStats";
 import { TaskCard } from "@/components/app/TaskCard";
+import { GoogleDataCard } from "@/components/app/GoogleDataCard";
 import { LeaderboardRow, BenchmarkStrip, NeedsReplyItem } from "@/components/app/widgets";
 
 export default async function DashboardPage() {
@@ -45,6 +46,8 @@ export default async function DashboardPage() {
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
         {/* Main column */}
         <div className="space-y-5 xl:col-span-2">
+          <GoogleDataCard data={data} />
+
           <DashboardStats stats={stats} />
 
           <Card>

@@ -385,3 +385,18 @@ export const datasetMeta = pgTable("dataset_meta", {
   agency: jsonb("agency").$type<Agency>().notNull(),
   platform: jsonb("platform").$type<FoundlyData["platform"]>().notNull(),
 });
+
+/**
+ * Per-workspace Google OAuth credential for the Business Profile connection.
+ * Stores only the AES-256-GCM envelope of the refresh token — never plaintext.
+ * One row per workspace (the primary key), created on connect and used by the
+ * approval-gated profile sync.
+ */
+export const googleCredential = pgTable("google_credential", {
+  workspaceId: text("workspace_id").primaryKey(),
+  encryptedRefreshToken: text("encrypted_refresh_token").notNull(),
+  googleAccount: text("google_account"),
+  scopes: text("scopes").notNull(),
+  connectedAt: text("connected_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});

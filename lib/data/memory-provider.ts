@@ -15,7 +15,20 @@ import type {
   AuthUser,
   GoogleLocationPatch,
   CreateTaskInput,
+  GoogleSyncResult,
+  SaveGoogleCredentialInput,
+  GoogleCredential,
 } from "./provider";
+// Id conventions + pure helpers only — the server-only Google modules
+// (places/profile-sync) are dynamically imported inside the sync methods so
+// this data module stays free of "server-only" for unit tests.
+import {
+  buildGooglePublicUpdate,
+  upsertSnapshot,
+  isPublicSampleReview,
+  isImportedGoogleReview,
+  friendlyPlacesError,
+} from "@/lib/google/public-sync";
 import type {
   FoundlyData,
   Customer,
@@ -58,13 +71,22 @@ interface StoredUser {
 interface MemoryStore {
   workspaces: Map<string, FoundlyData>;
   users: Map<string, StoredUser>; // key: lowercase email
+  credentials: Map<string, GoogleCredential>; // key: workspaceId
 }
 
 const globalRef = globalThis as unknown as { __foundlyStore?: MemoryStore };
 
 function store(): MemoryStore {
   if (!globalRef.__foundlyStore) {
-    globalRef.__foundlyStore = { workspaces: new Map(), users: new Map() };
+    globalRef.__foundlyStore = {
+      workspaces: new Map(),
+      users: new Map(),
+      credentials: new Map(),
+    };
+  }
+  // Back-compat for stores created before credentials existed.
+  if (!globalRef.__foundlyStore.credentials) {
+    globalRef.__foundlyStore.credentials = new Map();
   }
   return globalRef.__foundlyStore;
 }
@@ -658,6 +680,104 @@ export const memoryProvider: DataProvider = {
       };
       data.integrations.push(entry);
     }
+  },
+
+  // ── Google data sync ──────────────────────────────────────
+  async syncGooglePublic(workspaceId): Promise<GoogleSyncResult> {
+    const data = mustDb(workspaceId);
+    if (data.workspace.isDemo) {
+      return { ok: false, error: "The demo uses sample data — sign up to sync your real Google data." };
+    }
+    const placeId = data.location.googlePlaceId;
+    if (!placeId) {
+      return { ok: false, error: "Find your business on Google first (Onboarding → Find your business)." };
+    }
+    const { getPlaceDetails } = await import("@/lib/google/places");
+    const res = await getPlaceDetails(placeId);
+    if (!res.ok) return { ok: false, error: friendlyPlacesError(res.reason) };
+
+    const update = buildGooglePublicUpdate(res.details, data.location, nowIso());
+    data.location.rating = update.rating;
+    data.location.reviewCount = update.reviewCount;
+    // Replace the prior public sample; keep GBP-imported + owner reviews.
+    data.reviews = [
+      ...update.reviews,
+      ...data.reviews.filter((r) => !isPublicSampleReview(r.id)),
+    ];
+    data.metrics = upsertSnapshot(data.metrics, update.snapshot);
+    const places = data.integrations.find((i) => i.provider === "google_places");
+    if (places) {
+      places.status = "connected";
+      places.detail = `Public Google data synced — ${update.reviewCount} reviews, ${update.rating.toFixed(1)}★`;
+      places.lastSyncAt = update.syncedAt;
+    }
+    return {
+      ok: true,
+      rating: update.rating,
+      reviewCount: update.reviewCount,
+      reviewsImported: update.reviews.length,
+    };
+  },
+
+  async syncGoogleProfile(workspaceId): Promise<GoogleSyncResult> {
+    const data = mustDb(workspaceId);
+    if (data.workspace.isDemo) {
+      return { ok: false, error: "The demo uses sample data." };
+    }
+    const credential = store().credentials.get(workspaceId) ?? null;
+    const { fetchGoogleProfile } = await import("@/lib/google/profile-sync");
+    const outcome = await fetchGoogleProfile(credential, data.location, nowIso());
+    if (!outcome.ok) return { ok: false, error: outcome.error };
+
+    if (outcome.pendingApproval) {
+      const g = data.integrations.find((i) => i.provider === "google");
+      if (g) {
+        g.status = "needs_attention";
+        g.detail =
+          "Connected — Google Business Profile API approval pending (Google approves per-project; typically 1–2 weeks)";
+      }
+      return { ok: true, pendingApproval: true };
+    }
+
+    if (typeof outcome.rating === "number") data.location.rating = outcome.rating;
+    if (typeof outcome.reviewCount === "number") data.location.reviewCount = outcome.reviewCount;
+    const imported = outcome.reviews ?? [];
+    // Full history supersedes both the public sample and any prior GBP import.
+    data.reviews = [
+      ...imported,
+      ...data.reviews.filter((r) => !isImportedGoogleReview(r.id)),
+    ];
+    if (outcome.snapshot) data.metrics = upsertSnapshot(data.metrics, outcome.snapshot);
+    data.location.gbpConnected = true;
+    const g = data.integrations.find((i) => i.provider === "google");
+    if (g) {
+      g.status = "connected";
+      g.detail = `Google Business Profile synced — ${outcome.reviewCount ?? imported.length} reviews`;
+      g.lastSyncAt = nowIso();
+    }
+    return {
+      ok: true,
+      rating: outcome.rating,
+      reviewCount: outcome.reviewCount,
+      reviewsImported: imported.length,
+    };
+  },
+
+  async saveGoogleCredential(workspaceId, input: SaveGoogleCredentialInput) {
+    const now = nowIso();
+    const existing = store().credentials.get(workspaceId);
+    store().credentials.set(workspaceId, {
+      workspaceId,
+      encryptedRefreshToken: input.encryptedRefreshToken,
+      googleAccount: input.googleAccount ?? existing?.googleAccount,
+      scopes: input.scopes,
+      connectedAt: existing?.connectedAt ?? now,
+      updatedAt: now,
+    });
+  },
+
+  async getGoogleCredential(workspaceId) {
+    return store().credentials.get(workspaceId) ?? null;
   },
 
   // ── Team ──────────────────────────────────────────────────

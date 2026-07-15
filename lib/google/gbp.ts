@@ -19,6 +19,8 @@ import { googleClientId, googleClientSecret } from "./config";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const ACCOUNTS_ENDPOINT = "https://mybusinessaccountmanagement.googleapis.com/v1/accounts";
 const INFO_BASE = "https://mybusinessbusinessinformation.googleapis.com/v1";
+/** Reviews live on the legacy v4 surface (no v1 equivalent exists yet). */
+const REVIEWS_V4_BASE = "https://mybusiness.googleapis.com/v4";
 
 export type GbpResult<T> =
   | { ok: true; data: T }
@@ -119,6 +121,83 @@ export async function listLocations(
     accessToken,
     (body) => body.locations ?? [],
   );
+}
+
+// ── Reviews (owned-profile history) ────────────────────────────────────────
+
+export interface GbpReview {
+  reviewId: string;
+  author: string;
+  rating: 1 | 2 | 3 | 4 | 5;
+  text: string;
+  createTime?: string;
+  reply?: string;
+}
+
+export interface GbpReviewsPage {
+  reviews: GbpReview[];
+  averageRating: number;
+  totalReviewCount: number;
+}
+
+interface RawGbpReview {
+  reviewId?: string;
+  reviewer?: { displayName?: string };
+  starRating?: string;
+  comment?: string;
+  createTime?: string;
+  reviewReply?: { comment?: string };
+}
+
+/** GBP star enum → 1–5 integer. Exported for unit testing. */
+export function mapGbpStarRating(star: string | undefined): 1 | 2 | 3 | 4 | 5 {
+  switch (star) {
+    case "ONE":
+      return 1;
+    case "TWO":
+      return 2;
+    case "THREE":
+      return 3;
+    case "FOUR":
+      return 4;
+    case "FIVE":
+      return 5;
+    default:
+      return 5;
+  }
+}
+
+/** Map one raw GBP review to our shape. Exported for unit testing. */
+export function mapGbpReview(raw: RawGbpReview): GbpReview {
+  return {
+    reviewId: raw.reviewId ?? "",
+    author: raw.reviewer?.displayName ?? "A Google user",
+    rating: mapGbpStarRating(raw.starRating),
+    text: raw.comment ?? "",
+    createTime: raw.createTime,
+    reply: raw.reviewReply?.comment,
+  };
+}
+
+/**
+ * List reviews for a location (resource "accounts/{a}/locations/{l}").
+ * One page (up to 50) — enough to seed the dashboard; pagination can be added
+ * once the project is approved and we can exercise it against real data.
+ */
+export async function listReviews(
+  accessToken: string,
+  locationResource: string,
+): Promise<GbpResult<GbpReviewsPage>> {
+  const url = `${REVIEWS_V4_BASE}/${locationResource}/reviews?pageSize=50`;
+  return gbpGet<
+    { reviews?: RawGbpReview[]; averageRating?: number; totalReviewCount?: number },
+    GbpReviewsPage
+  >(url, accessToken, (body) => ({
+    reviews: (body.reviews ?? []).map(mapGbpReview),
+    averageRating: typeof body.averageRating === "number" ? body.averageRating : 0,
+    totalReviewCount:
+      typeof body.totalReviewCount === "number" ? body.totalReviewCount : 0,
+  }));
 }
 
 // ── Shared fetch + approval-aware error classification ─────────────────────

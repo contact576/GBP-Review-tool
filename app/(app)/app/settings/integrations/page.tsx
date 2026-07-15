@@ -6,6 +6,7 @@ import { formatRelative } from "@/lib/utils/format";
 import type { Integration } from "@/lib/data/types";
 import { SettingsNav } from "../SettingsNav";
 import { ReconnectButton } from "./ReconnectButton";
+import { SyncGoogleButton } from "@/components/app/SyncGoogleButton";
 
 const PROVIDER_ICON: Record<Integration["provider"], IconName> = {
   google: "google",
@@ -51,6 +52,15 @@ export default async function IntegrationsSettingsPage() {
       </div>
 
       <SettingsNav />
+
+      <Card>
+        <CardHeader title="Sync your Google data" />
+        <p className="mb-3 text-[14px] text-sub">
+          Pulls your real rating, review count and recent reviews now. Your full history and
+          performance import once your Business Profile connection is approved.
+        </p>
+        <SyncGoogleButton label="Sync from Google" />
+      </Card>
 
       <Card>
         <CardHeader title="Providers" />

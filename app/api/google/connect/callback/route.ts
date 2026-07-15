@@ -66,16 +66,21 @@ export async function GET(req: NextRequest) {
     return done();
   }
 
-  // Encrypt the refresh token at rest (AES-256-GCM envelope). Persistent
-  // storage of the envelope lands with the credentials table; nothing
-  // plaintext is ever kept.
-  const encryptedRefreshToken = tokens.refresh_token
-    ? encryptSecret(tokens.refresh_token)
-    : null;
-  void encryptedRefreshToken;
-
   // Probe GBP account access once so the stored status reflects reality.
   const probe = await listAccounts(tokens.access_token);
+
+  // Persist the refresh token (AES-256-GCM envelope — never plaintext) so the
+  // profile sync can run later, including automatically once Google approves
+  // the project. Google returns a refresh token only on first offline consent;
+  // the connect flow forces prompt=consent so we reliably get one.
+  if (tokens.refresh_token) {
+    await provider.saveGoogleCredential(ws, {
+      encryptedRefreshToken: encryptSecret(tokens.refresh_token),
+      googleAccount: probe.ok ? probe.data[0]?.name : undefined,
+      scopes: "openid email profile https://www.googleapis.com/auth/business.manage",
+    });
+  }
+
   if (probe.ok) {
     await provider.setIntegrationStatus(
       ws,
