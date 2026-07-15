@@ -1,12 +1,21 @@
 # Foundly
 
-**Get found and get chosen.** Foundly is an AI-powered **Local Growth Platform** for local businesses — a steady stream of durable Google reviews, an optimized Google Business Profile, competitor benchmarks, campaigns, and an agency white-label channel, all wired to one honest flywheel:
+**Get found and get chosen.** Foundly is an AI-powered **Local Growth Platform** for local businesses — a steady stream of genuine Google reviews, an optimized Google Business Profile, honest analytics, campaigns, and an agency white-label channel, running one flywheel:
 
 > **ASK → REVIEWS → OPTIMIZED PROFILE → RANK → NEW CUSTOMERS → COME BACK**
 
-Built with Next.js 15 (App Router), React 19, TypeScript, Tailwind, and Drizzle/Postgres. Ships fully interactive with **zero configuration** and deploys to Vercel out of the box.
+Built with Next.js 15 (App Router), React 19, TypeScript, Tailwind, and Drizzle/Postgres. Deploys to Vercel with **zero required configuration**; every credential unlocks a real capability (see `SETUP.md`).
 
 ---
+
+## What's real (v2)
+
+- **Real accounts** — email + password (bcrypt) and Google sign-in, JWT sessions, role-gated consoles. New accounts start **empty** with guided setup; the sample business ("Harbourview Physiotherapy") is an explicitly-labeled **demo workspace**, never mixed with real data.
+- **Working QR codes** — every code encodes `{your-app}/q/{slug}`; a scan mints a fresh review session, logs the scan, credits the staff member, and lands the customer in the review flow. Real PNG/SVG downloads and a print kit.
+- **Rating- and industry-aware AI** — 36-industry catalog drives review drafts that always match the star rating (a 4★ never gushes like a 5★), the industry's voice, the service received, and the selected attributes. A sentiment-consistency lint blocks mismatches; with `ANTHROPIC_API_KEY` set, drafts are genuinely AI-written (and still lint-gated).
+- **Real Google integration** — Places business search in onboarding (real place IDs → real Google review links), Google sign-in, and a Business-Profile connect flow that stores encrypted tokens and honestly reports Google's per-project API approval status.
+- **Multi-tenant persistence** — with `DATABASE_URL` set, everything is stored per-workspace in Postgres with workspace-scoped queries throughout.
+- **Honest states everywhere** — integrations show real connection status; features that need an unconnected service say so instead of pretending; the compliance invariants (never gate the public Google review link on low ratings, dual service/marketing consent, never edit a business name on Google) are enforced in code.
 
 ## Quick start
 
@@ -15,69 +24,47 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:3000>. The app runs immediately with a seeded demo tenant — **Harbourview Physiotherapy** — in ephemeral in-memory "Demo mode" (no database required).
+Open <http://localhost:3000>.
 
-- **Marketing / free Growth Score:** `/`, `/score`, `/pricing`
-- **Sign in / enter the demo:** `/sign-in` → one-click "Enter as Owner / Agency / Admin"
-- **Owner app:** `/app` (dashboard, this-week Co-Pilot, reviews, requests, customers, campaigns, benchmark, analytics, AI Visibility, rank grid, QR studio, growth report, settings)
-- **Staff capture PWA:** `/staff`
-- **Customer review page:** `/r/demo` (the seeded live token)
-- **Agency portal:** `/agency` · **Internal admin:** `/admin`
-- **Health probe:** `/api/health` → `{ ok, aiKeyed, dbBacked }`
+- **Try the demo:** `/sign-in` → "Explore the demo" (labeled, resettable, isolated)
+- **Create a real account:** `/sign-up` (works keyless; persists when `DATABASE_URL` is set)
+- **Customer review flow:** scan any QR from Studio, or visit `/q/harbourview` in the demo
+- **Staff capture:** `/staff` · **Agency:** `/agency` · **Internal ops:** `/admin`
+- **Health probe:** `/api/health`
 
-## Configuration (all optional)
+## Configuration
 
-Every environment variable is optional. Copy `.env.example` to `.env` and set what you want.
+All optional — see **`SETUP.md`** for non-technical, click-by-click instructions.
 
-| Variable | Effect when set |
+| Variable | Unlocks |
 |---|---|
-| `ANTHROPIC_API_KEY` | Enables **live AI** generation (review drafts, replies, campaign copy, report narration). Without it, high-quality deterministic templates are used — every AI feature still works. |
-| `FOUNDLY_AI_MODEL` | Override the model (default `claude-haiku-4-5-20251001`, chosen for lean cost). |
-| `DATABASE_URL` | Switches persistence to **real Postgres** (Neon/Supabase/any Postgres) via Drizzle. Without it, seeded in-memory demo data is used. |
+| `ANTHROPIC_API_KEY` | Live AI generation (drafts, replies, campaign copy, report narration) |
+| `DATABASE_URL` | Real Postgres persistence (`npm run db:push`, optional `npm run db:seed`) |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google sign-in + Business Profile connect |
+| `GOOGLE_MAPS_API_KEY` | Real business lookup (onboarding + free score tool) |
+| `AUTH_SECRET` / `ENCRYPTION_SECRET` | Session signing / Google-token encryption (set in production) |
+| `NEXT_PUBLIC_APP_URL` | Permanent absolute origin for QR codes and OAuth redirects |
+| `RESEND_API_KEY` (later) | Real email sending |
 
-### Enable real persistence (2 minutes)
+**Google Business Profile API** (reviews import, reply publishing, performance data) additionally requires Google's per-project approval — apply at <https://developers.google.com/my-business/content/prereqs>; the app shows an honest "approval pending" status until then.
 
-1. Create a free Postgres database at <https://neon.tech> and copy the connection string.
-2. Set `DATABASE_URL` (locally in `.env`, or in Vercel → Project → Settings → Environment Variables).
-3. Push the schema and seed the demo tenant:
+## Testing
 
 ```bash
-npm run db:push
-npm run db:seed
+npm run typecheck     # strict TS
+npx vitest run        # unit: industry catalog, AI engine, lints
+npx playwright test   # e2e: 7 industry scenarios, mobile + desktop
 ```
 
-Data now persists across reloads and instances.
-
-### Enable live AI
-
-Set `ANTHROPIC_API_KEY` in your environment (locally or on Vercel). No code change needed — the AI routes detect the key and switch from templates to live generation automatically.
-
-## Deploy to Vercel
-
-Framework preset **Next.js**, default build (`next build`). No env vars are required for a working deploy. Add `DATABASE_URL` and `ANTHROPIC_API_KEY` later to unlock persistence and live AI.
-
-## What's real vs simulated
-
-**Real & working:** every screen and UI flow, the full review loop, AI generation (keyed) + templates, compliance enforcement (non-gated public review link on 1–3★, dual consent, no business-name edits, honesty microcopy), Drizzle/Postgres persistence + seed, CSV export, mobile-first responsive design.
-
-**Simulated behind clean interfaces (swap for real integrations in Phase 1.5+):** Google OAuth / GBP / Places API, Stripe billing, Twilio/Resend real sends, live SERP rank data, live AEO probing, A2P registration. These render realistic seeded data and mock success paths.
-
-## Scripts
-
-| Script | Purpose |
-|---|---|
-| `npm run dev` | Start the dev server |
-| `npm run build` | Production build |
-| `npm run typecheck` | `tsc --noEmit` |
-| `npm run db:push` | Push Drizzle schema to `DATABASE_URL` |
-| `npm run db:seed` | Seed the Harbourview demo tenant into Postgres |
+See `TESTING.md` for the scenario matrix and latest results.
 
 ## Architecture
 
-- **`lib/data`** — domain types, the `DataProvider` interface, the in-memory + Drizzle providers, the seed, and derived-metric selectors. `getDataProvider()` picks Postgres when `DATABASE_URL` is set, otherwise the seeded memory provider.
-- **`lib/ai`** — the AI service (Anthropic when keyed, deterministic templates otherwise) behind `/api/ai/*` routes; every output passes the compliance lints.
-- **`lib/compliance`** — the structural backstop: lints (no name-stuffing / no incentives / attribution honesty / no fabricated specifics), dual-consent guards, and frozen honesty microcopy.
-- **`components`** — the Foundly design system: `ds` primitives, hand-rolled SVG `charts`, `app` shell + widgets, `review` surfaces (including the compliance-critical `PublicGoogleReviewLink`), and a ~30-icon stroked set.
-- **`app`** — route groups for marketing, auth, onboarding, the owner app, the staff PWA, the customer review page, the agency portal, and the internal admin console.
+- **`lib/data`** — domain types, the multi-tenant `DataProvider` contract, in-memory + Drizzle/Postgres providers, the demo seed, the empty-workspace factory, derived-metric selectors.
+- **`lib/auth`** — bcrypt password auth, JWT sessions (jose), role model.
+- **`lib/industries`** — the 36-industry catalog (services, attributes, terminology, AI phrase banks, Google category mapping, custom industries).
+- **`lib/ai`** — generation engine: Anthropic when keyed, deterministic industry/rating-aware templates otherwise; every output passes `lib/compliance` lints (no name-stuffing, no incentives, attribution honesty, no fabricated specifics, sentiment-rating consistency).
+- **`lib/google`** — OAuth flows, Places client, approval-aware GBP clients, AES-GCM token encryption.
+- **`app`** — route groups: marketing, auth, onboarding, owner app, staff PWA, customer review flow (`/r/[token]`), QR scan endpoint (`/q/[slug]`), agency portal, internal admin.
 
-_Not legal advice. Compliance controls are engineering requirements; consult qualified counsel per jurisdiction before launch._
+_Not legal advice: compliance controls are engineering safeguards; consult qualified counsel per jurisdiction before launch._
