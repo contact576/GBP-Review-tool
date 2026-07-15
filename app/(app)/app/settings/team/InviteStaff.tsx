@@ -95,7 +95,7 @@ export function InviteStaff() {
 
       {/* Add directly */}
       <div className="border-t border-hairline pt-4">
-        <div className="mb-1.5 text-[13px] font-semibold text-ink">Add a staff member directly</div>
+        <div className="mb-1.5 text-[14px] font-semibold text-ink">Add a staff member directly</div>
         <div className="flex flex-col gap-2 sm:flex-row">
           <div className="flex-1">
             <Input

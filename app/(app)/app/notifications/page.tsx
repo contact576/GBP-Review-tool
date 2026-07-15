@@ -25,8 +25,8 @@ export default async function NotificationsPage() {
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-[22px] font-extrabold text-ink">Notifications</h1>
-          <p className="text-[14px] text-sub">
+          <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Notifications</h1>
+          <p className="text-[15px] text-sub">
             Reviews, feedback, deliveries and milestones — everything worth knowing about.
           </p>
         </div>
@@ -56,12 +56,12 @@ export default async function NotificationsPage() {
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className={`text-[14px] ${n.read ? "font-semibold text-sub" : "font-bold text-ink"}`}>
+                  <span className={`text-[15px] ${n.read ? "font-semibold text-sub" : "font-bold text-ink"}`}>
                     {n.title}
                   </span>
-                  <span className="shrink-0 text-[11px] text-faint">{formatRelative(n.createdAt)}</span>
+                  <span className="shrink-0 text-[12px] text-faint">{formatRelative(n.createdAt)}</span>
                 </div>
-                <p className="mt-0.5 text-[13px] text-sub">{n.body}</p>
+                <p className="mt-0.5 text-[14px] text-sub">{n.body}</p>
               </div>
             </div>
           ))}

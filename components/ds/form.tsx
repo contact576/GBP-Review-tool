@@ -14,7 +14,7 @@ export function Field({
   return (
     <label className={cn("block", className)}>
       {label ? (
-        <span className="block text-[13px] font-semibold text-ink mb-1.5">
+        <span className="block text-[14px] font-semibold text-ink mb-1.5">
           {label}
           {required ? <span className="text-danger"> *</span> : null}
         </span>
@@ -30,7 +30,7 @@ export function Field({
 }
 
 const inputBase =
-  "w-full rounded-input border bg-card px-3.5 text-[14px] text-ink placeholder:text-faint transition-colors focus-visible:outline-none focus-visible:border-primary min-h-[44px] h-11";
+  "w-full rounded-input border bg-card px-3.5 text-[15px] text-ink placeholder:text-faint transition-colors focus-visible:outline-none focus-visible:border-primary min-h-[44px] h-11";
 
 export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean; iconLeft?: IconName }>(
   function Input({ className, invalid, iconLeft, ...props }, ref) {
@@ -52,7 +52,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttrib
       <textarea
         ref={ref}
         className={cn(
-          "w-full rounded-input border bg-card px-3.5 py-3 text-[14px] text-ink placeholder:text-faint transition-colors focus-visible:outline-none focus-visible:border-primary min-h-[96px] resize-y",
+          "w-full rounded-input border bg-card px-3.5 py-3 text-[15px] text-ink placeholder:text-faint transition-colors focus-visible:outline-none focus-visible:border-primary min-h-[96px] resize-y",
           invalid ? "border-danger" : "border-hairline",
           className,
         )}
@@ -126,7 +126,7 @@ export function Checkbox({
       >
         {checked ? <Icon name="check" size={14} /> : null}
       </button>
-      <label htmlFor={inputId} className="text-[13px] text-ink leading-snug cursor-pointer">
+      <label htmlFor={inputId} className="text-[14px] text-ink leading-snug cursor-pointer">
         {label}
         {hint ? <span className="block text-[12px] text-faint mt-0.5">{hint}</span> : null}
       </label>

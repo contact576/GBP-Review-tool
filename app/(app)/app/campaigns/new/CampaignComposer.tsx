@@ -94,7 +94,7 @@ export function CampaignComposer({
     <div className="space-y-5">
       {/* Type */}
       <Card>
-        <div className="kicker mb-2">Campaign type</div>
+        <div className="mb-2 text-[13px] font-bold text-sub">Campaign type</div>
         <div className="flex flex-wrap gap-2">
           {TYPES.map((t) => (
             <Chip key={t.key} selected={type === t.key} onClick={() => pickType(t.key)} icon={t.icon}>
@@ -111,17 +111,17 @@ export function CampaignComposer({
             <Icon name="users" size={20} />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[15px] font-bold text-ink">
+            <div className="text-[16px] font-bold text-ink">
               Sending to {formatNumber(consented)} of {formatNumber(total)} who opted in to marketing
             </div>
-            <p className="text-[13px] text-sub">
+            <p className="text-[14px] text-sub">
               We only include customers with explicit marketing consent. This count updates before every send.
             </p>
             {audience.excluded.length ? (
               <button
                 type="button"
                 onClick={() => setShowExcluded((v) => !v)}
-                className="mt-2 inline-flex items-center gap-1 text-[13px] font-semibold text-primary hover:text-primary-dark"
+                className="mt-2 inline-flex items-center gap-1 text-[14px] font-semibold text-primary hover:text-primary-dark"
               >
                 {showExcluded ? "Hide" : "Show"} who&apos;s excluded
                 <Icon name={showExcluded ? "chevron-down" : "chevron-right"} size={14} />
@@ -152,7 +152,7 @@ export function CampaignComposer({
         </Field>
 
         <div>
-          <span className="mb-1.5 block text-[13px] font-semibold text-ink">Channel</span>
+          <span className="mb-1.5 block text-[14px] font-semibold text-ink">Channel</span>
           <div className="flex flex-wrap gap-2">
             <Chip selected={channel === "email"} onClick={() => setChannel("email")} icon="mail">
               Email
@@ -167,7 +167,7 @@ export function CampaignComposer({
       {/* Composer */}
       <Card className="space-y-3">
         <div className="flex items-center justify-between">
-          <div className="kicker">Message</div>
+          <div className="text-[13px] font-bold text-sub">Message</div>
           <Button variant="secondary" size="sm" icon="sparkles" onClick={aiDraft} loading={drafting}>
             AI draft
           </Button>
@@ -189,7 +189,7 @@ export function CampaignComposer({
 
       {/* Device preview */}
       <div>
-        <div className="kicker mb-2">Preview</div>
+        <div className="mb-2 text-[13px] font-bold text-sub">Preview</div>
         <div className="mx-auto max-w-sm overflow-hidden rounded-card border border-hairline bg-card shadow-lg">
           <div className="flex items-center gap-2 border-b border-hairline bg-paper px-4 py-2.5">
             <div className="grid size-7 place-items-center rounded-chip bg-primary text-[11px] font-bold text-white">
@@ -217,7 +217,7 @@ export function CampaignComposer({
       {/* Compliance guard */}
       <div className="flex items-start gap-2 rounded-btn border border-hairline bg-paper px-3 py-2.5">
         <Icon name="shield" size={16} className="mt-0.5 shrink-0 text-primary" />
-        <p className="text-[12px] text-sub">
+        <p className="text-[13px] text-sub">
           {MICROCOPY.noIncentive} Campaigns can&apos;t offer rewards in exchange for a review — every send includes a working unsubscribe.
         </p>
       </div>
@@ -228,11 +228,11 @@ export function CampaignComposer({
           Review &amp; send to {formatNumber(consented)} customers
         </Button>
         {consented === 0 ? (
-          <p className="text-center text-[12px] text-danger">
+          <p className="text-center text-[13px] text-danger">
             No customers have opted in to marketing — nothing can be sent.
           </p>
         ) : body.trim().length === 0 ? (
-          <p className="text-center text-[12px] text-faint">Add a message to enable sending.</p>
+          <p className="text-center text-[13px] text-faint">Add a message to enable sending.</p>
         ) : null}
       </div>
     </div>

@@ -128,8 +128,7 @@ export function RequestsView({
       <Card>
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <div className="kicker mb-1">Funnel</div>
-            <h2 className="text-[17px] font-bold text-ink">Ask → posted</h2>
+            <h2 className="text-[18px] font-bold text-ink">Ask → posted</h2>
           </div>
           <Button icon="send" onClick={() => setDrawerOpen(true)}>Send request</Button>
         </div>
@@ -153,8 +152,8 @@ export function RequestsView({
                       <Icon name={CHANNEL_ICON[r.channel]} size={16} />
                     </div>
                     <div className="min-w-0">
-                      <div className="truncate text-[14px] font-semibold text-ink">{r.customerName}</div>
-                      <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-faint">
+                      <div className="truncate text-[15px] font-semibold text-ink">{r.customerName}</div>
+                      <div className="flex flex-wrap items-center gap-1.5 text-[13px] text-faint">
                         <span className="capitalize">{r.channel}</span>
                         {r.sentAt ? <span>· sent {formatRelative(r.sentAt)}</span> : <span>· not sent yet</span>}
                       </div>
@@ -175,7 +174,7 @@ export function RequestsView({
                 {r.status === "suppressed" && r.suppressedReason ? (
                   <div className="mt-2 flex items-start gap-2 rounded-btn border border-hairline bg-paper px-3 py-2">
                     <Icon name="shield" size={14} className="mt-0.5 shrink-0 text-faint" />
-                    <p className="text-[12px] text-sub">
+                    <p className="text-[13px] text-sub">
                       Suppressed — <span className="font-medium text-ink">{r.suppressedReason}</span>. We don&apos;t re-ask when it isn&apos;t appropriate.
                     </p>
                   </div>
@@ -186,7 +185,7 @@ export function RequestsView({
         </div>
       ) : (
         <Card>
-          <p className="py-8 text-center text-[13px] text-faint">No requests in this view.</p>
+          <p className="py-8 text-center text-[14px] text-faint">No requests in this view.</p>
         </Card>
       )}
 
@@ -215,7 +214,7 @@ export function RequestsView({
           </Field>
 
           <div>
-            <span className="mb-1.5 block text-[13px] font-semibold text-ink">Channel</span>
+            <span className="mb-1.5 block text-[14px] font-semibold text-ink">Channel</span>
             <div className="flex flex-wrap gap-2">
               <Chip selected={channel === "email"} onClick={() => setChannel("email")} icon="mail">
                 Email
@@ -229,14 +228,14 @@ export function RequestsView({
           {pickedCustomer && !canSendService(customerById.get(pickedCustomer)!) ? (
             <div className="flex items-start gap-2 rounded-btn border border-gold/40 bg-gold-tint/50 px-3 py-2">
               <Icon name="alert" size={16} className="mt-0.5 shrink-0 text-gold-deep" />
-              <p className="text-[12px] text-sub">
+              <p className="text-[13px] text-sub">
                 This customer hasn&apos;t given service-message consent. Confirm consent before sending.
               </p>
             </div>
           ) : null}
 
           {requestable.length === 0 ? (
-            <p className="text-[13px] text-faint">Everyone eligible has already been asked. Nice work.</p>
+            <p className="text-[14px] text-faint">Everyone eligible has already been asked. Nice work.</p>
           ) : null}
         </div>
       </Drawer>

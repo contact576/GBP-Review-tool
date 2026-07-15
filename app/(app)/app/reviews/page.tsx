@@ -13,8 +13,8 @@ export default async function ReviewsPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-[22px] font-extrabold text-ink">Reviews</h1>
-        <p className="text-[14px] text-sub">
+        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Reviews</h1>
+        <p className="text-[15px] text-sub">
           Every review in one place. Reply in your voice — we draft, you approve.
         </p>
       </div>
@@ -22,7 +22,6 @@ export default async function ReviewsPage() {
       {unresolvedFeedback.length > 0 ? (
         <Card className="border-gold/40">
           <CardHeader
-            kicker="Handle privately"
             title="Private feedback"
             action={<Badge tone="gold" icon="alert">{unresolvedFeedback.length} open</Badge>}
           />
@@ -34,13 +33,13 @@ export default async function ReviewsPage() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[14px] font-semibold text-ink">{f.customerName}</span>
+                    <span className="text-[15px] font-semibold text-ink">{f.customerName}</span>
                     <span className="inline-flex items-center gap-0.5 text-[12px] font-semibold text-gold-deep">
                       <Icon name="star-fill" size={12} /> {f.rating}
                     </span>
                     <span className="text-[11px] text-faint">{formatRelative(f.createdAt)}</span>
                   </div>
-                  <p className="mt-0.5 text-[13px] text-sub">{f.text}</p>
+                  <p className="mt-0.5 text-[14px] text-sub">{f.text}</p>
                 </div>
                 <ResolveFeedback id={f.id} />
               </div>

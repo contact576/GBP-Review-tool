@@ -23,8 +23,8 @@ export default async function BusinessSettingsPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-[22px] font-extrabold text-ink">Settings</h1>
-        <p className="text-[14px] text-sub">Your business profile and how Foundly connects to Google.</p>
+        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Settings</h1>
+        <p className="text-[15px] text-sub">Your business profile and how Foundly connects to Google.</p>
       </div>
 
       <SettingsNav />
@@ -38,14 +38,14 @@ export default async function BusinessSettingsPage() {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-[15px] font-bold text-ink">Google Business Profile</span>
+                <span className="text-[16px] font-bold text-ink">Google Business Profile</span>
                 {loc.gbpConnected ? (
                   <Badge tone="primary" icon="check-circle">Connected</Badge>
                 ) : (
                   <Badge tone="danger" icon="alert">Disconnected</Badge>
                 )}
               </div>
-              <p className="mt-0.5 text-[13px] text-sub">
+              <p className="mt-0.5 text-[14px] text-sub">
                 {loc.gbpConnected
                   ? `Reviews and performance syncing${googleInt?.lastSyncAt ? ` · last sync ${formatRelative(googleInt.lastSyncAt)}` : ""}.`
                   : "Reconnect to resume review sync and Co-Pilot tasks."}
@@ -68,7 +68,6 @@ export default async function BusinessSettingsPage() {
       {/* Profile details */}
       <Card>
         <CardHeader
-          kicker="Profile"
           title="Business details"
           action={<Badge tone="neutral">Synced from Google</Badge>}
         />
@@ -78,11 +77,11 @@ export default async function BusinessSettingsPage() {
               <dt className="w-40 shrink-0 text-[12px] font-semibold uppercase tracking-wide text-faint">
                 {row.label}
               </dt>
-              <dd className="text-[14px] text-ink">{row.value}</dd>
+              <dd className="text-[15px] text-ink">{row.value}</dd>
             </div>
           ))}
         </dl>
-        <p className="mt-3 flex items-center gap-1.5 text-[12px] text-faint">
+        <p className="mt-3 flex items-center gap-1.5 text-[13px] text-faint">
           <Icon name="lock" size={13} /> We never edit your business name — that would violate Google policy.
         </p>
       </Card>
@@ -94,7 +93,7 @@ export default async function BusinessSettingsPage() {
           <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-primary-wash">
             <div className="h-full rounded-full bg-primary" style={{ width: `${profile.completeness}%` }} />
           </div>
-          <span className="text-[15px] font-bold tabular-nums text-ink">{profile.completeness}%</span>
+          <span className="text-[16px] font-bold tabular-nums text-ink">{profile.completeness}%</span>
         </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Stat label="Photos" value={profile.photoCount} />
@@ -111,7 +110,7 @@ function Stat({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="rounded-card border border-hairline bg-card p-3 text-center">
       <div className="text-[20px] font-extrabold leading-none tabular-nums text-ink">{value}</div>
-      <div className="mt-1 text-[11px] text-faint">{label}</div>
+      <div className="mt-1 text-[12px] text-faint">{label}</div>
     </div>
   );
 }

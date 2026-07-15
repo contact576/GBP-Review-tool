@@ -7,8 +7,8 @@ export default async function CustomersPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-[22px] font-extrabold text-ink">Customers</h1>
-        <p className="text-[14px] text-sub">
+        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Customers</h1>
+        <p className="text-[15px] text-sub">
           Your people, their consent, and their history — always yours to export.
         </p>
       </div>

@@ -28,10 +28,10 @@ export function ReviewCard({
             {review.author.split(" ").map((w) => w[0]).join("").slice(0, 2)}
           </div>
           <div>
-            <div className="text-[14px] font-semibold text-ink">{review.author}</div>
+            <div className="text-[15px] font-semibold text-ink">{review.author}</div>
             <div className="flex items-center gap-2">
               <Stars rating={review.rating} />
-              <span className="text-[12px] text-faint">{formatRelative(review.publishedAt)}</span>
+              <span className="text-[13px] text-faint">{formatRelative(review.publishedAt)}</span>
             </div>
           </div>
         </div>
@@ -47,12 +47,12 @@ export function ReviewCard({
         </div>
       </div>
 
-      <p className="mt-3 text-[14px] leading-relaxed text-ink/90">{review.text}</p>
+      <p className="mt-3 text-[15px] leading-relaxed text-ink/90">{review.text}</p>
 
       {review.reply ? (
         <div className="mt-3 rounded-btn border-l-2 border-primary/40 bg-primary-wash/60 px-3 py-2">
           <div className="kicker mb-0.5">Your reply</div>
-          <p className="text-[13px] text-sub">{review.reply.text}</p>
+          <p className="text-[14px] text-sub">{review.reply.text}</p>
         </div>
       ) : review.needsReply ? (
         <div className="mt-3 flex items-center justify-between">
@@ -60,7 +60,7 @@ export function ReviewCard({
           {onReply ? (
             <button
               onClick={(e) => { e.stopPropagation(); onReply(); }}
-              className="inline-flex items-center gap-1 text-[13px] font-semibold text-primary hover:text-primary-dark"
+              className="inline-flex items-center gap-1 text-[14px] font-semibold text-primary hover:text-primary-dark"
             >
               Reply <Icon name="chevron-right" size={14} />
             </button>

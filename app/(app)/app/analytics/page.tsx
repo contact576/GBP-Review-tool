@@ -58,8 +58,8 @@ export default async function AnalyticsPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-[22px] font-extrabold text-ink">Analytics</h1>
-        <p className="text-[14px] text-sub">
+        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Analytics</h1>
+        <p className="text-[15px] text-sub">
           The three actions that matter — measured honestly, never inflated into &ldquo;customers.&rdquo;
         </p>
       </div>
@@ -72,11 +72,11 @@ export default async function AnalyticsPage() {
                 <div className="grid size-9 place-items-center rounded-btn bg-primary-wash text-primary">
                   <Icon name={s.icon} size={18} />
                 </div>
-                <span className="text-[14px] font-semibold text-ink">{s.label}</span>
+                <span className="text-[15px] font-semibold text-ink">{s.label}</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <Delta value={s.delta} />
-                <span className="text-[11px] text-faint">vs prev. 30 days</span>
+                <span className="text-[12px] text-faint">vs prev. 30 days</span>
               </div>
             </div>
 
@@ -85,13 +85,13 @@ export default async function AnalyticsPage() {
                 {formatNumber(s.value)}
               </span>
             </div>
-            <p className="mt-1.5 text-[13px] text-sub">{s.blurb}</p>
+            <p className="mt-1.5 text-[14px] text-sub">{s.blurb}</p>
 
             <div className="mt-3 overflow-x-auto">
               <Sparkline data={sparklinePoints(metrics, s.key)} width={560} height={72} />
             </div>
 
-            <p className="mt-2 flex items-center gap-1.5 text-[12px] text-faint">
+            <p className="mt-2 flex items-center gap-1.5 text-[13px] text-faint">
               <Icon name="clock" size={13} />
               {MICROCOPY.sinceJoined} — you joined {joined}
             </p>
@@ -101,9 +101,9 @@ export default async function AnalyticsPage() {
 
       {/* Sources */}
       <Card>
-        <CardHeader kicker="Where this comes from" title="Sources" />
+        <CardHeader title="Sources" />
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[440px] text-left text-[13px]">
+          <table className="w-full min-w-[440px] text-left text-[14px]">
             <thead>
               <tr className="border-b border-hairline text-faint">
                 <th className="py-2 pr-4 font-medium">Metric</th>
@@ -126,7 +126,7 @@ export default async function AnalyticsPage() {
 
       <div className="flex items-start gap-2 rounded-card border border-hairline bg-primary-wash/40 p-3">
         <Icon name="shield" size={16} className="mt-0.5 shrink-0 text-primary" />
-        <p className="text-[12px] text-sub">{MICROCOPY.actionsNotCustomers}</p>
+        <p className="text-[13px] text-sub">{MICROCOPY.actionsNotCustomers}</p>
       </div>
 
       <div className="px-1">

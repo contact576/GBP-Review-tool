@@ -18,10 +18,10 @@ export default async function VisibilityPage() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="mb-1 flex items-center gap-2">
-            <h1 className="text-[22px] font-extrabold text-ink">AI Visibility</h1>
+            <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">AI Visibility</h1>
             <Badge tone="gold" icon="sparkles">Pro</Badge>
           </div>
-          <p className="text-[14px] text-sub">
+          <p className="text-[15px] text-sub">
             Whether AI assistants name your clinic when people ask — answer-engine optimization (AEO).
           </p>
         </div>
@@ -35,7 +35,7 @@ export default async function VisibilityPage() {
             <div className="text-[20px] font-extrabold text-ink">
               Named in {named} of {total} questions
             </div>
-            <p className="mt-1 text-[13px] text-sub">
+            <p className="mt-1 text-[14px] text-sub">
               You appear in AI answers for {total > 0 ? Math.round((named / total) * 100) : 0}% of the
               buying questions we tested nearby.
             </p>
@@ -107,7 +107,7 @@ export default async function VisibilityPage() {
 
       {/* Factor panel */}
       <Card>
-        <CardHeader kicker="Why" title="What drives whether you're named" />
+        <CardHeader title="What drives whether you're named" />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <FactorRow good title="Strong, recent reviews" detail="4.7★ with fresh reviews makes you a safe recommendation." />
           <FactorRow good title="Clear service descriptions" detail="Direct billing and dry needling are well described — you win those." />

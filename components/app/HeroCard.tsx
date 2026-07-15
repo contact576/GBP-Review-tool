@@ -19,7 +19,7 @@ export function HeroCard({
           <SubDial value={profileScore} label="Profile" onHero />
         </div>
       </div>
-      <p className="mt-4 text-center text-[13px] text-white/70 sm:text-left">
+      <p className="mt-4 text-center text-[14px] text-white/70 sm:text-left">
         {business} · You&apos;re trending up. Keep the loop spinning with this week&apos;s three tasks.
       </p>
     </div>

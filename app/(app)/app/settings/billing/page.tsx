@@ -59,8 +59,8 @@ export default async function BillingSettingsPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-[22px] font-extrabold text-ink">Billing</h1>
-        <p className="text-[14px] text-sub">Your plan, usage, and invoices — with an honest way out.</p>
+        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Billing</h1>
+        <p className="text-[15px] text-sub">Your plan, usage, and invoices — with an honest way out.</p>
       </div>
 
       <SettingsNav />
@@ -77,15 +77,24 @@ export default async function BillingSettingsPage() {
                 <Badge tone="primary" icon="check-circle">Active</Badge>
               )}
             </div>
-            <p className="text-[13px] text-sub">
+            <p className="text-[14px] text-sub">
               {sub.status === "trialing"
-                ? `${trialLeft} day${trialLeft === 1 ? "" : "s"} left. You keep a free plan after — no card charged automatically.`
+                ? `${trialLeft} day${trialLeft === 1 ? "" : "s"} left on your trial.`
                 : "Billed monthly. Cancel or downgrade anytime."}
             </p>
+            {sub.status === "trialing" ? (
+              <details className="mt-1.5">
+                <summary className="cursor-pointer text-[13px] font-semibold text-primary">How the trial works</summary>
+                <p className="mt-1 max-w-[65ch] text-[13px] text-sub">
+                  When the trial ends you keep a free plan automatically — your card is never charged unless
+                  you choose a paid plan. Your QR codes and review link keep working on Free.
+                </p>
+              </details>
+            ) : null}
           </div>
           <div className="text-right">
             <div className="text-[24px] font-extrabold tabular-nums text-ink">{formatMoney(99, currency)}</div>
-            <div className="text-[12px] text-faint">per month</div>
+            <div className="text-[13px] text-faint">per month</div>
           </div>
         </div>
       </Card>
@@ -102,7 +111,7 @@ export default async function BillingSettingsPage() {
 
       {/* Plan matrix */}
       <div>
-        <div className="mb-3 text-[15px] font-bold text-ink">Change plan</div>
+        <div className="mb-3 text-[16px] font-bold text-ink">Change plan</div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           {tiers.map((t) => (
             <PricingTierCard key={t.name} tier={t} currencySymbol={symbol} />
@@ -112,10 +121,10 @@ export default async function BillingSettingsPage() {
 
       {/* Invoices */}
       <Card>
-        <CardHeader kicker="History" title="Invoices" />
+        <CardHeader title="Invoices" />
         {invoices.length ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[420px] text-left text-[13px]">
+            <table className="w-full min-w-[420px] text-left text-[14px]">
               <thead>
                 <tr className="border-b border-hairline text-faint">
                   <th className="py-2 pr-4 font-medium">Period</th>
@@ -141,15 +150,15 @@ export default async function BillingSettingsPage() {
             </table>
           </div>
         ) : (
-          <p className="py-4 text-center text-[13px] text-faint">No invoices yet.</p>
+          <p className="py-4 text-center text-[14px] text-faint">No invoices yet.</p>
         )}
       </Card>
 
       {/* Data portability + demo control */}
       <Card>
-        <CardHeader kicker="Your data" title="Export & controls" />
+        <CardHeader title="Export & controls" />
         <BillingActions customers={data.customers ?? []} />
-        <p className="mt-3 text-[12px] text-faint">
+        <p className="mt-3 text-[13px] text-faint">
           Your customer graph is always yours — export the full CSV anytime, no lock-in.
         </p>
       </Card>
@@ -162,11 +171,9 @@ export default async function BillingSettingsPage() {
               <Icon name="shield" size={20} />
             </div>
             <div>
-              <div className="text-[15px] font-bold text-ink">Need to step back?</div>
-              <p className="mt-0.5 text-[13px] text-sub">
-                Cancelling routes you to pause or downgrade to Free — never a locked door. Your printed QR
-                codes keep redirecting to your Google review link for 90 days, so nothing you handed out breaks.
-              </p>
+              <div className="text-[16px] font-bold text-ink">Need to step back?</div>
+              <p className="mt-0.5 text-[14px] text-sub">Cancelling routes you to pause or Free — never a locked door.</p>
+              <p className="text-[14px] text-sub">Printed QR codes keep redirecting to Google for 90 days.</p>
             </div>
           </div>
           <div className="shrink-0">
@@ -193,7 +200,7 @@ function Meter({
 }) {
   return (
     <div>
-      <div className="mb-1.5 flex items-center justify-between text-[13px]">
+      <div className="mb-1.5 flex items-center justify-between text-[14px]">
         <span className="font-semibold text-ink">{label}</span>
         <span className="tabular-nums text-sub">
           {unlimited ? `${used} used · Unlimited` : `${used} / ${total}`}

@@ -46,8 +46,8 @@ export default async function ReportPage() {
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-[22px] font-extrabold text-ink">Growth Report</h1>
-          <p className="text-[14px] text-sub">
+          <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Growth Report</h1>
+          <p className="text-[15px] text-sub">
             {report ? report.period : "Last 30 days"} · generated {report ? formatDate(report.generatedAt) : formatDate(new Date().toISOString())}
           </p>
         </div>
@@ -55,7 +55,7 @@ export default async function ReportPage() {
 
       {/* Headline */}
       <Card raised as="section">
-        <div className="kicker mb-1">Headline</div>
+        <div className="mb-1 text-[13px] font-bold text-sub">Headline</div>
         <h2 className="text-[24px] font-extrabold leading-tight text-ink">
           {report?.headline ?? "Your month at a glance"}
         </h2>
@@ -73,30 +73,30 @@ export default async function ReportPage() {
 
       {/* Action stats */}
       <section>
-        <div className="mb-2 text-[15px] font-bold text-ink">The three numbers that matter</div>
+        <div className="mb-2 text-[16px] font-bold text-ink">The three numbers that matter</div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {stats.map((s) => (
             <div key={s.label} className="rounded-card border border-hairline bg-card p-4 shadow-sm">
               <div className="flex items-center gap-2 text-sub">
                 <Icon name={s.icon} size={16} />
-                <span className="text-[12px] font-medium">{s.label}</span>
+                <span className="text-[13px] font-medium">{s.label}</span>
               </div>
-              <div className="mt-2 text-[26px] font-extrabold leading-none tabular-nums text-ink">
+              <div className="mt-2 text-[30px] font-extrabold leading-none tabular-nums text-ink">
                 {formatNumber(s.value)}
               </div>
               <div className="mt-1.5 flex items-center gap-1.5">
                 <Delta value={s.delta} />
-                <span className="text-[11px] text-faint">vs prev. 30 days</span>
+                <span className="text-[12px] text-faint">vs prev. 30 days</span>
               </div>
             </div>
           ))}
         </div>
-        <p className="mt-2 text-[11px] text-faint">{MICROCOPY.actionsNotCustomers}</p>
+        <p className="mt-2 text-[12px] text-faint">{MICROCOPY.actionsNotCustomers}</p>
       </section>
 
       {/* Score movement */}
       <Card>
-        <CardHeader kicker="Local Growth Score" title="Where your score moved" />
+        <CardHeader title="Where your score moved" />
         <div className="flex items-center justify-center gap-6 sm:gap-10">
           <SubDial value={scoreStart} label="30 days ago" />
           <Icon name="arrow-right" size={24} className="text-faint" />
@@ -112,7 +112,7 @@ export default async function ReportPage() {
 
       {/* Review highlights */}
       <Card>
-        <CardHeader kicker="Reputation" title="Review highlights" />
+        <CardHeader title="Review highlights" />
         <div className="grid grid-cols-3 gap-3">
           <Highlight value={since.newReviews.now} label="new reviews" icon="star" />
           <Highlight value={repliesPosted} label="replies posted" icon="chat" />
@@ -125,7 +125,7 @@ export default async function ReportPage() {
                 <Icon key={i} name="star-fill" size={14} className="text-star" />
               ))}
             </div>
-            <blockquote className="text-[14px] italic text-ink/90">&ldquo;{bestNew.text}&rdquo;</blockquote>
+            <blockquote className="text-[15px] italic text-ink/90">&ldquo;{bestNew.text}&rdquo;</blockquote>
             <figcaption className="mt-2 text-[12px] font-semibold text-sub">— {bestNew.author}</figcaption>
           </figure>
         ) : null}
@@ -134,10 +134,10 @@ export default async function ReportPage() {
       {/* What Foundly did / next tasks */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Card>
-          <CardHeader kicker="Behind the scenes" title="What Foundly did" />
+          <CardHeader title="What Foundly did" />
           <ul className="space-y-2.5">
             {foundleyDid.map((item) => (
-              <li key={item} className="flex items-start gap-2 text-[13px] text-ink/90">
+              <li key={item} className="flex items-start gap-2 text-[14px] text-ink/90">
                 <Icon name="check" size={16} className="mt-0.5 shrink-0 text-primary" />
                 {item}
               </li>
@@ -146,7 +146,7 @@ export default async function ReportPage() {
         </Card>
 
         <Card>
-          <CardHeader kicker="Next month" title="Your 3 tasks" />
+          <CardHeader title="Your 3 tasks" />
           {nextTasks.length ? (
             <ol className="space-y-2.5">
               {nextTasks.map((t, i) => (
@@ -155,14 +155,14 @@ export default async function ReportPage() {
                     {i + 1}
                   </span>
                   <div>
-                    <div className="text-[13px] font-semibold text-ink">{t.title}</div>
-                    <p className="text-[12px] text-sub">{t.rationale}</p>
+                    <div className="text-[14px] font-semibold text-ink">{t.title}</div>
+                    <p className="text-[13px] text-sub">{t.rationale}</p>
                   </div>
                 </li>
               ))}
             </ol>
           ) : (
-            <p className="py-4 text-center text-[13px] text-faint">No tasks queued — you&apos;re all caught up.</p>
+            <p className="py-4 text-center text-[14px] text-faint">No tasks queued — you&apos;re all caught up.</p>
           )}
         </Card>
       </div>
@@ -179,7 +179,7 @@ function Highlight({ value, label, icon }: { value: number; label: string; icon:
     <div className="rounded-card border border-hairline bg-card p-3 text-center">
       <Icon name={icon} size={16} className="mx-auto text-primary" />
       <div className="mt-1 text-[22px] font-extrabold leading-none tabular-nums text-ink">{formatNumber(value)}</div>
-      <div className="mt-0.5 text-[11px] text-faint">{label}</div>
+      <div className="mt-0.5 text-[12px] text-faint">{label}</div>
     </div>
   );
 }

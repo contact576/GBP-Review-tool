@@ -16,22 +16,22 @@ export default async function TeamSettingsPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-[22px] font-extrabold text-ink">Team</h1>
-        <p className="text-[14px] text-sub">Your capture crew — who&apos;s asking and who&apos;s on a streak.</p>
+        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Team</h1>
+        <p className="text-[15px] text-sub">Your capture crew — who&apos;s asking and who&apos;s on a streak.</p>
       </div>
 
       <SettingsNav />
 
       {/* Invite */}
       <Card>
-        <CardHeader kicker="Grow the crew" title="Invite staff" />
+        <CardHeader title="Invite staff" />
         <InviteStaff />
       </Card>
 
       {/* Pending invites */}
       {pendingInvites.length ? (
         <Card>
-          <CardHeader kicker="Waiting on" title="Pending invites" />
+          <CardHeader title="Pending invites" />
           <div className="divide-y divide-hairline">
             {pendingInvites.map((inv) => (
               <div key={inv.id} className="flex items-center gap-3 py-3">
@@ -39,8 +39,8 @@ export default async function TeamSettingsPage() {
                   <Icon name="mail" size={15} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[14px] font-semibold text-ink">{inv.email}</div>
-                  <div className="text-[12px] capitalize text-faint">
+                  <div className="truncate text-[15px] font-semibold text-ink">{inv.email}</div>
+                  <div className="text-[13px] capitalize text-faint">
                     {inv.role} · invited {formatRelative(inv.createdAt)}
                   </div>
                 </div>
@@ -53,14 +53,14 @@ export default async function TeamSettingsPage() {
 
       {/* Roster */}
       <Card>
-        <CardHeader kicker="Roster" title="Staff members" />
+        <CardHeader title="Staff members" />
         {staff.length === 0 ? (
-          <p className="py-4 text-center text-[13px] text-faint">
+          <p className="py-4 text-center text-[14px] text-faint">
             No team members yet — invite a teammate or add one directly above.
           </p>
         ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-left text-[13px]">
+          <table className="w-full min-w-[560px] text-left text-[14px]">
             <thead>
               <tr className="border-b border-hairline text-faint">
                 <th className="py-2 pr-4 font-medium">Name</th>
@@ -122,7 +122,7 @@ export default async function TeamSettingsPage() {
             ))}
           </div>
         ) : (
-          <p className="py-4 text-center text-[13px] text-faint">No staff yet — invite your first teammate above.</p>
+          <p className="py-4 text-center text-[14px] text-faint">No staff yet — invite your first teammate above.</p>
         )}
       </Card>
     </div>

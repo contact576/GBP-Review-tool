@@ -216,14 +216,14 @@ export function CustomersView({
 
       {filtered.length === 0 ? (
         <Card>
-          <p className="py-8 text-center text-[13px] text-faint">No customers match this view.</p>
+          <p className="py-8 text-center text-[14px] text-faint">No customers match this view.</p>
         </Card>
       ) : (
         <>
           {/* Desktop table */}
           <Card padded={false} className="hidden overflow-hidden lg:block">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-[13px]">
+              <table className="w-full text-left text-[14px]">
                 <thead className="border-b border-hairline bg-paper/60">
                   <tr className="text-faint">
                     <th className="px-4 py-3 font-semibold">Customer</th>
@@ -283,8 +283,8 @@ export function CustomersView({
                       {initials(c.name)}
                     </div>
                     <div className="min-w-0">
-                      <div className="truncate text-[14px] font-semibold text-ink">{c.name}</div>
-                      <div className="text-[12px] text-faint">
+                      <div className="truncate text-[15px] font-semibold text-ink">{c.name}</div>
+                      <div className="text-[13px] text-faint">
                         {c.email ? maskEmail(c.email) : c.phone ? maskPhone(c.phone) : "No contact"}
                       </div>
                     </div>
@@ -355,7 +355,7 @@ export function CustomersView({
           </Field>
 
           <div className="space-y-3 rounded-card border border-hairline bg-card p-3">
-            <div className="kicker">Consent</div>
+            <div className="text-[13px] font-bold text-sub">Consent</div>
             <Checkbox
               checked={addService}
               onChange={setAddService}
@@ -368,14 +368,14 @@ export function CustomersView({
               label={labels.marketing}
               hint={labels.casl}
             />
-            <p className="text-[12px] text-faint">
+            <p className="text-[13px] text-faint">
               Check only what the customer actually agreed to — consent is recorded with today&apos;s
               date.
             </p>
           </div>
 
           {addError ? (
-            <p className="flex items-center gap-1.5 text-[12px] text-danger" role="alert">
+            <p className="flex items-center gap-1.5 text-[13px] text-danger" role="alert">
               <Icon name="alert" size={13} className="shrink-0" /> {addError}
             </p>
           ) : null}
@@ -415,8 +415,8 @@ export function CustomersView({
                 {initials(openCustomer.name)}
               </div>
               <div className="min-w-0">
-                <div className="text-[16px] font-bold text-ink">{openCustomer.name}</div>
-                <div className="flex flex-wrap items-center gap-2 text-[12px] text-sub">
+                <div className="text-[17px] font-bold text-ink">{openCustomer.name}</div>
+                <div className="flex flex-wrap items-center gap-2 text-[13px] text-sub">
                   {openCustomer.email ? <span>{maskEmail(openCustomer.email)}</span> : null}
                   {openCustomer.phone ? <span>{maskPhone(openCustomer.phone)}</span> : null}
                   <Badge tone={LIFECYCLE[openCustomer.lifecycleStage].tone}>
@@ -429,7 +429,7 @@ export function CustomersView({
             {openCustomer.suppressedReason ? (
               <div className="flex items-start gap-2 rounded-btn border border-danger/30 bg-danger-tint/50 px-3 py-2">
                 <Icon name="shield" size={16} className="mt-0.5 shrink-0 text-danger" />
-                <p className="text-[12px] text-sub">
+                <p className="text-[13px] text-sub">
                   Suppressed — <span className="font-medium text-ink">{openCustomer.suppressedReason}</span>
                 </p>
               </div>
@@ -437,7 +437,7 @@ export function CustomersView({
 
             {/* Consent panel */}
             <div>
-              <div className="kicker mb-2">Consent</div>
+              <div className="mb-2 text-[13px] font-bold text-sub">Consent</div>
               <div className="space-y-2.5">
                 <ConsentRow
                   title="Service messages"
@@ -455,12 +455,12 @@ export function CustomersView({
                   casl={openCustomer.consent.caslCaptured ? labels.casl : undefined}
                 />
               </div>
-              <p className="mt-2 text-[12px] text-faint">{openCustomer.consent.consentSourceText}</p>
+              <p className="mt-2 text-[13px] text-faint">{openCustomer.consent.consentSourceText}</p>
             </div>
 
             {/* Timeline */}
             <div>
-              <div className="kicker mb-2">History</div>
+              <div className="mb-2 text-[13px] font-bold text-sub">History</div>
               <ol className="space-y-3">
                 <TimelineItem
                   icon="plus"
@@ -491,7 +491,7 @@ export function CustomersView({
             {!canSendService(openCustomer) ? (
               <div className="flex items-start gap-2 rounded-btn border border-gold/40 bg-gold-tint/50 px-3 py-2">
                 <Icon name="lock" size={16} className="mt-0.5 shrink-0 text-gold-deep" />
-                <p className="text-[12px] text-sub">
+                <p className="text-[13px] text-sub">
                   Sending is locked — this customer hasn&apos;t consented to service messages.
                 </p>
               </div>
@@ -536,13 +536,13 @@ function ConsentRow({
   return (
     <div className="rounded-card border border-hairline bg-card p-3">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[14px] font-semibold text-ink">{title}</span>
+        <span className="text-[15px] font-semibold text-ink">{title}</span>
         <Badge tone={given ? "primary" : "sub"} icon={given ? "check-circle" : "x"}>
           {given ? "Given" : "Not given"}
         </Badge>
       </div>
-      <p className="mt-1 text-[12px] text-sub">{source}</p>
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-faint">
+      <p className="mt-1 text-[13px] text-sub">{source}</p>
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12px] text-faint">
         <span className="capitalize">Captured {channel.replace("_", " ")}</span>
         {at ? <span>· {formatDate(at)}</span> : null}
         {casl ? <Badge tone="neutral" icon="shield">CASL</Badge> : null}
@@ -569,8 +569,8 @@ function TimelineItem({
         <Icon name={icon} size={15} />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-semibold text-ink">{label}</div>
-        {detail ? <div className="text-[12px] capitalize text-sub">{detail}</div> : null}
+        <div className="text-[14px] font-semibold text-ink">{label}</div>
+        {detail ? <div className="text-[13px] capitalize text-sub">{detail}</div> : null}
         <div className="text-[11px] text-faint">{formatRelative(at)}</div>
       </div>
     </li>

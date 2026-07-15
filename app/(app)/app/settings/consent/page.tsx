@@ -21,8 +21,8 @@ export default async function ConsentSettingsPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-[22px] font-extrabold text-ink">Consent</h1>
-        <p className="text-[14px] text-sub">
+        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Consent</h1>
+        <p className="text-[15px] text-sub">
           Two separate permissions — service and marketing — captured honestly, never bundled.
         </p>
       </div>
@@ -31,7 +31,7 @@ export default async function ConsentSettingsPage() {
 
       {/* Configuration */}
       <Card>
-        <CardHeader kicker="Configuration" title="Consent rules" />
+        <CardHeader title="Consent rules" />
         <ConsentConfig settings={settings} isCanada={isCanada} />
       </Card>
 
@@ -52,12 +52,12 @@ export default async function ConsentSettingsPage() {
                 <div className="text-[12px] font-semibold uppercase tracking-wide text-primary-dark">
                   Canada · CASL
                 </div>
-                <p className="text-[13px] text-sub">{labels.casl}</p>
+                <p className="text-[14px] text-sub">{labels.casl}</p>
               </div>
             </div>
           ) : null}
         </div>
-        <p className="mt-3 text-[12px] text-faint">
+        <p className="mt-3 text-[13px] text-faint">
           This wording is fixed so the honesty and dual-consent stance survives every theme and white-label.
         </p>
       </Card>
@@ -76,7 +76,7 @@ function WordingRow({ tag, text, optional }: { tag: string; text: string; option
         <div className="mt-0.5 grid size-4 shrink-0 place-items-center rounded border border-primary bg-primary text-white">
           <Icon name="check" size={11} />
         </div>
-        <p className="text-[13px] text-ink">{text}</p>
+        <p className="text-[14px] text-ink">{text}</p>
       </div>
     </div>
   );

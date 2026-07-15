@@ -13,8 +13,8 @@ export default async function RankGridPage() {
     return (
       <div className="space-y-5">
         <div>
-          <h1 className="text-[22px] font-extrabold text-ink">Rank Grid</h1>
-          <p className="text-[14px] text-sub">Where you rank on the map, point by point.</p>
+          <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Rank Grid</h1>
+          <p className="text-[15px] text-sub">Where you rank on the map, point by point.</p>
         </div>
         <Card>
           <EmptyState icon="grid" title="No scan yet" description="Run a rank-grid scan to see your local map coverage." />
@@ -34,10 +34,10 @@ export default async function RankGridPage() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="mb-1 flex items-center gap-2">
-            <h1 className="text-[22px] font-extrabold text-ink">Rank Grid</h1>
+            <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Rank Grid</h1>
             <Badge tone="gold" icon="sparkles">Pro</Badge>
           </div>
-          <p className="text-[14px] text-sub">
+          <p className="text-[15px] text-sub">
             Your Google ranking sampled across a grid of nearby search points.
           </p>
         </div>
@@ -51,7 +51,7 @@ export default async function RankGridPage() {
             <span className="inline-flex items-center gap-1.5 rounded-chip border border-primary bg-primary-tint px-3 py-2 text-[13px] font-semibold text-primary-dark">
               <Icon name="search" size={14} /> {scan.keyword}
             </span>
-            <p className="mt-2 text-[11px] text-faint">
+            <p className="mt-2 text-[12px] text-faint">
               {scan.gridSize}×{scan.gridSize} grid · scanned {formatDate(scan.ranAt)}
             </p>
           </div>
@@ -90,8 +90,8 @@ export default async function RankGridPage() {
             <Icon name="map-pin" size={20} />
           </div>
           <div>
-            <div className="text-[15px] font-bold text-ink">What this means</div>
-            <p className="mt-0.5 text-[13px] text-sub">
+            <div className="text-[16px] font-bold text-ink">What this means</div>
+            <p className="mt-0.5 text-[14px] text-sub">
               You&apos;re in the top 3 at {green} of {total} search points and invisible (below the top 20)
               at {red}. Coverage is strongest near the clinic and fades at the edges — more reviews and
               fresh posts widen that circle.
@@ -102,7 +102,7 @@ export default async function RankGridPage() {
 
       <div className="flex flex-wrap items-center gap-2 px-1">
         <Badge tone="neutral" icon="credit-card">Scan cost: {total} checks · 1 of 4 monthly scans used</Badge>
-        <p className="text-[12px] text-faint">Grid scans query Google from each point — detected {formatDate(scan.ranAt)}.</p>
+        <p className="text-[13px] text-faint">Grid scans query Google from each point — detected {formatDate(scan.ranAt)}.</p>
       </div>
     </div>
   );

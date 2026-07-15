@@ -49,8 +49,8 @@ export default async function ThisWeekPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-[22px] font-extrabold text-ink">This week</h1>
-        <p className="text-[14px] text-sub">
+        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">This week</h1>
+        <p className="text-[15px] text-sub">
           Your GBP Co-Pilot picked the highest-impact moves. Approve, and we publish for you.
         </p>
       </div>
@@ -62,12 +62,12 @@ export default async function ThisWeekPage() {
             <SubDial value={p.completeness} label="Profile health" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="kicker mb-1">What&apos;s dragging it</div>
-            <p className="text-[15px] font-semibold text-ink">{topDrag}.</p>
+            <div className="mb-1 text-[13px] font-bold text-sub">What&apos;s dragging it</div>
+            <p className="text-[16px] font-semibold text-ink">{topDrag}.</p>
             {drags.length > 1 ? (
               <ul className="mt-2 space-y-1">
                 {drags.slice(1, 4).map((d) => (
-                  <li key={d} className="flex items-start gap-2 text-[13px] text-sub">
+                  <li key={d} className="flex items-start gap-2 text-[14px] text-sub">
                     <Icon name="chevron-right" size={14} className="mt-0.5 shrink-0 text-faint" />
                     <span>{d}</span>
                   </li>
@@ -86,7 +86,7 @@ export default async function ThisWeekPage() {
 
       {/* This week's tasks */}
       <Card>
-        <CardHeader kicker="Grow" title="This week's tasks" />
+        <CardHeader title="This week's tasks" />
         {tasks.length ? (
           <div className="space-y-3">
             {tasks.map((t) => (
@@ -94,7 +94,7 @@ export default async function ThisWeekPage() {
             ))}
           </div>
         ) : (
-          <p className="py-6 text-center text-[13px] text-faint">
+          <p className="py-6 text-center text-[14px] text-faint">
             No tasks this week — you&apos;re all caught up.
           </p>
         )}
@@ -102,7 +102,7 @@ export default async function ThisWeekPage() {
 
       {/* Publish history */}
       <Card>
-        <CardHeader kicker="History" title="Recently published" />
+        <CardHeader title="Recently published" />
         {history.length ? (
           <ul className="divide-y divide-hairline">
             {history.map((entry) => {
@@ -113,8 +113,8 @@ export default async function ThisWeekPage() {
                     <Icon name={icon} size={18} />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="text-[14px] font-semibold text-ink">{label}</div>
-                    <div className="text-[12px] text-sub">by {entry.actor}</div>
+                    <div className="text-[15px] font-semibold text-ink">{label}</div>
+                    <div className="text-[13px] text-sub">by {entry.actor}</div>
                   </div>
                   <span className="shrink-0 text-[12px] text-faint">{formatRelative(entry.at)}</span>
                 </li>
@@ -122,7 +122,7 @@ export default async function ThisWeekPage() {
             })}
           </ul>
         ) : (
-          <p className="py-6 text-center text-[13px] text-faint">Nothing published yet.</p>
+          <p className="py-6 text-center text-[14px] text-faint">Nothing published yet.</p>
         )}
       </Card>
 
@@ -131,9 +131,17 @@ export default async function ThisWeekPage() {
         <div className="grid size-9 shrink-0 place-items-center rounded-btn bg-primary text-white">
           <Icon name="shield" size={18} />
         </div>
-        <div>
-          <div className="text-[13px] font-bold text-ink">Why this is safe</div>
-          <p className="text-[13px] text-sub">{MICROCOPY.nameStuffBlocked}</p>
+        <div className="min-w-0">
+          <p className="text-[14px] text-ink">
+            <span className="font-bold">Why this is safe:</span> {MICROCOPY.nameStuffBlocked}
+          </p>
+          <details className="mt-1">
+            <summary className="cursor-pointer text-[13px] font-semibold text-primary">More detail</summary>
+            <p className="mt-1 max-w-[65ch] text-[13px] text-sub">
+              Every task follows Google Business Profile policy. Nothing publishes until you approve it, and
+              tasks only touch posts, photos, Q&amp;A, services and hours — never your business name.
+            </p>
+          </details>
         </div>
       </div>
     </div>

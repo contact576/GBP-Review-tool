@@ -100,7 +100,7 @@ export function RankGridView({ scan }: { scan: RankGridScan }) {
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[360px] text-left text-[13px]">
+          <table className="w-full min-w-[360px] text-left text-[14px]">
             <thead>
               <tr className="border-b border-hairline text-faint">
                 <th className="py-2 pr-4 font-medium">Grid point</th>

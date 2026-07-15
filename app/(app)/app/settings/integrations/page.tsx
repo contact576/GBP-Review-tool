@@ -44,8 +44,8 @@ export default async function IntegrationsSettingsPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-[22px] font-extrabold text-ink">Integrations</h1>
-        <p className="text-[14px] text-sub">
+        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Integrations</h1>
+        <p className="text-[15px] text-sub">
           What&apos;s connected — and exactly what stops working if something drops.
         </p>
       </div>
@@ -53,7 +53,7 @@ export default async function IntegrationsSettingsPage() {
       <SettingsNav />
 
       <Card>
-        <CardHeader kicker="Connections" title="Providers" />
+        <CardHeader title="Providers" />
         <div className="divide-y divide-hairline">
           {integrations.map((int) => {
             const connected = int.status === "connected";
@@ -65,22 +65,21 @@ export default async function IntegrationsSettingsPage() {
                   </div>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-[14px] font-bold text-ink">{int.label}</span>
+                      <span className="text-[15px] font-bold text-ink">{int.label}</span>
                       <Badge tone={tone(int.status)} icon={connected ? "check-circle" : int.status === "pending" ? "clock" : "alert"}>
                         {statusLabel(int.status)}
                       </Badge>
                     </div>
-                    <p className="mt-0.5 text-[13px] text-sub">{int.detail}</p>
-                    {connected ? (
-                      int.lastSyncAt ? (
-                        <p className="mt-0.5 text-[11px] text-faint">Last sync {formatRelative(int.lastSyncAt)}</p>
-                      ) : null
-                    ) : (
-                      <p className="mt-1 flex items-start gap-1.5 text-[12px] text-danger">
+                    <p className="mt-0.5 text-[14px] text-sub">
+                      {int.detail}
+                      {connected && int.lastSyncAt ? ` · synced ${formatRelative(int.lastSyncAt)}` : ""}
+                    </p>
+                    {!connected ? (
+                      <p className="mt-1 flex items-start gap-1.5 text-[13px] text-danger">
                         <Icon name="alert" size={13} className="mt-0.5 shrink-0" />
                         <span>If this stays down, {CONSEQUENCE[int.provider]}.</span>
                       </p>
-                    )}
+                    ) : null}
                   </div>
                 </div>
                 <div className="shrink-0 sm:pl-3">
@@ -94,9 +93,8 @@ export default async function IntegrationsSettingsPage() {
 
       <div className="flex items-start gap-2 rounded-card border border-hairline bg-primary-wash/40 p-3">
         <Icon name="shield" size={16} className="mt-0.5 shrink-0 text-primary" />
-        <p className="text-[12px] text-sub">
-          We only ask for the access each feature needs, and we tell you the exact consequence when a
-          connection lapses — no silent failures.
+        <p className="text-[13px] text-sub">
+          Minimal access, no silent failures — you always see the exact consequence when a connection lapses.
         </p>
       </div>
     </div>

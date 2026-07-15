@@ -7,8 +7,8 @@ export default async function RequestsPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-[22px] font-extrabold text-ink">Requests</h1>
-        <p className="text-[14px] text-sub">
+        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Requests</h1>
+        <p className="text-[15px] text-sub">
           Track every review ask from sent to posted — and send new ones to happy customers.
         </p>
       </div>

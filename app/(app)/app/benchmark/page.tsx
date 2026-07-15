@@ -34,8 +34,8 @@ export default async function BenchmarkPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-[22px] font-extrabold text-ink">Benchmark</h1>
-        <p className="text-[14px] text-sub">
+        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Benchmark</h1>
+        <p className="text-[15px] text-sub">
           Where you stand against nearby physiotherapy clinics — the honest version.
         </p>
       </div>
@@ -52,7 +52,7 @@ export default async function BenchmarkPage() {
                   <Icon name="star-fill" size={18} className="mx-1 -mt-1 inline text-star" />
                   — #{ratingRank} of {competitors.length} nearby physio clinics by rating
                 </div>
-                <p className="mt-1 text-[13px] text-sub">
+                <p className="mt-1 text-[14px] text-sub">
                   Top-rated in your area, but #{countRank} of {competitors.length} on review volume — pace is where the gap is.
                 </p>
               </>
@@ -69,7 +69,7 @@ export default async function BenchmarkPage() {
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Card>
-          <CardHeader kicker="Rating" title="Star rating vs nearby clinics" />
+          <CardHeader title="Star rating vs nearby clinics" />
           <BenchmarkBar
             label="Average rating"
             you={you?.rating ?? 0}
@@ -80,7 +80,7 @@ export default async function BenchmarkPage() {
         </Card>
 
         <Card>
-          <CardHeader kicker="Volume" title="Review count vs nearby clinics" />
+          <CardHeader title="Review count vs nearby clinics" />
           <BenchmarkBar
             label="Total Google reviews"
             you={you?.reviewCount ?? 0}
@@ -92,10 +92,9 @@ export default async function BenchmarkPage() {
       {/* Velocity */}
       <Card>
         <CardHeader
-          kicker="Momentum"
           title="Your review pace"
           action={
-            <span className="text-[12px] text-sub">
+            <span className="text-[13px] text-sub">
               {yourVel}/mo · area median {medianVel}/mo
             </span>
           }
@@ -104,9 +103,9 @@ export default async function BenchmarkPage() {
           <div className="min-w-0">
             <div className="flex items-end gap-2">
               <span className="text-[30px] font-extrabold leading-none tabular-nums text-ink">{yourVel}</span>
-              <span className="mb-1 text-[13px] text-sub">new reviews / 30 days</span>
+              <span className="mb-1 text-[14px] text-sub">new reviews / 30 days</span>
             </div>
-            <p className="mt-1 text-[13px] text-sub">
+            <p className="mt-1 text-[14px] text-sub">
               {yourVel >= medianVel
                 ? "You're keeping pace with the neighbourhood."
                 : `About ${Math.max(1, medianVel - yourVel)} behind the area median each month.`}
@@ -131,8 +130,8 @@ export default async function BenchmarkPage() {
               <Icon name="trend" size={20} />
             </div>
             <div>
-              <div className="text-[15px] font-bold text-ink">Close the volume gap</div>
-              <p className="mt-0.5 text-[13px] text-sub">
+              <div className="text-[16px] font-bold text-ink">Close the volume gap</div>
+              <p className="mt-0.5 text-[14px] text-sub">
                 {reviewGap > 0 && leader
                   ? `You lead on rating but trail on volume. Reaching ${leader.name} means about ${reviewGap} more reviews — steady requests get you there.`
                   : "You're leading your area on volume. Keep the request habit going to stay ahead."}
@@ -147,7 +146,7 @@ export default async function BenchmarkPage() {
 
       <div className="flex items-center gap-2 px-1">
         <Badge tone="neutral" icon="shield">Public data</Badge>
-        <p className="text-[12px] text-faint">
+        <p className="text-[13px] text-faint">
           Based on public Google data, detected {detected}. Competitor figures are point-in-time snapshots.
         </p>
       </div>

@@ -57,11 +57,11 @@ export function ConsentConfig({
       {/* Platform stance — always on, not configurable */}
       <div className="flex items-start justify-between gap-4 py-3.5">
         <div>
-          <div className="flex items-center gap-2 text-[14px] font-semibold text-ink">
+          <div className="flex items-center gap-2 text-[15px] font-semibold text-ink">
             Require service consent before any request
             <span className="text-[11px] font-medium text-faint">(required)</span>
           </div>
-          <p className="mt-0.5 text-[12px] text-sub">
+          <p className="mt-0.5 text-[13px] text-sub">
             Customers must agree to messages about their visit. Always on — it&apos;s the legal
             basis for review requests.
           </p>
@@ -72,8 +72,8 @@ export function ConsentConfig({
       {ROWS.map((row) => (
         <div key={row.key} className="flex items-start justify-between gap-4 py-3.5">
           <div>
-            <div className="text-[14px] font-semibold text-ink">{row.title}</div>
-            <p className="mt-0.5 text-[12px] text-sub">{row.hint}</p>
+            <div className="text-[15px] font-semibold text-ink">{row.title}</div>
+            <p className="mt-0.5 text-[13px] text-sub">{row.hint}</p>
           </div>
           <Toggle checked={values[row.key]} onChange={(v) => set(row.key, v)} label={row.title} />
         </div>
@@ -82,11 +82,11 @@ export function ConsentConfig({
       {isCanada ? (
         <div className="flex items-start justify-between gap-4 py-3.5">
           <div>
-            <div className="flex items-center gap-2 text-[14px] font-semibold text-ink">
+            <div className="flex items-center gap-2 text-[15px] font-semibold text-ink">
               Capture CASL express consent (Canada)
               <span className="text-[11px] font-medium text-faint">(required)</span>
             </div>
-            <p className="mt-0.5 text-[12px] text-sub">
+            <p className="mt-0.5 text-[13px] text-sub">
               Records express consent at point of service, as CASL requires.
             </p>
           </div>

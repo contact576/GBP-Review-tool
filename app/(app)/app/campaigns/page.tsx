@@ -21,8 +21,8 @@ export default async function CampaignsPage() {
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-[22px] font-extrabold text-ink">Campaigns</h1>
-          <p className="text-[14px] text-sub">
+          <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Campaigns</h1>
+          <p className="text-[15px] text-sub">
             Consent-safe automations that keep customers coming back.
           </p>
         </div>
@@ -46,8 +46,8 @@ export default async function CampaignsPage() {
                       {c.isAutomation ? <Badge tone="neutral" icon="refresh">Automation</Badge> : null}
                       <Badge tone={c.status === "active" ? "primary" : "sub"}>{c.status}</Badge>
                     </div>
-                    <h2 className="text-[16px] font-bold text-ink">{c.name}</h2>
-                    <p className="mt-1 text-[13px] text-sub">{c.body}</p>
+                    <h2 className="text-[17px] font-bold text-ink">{c.name}</h2>
+                    <p className="mt-1 text-[14px] text-sub">{c.body}</p>
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-2">
                     <CampaignToggle id={c.id} name={c.name} initialActive={c.status === "active"} />
@@ -61,7 +61,7 @@ export default async function CampaignsPage() {
                 {/* Consent-basis label */}
                 <div className="mt-3 flex items-start gap-2 rounded-btn border border-hairline bg-paper px-3 py-2">
                   <Icon name="shield" size={14} className="mt-0.5 shrink-0 text-primary" />
-                  <p className="text-[12px] text-sub">
+                  <p className="text-[13px] text-sub">
                     Sending to <span className="font-semibold text-ink">{formatNumber(c.audienceConsented)}</span> of{" "}
                     <span className="font-semibold text-ink">{formatNumber(c.audienceTotal)}</span> opted in to {basisLabel}
                   </p>
@@ -80,7 +80,7 @@ export default async function CampaignsPage() {
         </div>
       ) : (
         <Card>
-          <p className="py-8 text-center text-[13px] text-faint">No campaigns yet.</p>
+          <p className="py-8 text-center text-[14px] text-faint">No campaigns yet.</p>
         </Card>
       )}
 
@@ -91,10 +91,10 @@ export default async function CampaignsPage() {
             <Icon name="lock" size={18} />
           </div>
           <div>
-            <div className="flex items-center gap-1.5 text-[14px] font-bold text-ink">
+            <div className="flex items-center gap-1.5 text-[15px] font-bold text-ink">
               Campaigns Pro <Badge tone="gold">Pro</Badge>
             </div>
-            <p className="text-[13px] text-sub">Multi-step journeys, segments, and A/B testing.</p>
+            <p className="text-[14px] text-sub">Multi-step journeys, segments, and A/B testing.</p>
           </div>
         </div>
         <LinkButton href="/app/settings/billing" variant="gold" size="sm" iconRight="chevron-right">

@@ -198,10 +198,10 @@ export function ReviewsInbox({
             <Icon name="alert" size={18} />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-bold text-ink">
+            <div className="text-[14px] font-bold text-ink">
               {durabilityAtRisk.length} {durabilityAtRisk.length === 1 ? "review needs" : "reviews need"} a durability check
             </div>
-            <p className="text-[13px] text-sub">
+            <p className="text-[14px] text-sub">
               Google sometimes filters or removes reviews. We flag anything vanished or at risk so nothing quietly disappears.
             </p>
           </div>
@@ -219,7 +219,7 @@ export function ReviewsInbox({
         </div>
       ) : (
         <Card>
-          <p className="py-8 text-center text-[13px] text-faint">Nothing here right now.</p>
+          <p className="py-8 text-center text-[14px] text-faint">Nothing here right now.</p>
         </Card>
       )}
 
@@ -230,17 +230,17 @@ export function ReviewsInbox({
             {/* Original review */}
             <div className="rounded-card border border-hairline bg-card p-4">
               <div className="flex items-center justify-between gap-2">
-                <div className="text-[14px] font-semibold text-ink">{active.author}</div>
+                <div className="text-[15px] font-semibold text-ink">{active.author}</div>
                 <Stars rating={active.rating} />
               </div>
               <div className="mt-0.5 text-[12px] text-faint">{formatRelative(active.publishedAt)}</div>
-              <p className="mt-2 text-[14px] leading-relaxed text-ink/90">{active.text}</p>
+              <p className="mt-2 text-[15px] leading-relaxed text-ink/90">{active.text}</p>
             </div>
 
             {isDurabilityRisk(active) ? (
               <div className="flex items-start gap-2 rounded-btn border border-danger/30 bg-danger-tint/50 px-3 py-2">
                 <Icon name="alert" size={16} className="mt-0.5 shrink-0 text-danger" />
-                <p className="text-[12px] text-sub">
+                <p className="text-[13px] text-sub">
                   This review is {active.durability === "vanished" ? "no longer showing on Google" : "at risk of being filtered"}.
                   Replying can help, but Google controls final visibility.
                 </p>
@@ -249,9 +249,9 @@ export function ReviewsInbox({
 
             {/* Tone options */}
             <div>
-              <div className="kicker mb-2">Choose a tone</div>
+              <div className="mb-2 text-[13px] font-bold text-sub">Choose a tone</div>
               {loadingDraft ? (
-                <div className="text-[13px] text-faint">Drafting a reply…</div>
+                <div className="text-[14px] text-faint">Drafting a reply…</div>
               ) : variants.length ? (
                 <div className="flex flex-wrap gap-2">
                   {variants.map((v, i) => (
@@ -261,20 +261,20 @@ export function ReviewsInbox({
                   ))}
                 </div>
               ) : (
-                <div className="text-[13px] text-faint">Write your reply below.</div>
+                <div className="text-[14px] text-faint">Write your reply below.</div>
               )}
             </div>
 
             {/* Editable draft */}
             <div>
-              <div className="kicker mb-2">Your reply</div>
+              <div className="mb-2 text-[13px] font-bold text-sub">Your reply</div>
               <Textarea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 placeholder="Write a warm, specific reply…"
                 className="min-h-[140px]"
               />
-              <p className="mt-1.5 text-[12px] text-faint">{MICROCOPY.aiDraftDisclaimer}</p>
+              <p className="mt-1.5 text-[13px] text-faint">{MICROCOPY.aiDraftDisclaimer}</p>
             </div>
           </div>
         ) : null}
@@ -285,7 +285,7 @@ export function ReviewsInbox({
           </Button>
         </div>
         {aiSource === "template" ? (
-          <p className="mt-2 text-center text-[11px] text-faint">Starter template — make it yours before posting.</p>
+          <p className="mt-2 text-center text-[12px] text-faint">Starter template — make it yours before posting.</p>
         ) : null}
       </Drawer>
     </div>

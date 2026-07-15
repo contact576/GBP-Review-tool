@@ -29,8 +29,8 @@ export default async function StudioPage() {
 
       <div className="space-y-5 print:hidden">
         <div>
-          <h1 className="text-[22px] font-extrabold text-ink">QR &amp; Widgets</h1>
-          <p className="text-[14px] text-sub">
+          <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">QR &amp; Widgets</h1>
+          <p className="text-[15px] text-sub">
             The tools that turn a happy visit into a review — printed, worn, and embedded.
           </p>
         </div>
@@ -39,9 +39,9 @@ export default async function StudioPage() {
         <Card raised>
           <div className="grid grid-cols-1 items-center gap-5 sm:grid-cols-2">
             <div>
-              <div className="kicker mb-1">Your clinic QR</div>
+              <div className="mb-1 text-[13px] font-bold text-sub">Your clinic QR</div>
               <h2 className="text-[18px] font-bold text-ink">One code, every counter</h2>
-              <p className="mt-1 text-[13px] text-sub">
+              <p className="mt-1 text-[14px] text-sub">
                 Print it, stick it at reception, and let customers scan straight into your review
                 flow. Every scan opens a fresh session and counts below.
               </p>
@@ -74,7 +74,7 @@ export default async function StudioPage() {
 
         {/* Per-staff QR cards */}
         <Card>
-          <CardHeader kicker="Team" title="Staff QR codes" />
+          <CardHeader title="Staff QR codes" />
           {staffQrs.length ? (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {staffQrs.map((qr) => {
@@ -116,7 +116,7 @@ export default async function StudioPage() {
           />
           {locationQr ? (
             <>
-              <p className="text-[13px] text-sub">
+              <p className="text-[14px] text-sub">
                 Printing this page produces a ready-to-use kit with your live QR code — no PDF
                 download, straight from your browser&apos;s print dialog.
               </p>
@@ -124,15 +124,15 @@ export default async function StudioPage() {
                 <div className="flex items-start gap-2.5 rounded-card border border-hairline bg-primary-wash/40 p-3">
                   <Icon name="building" size={16} className="mt-0.5 shrink-0 text-primary" />
                   <div>
-                    <div className="text-[13px] font-semibold text-ink">Counter card</div>
-                    <p className="text-[11px] text-faint">Trim and stand at the front desk.</p>
+                    <div className="text-[14px] font-semibold text-ink">Counter card</div>
+                    <p className="text-[12px] text-faint">Trim and stand at the front desk.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-2.5 rounded-card border border-hairline bg-primary-wash/40 p-3">
                   <Icon name="file" size={16} className="mt-0.5 shrink-0 text-primary" />
                   <div>
-                    <div className="text-[13px] font-semibold text-ink">Table tent</div>
-                    <p className="text-[11px] text-faint">Fold along the dashed line so both sides stand.</p>
+                    <div className="text-[14px] font-semibold text-ink">Table tent</div>
+                    <p className="text-[12px] text-faint">Fold along the dashed line so both sides stand.</p>
                   </div>
                 </div>
               </div>
@@ -147,11 +147,10 @@ export default async function StudioPage() {
         {/* Website widget */}
         <Card>
           <CardHeader
-            kicker="Website"
             title="Review widget embed"
             action={
               widget ? (
-                <span className="text-[12px] text-sub">
+                <span className="text-[13px] text-sub">
                   {formatNumber(widget.impressions)} views · {formatNumber(widget.clicks)} clicks
                 </span>
               ) : undefined
@@ -170,8 +169,8 @@ export default async function StudioPage() {
               <Icon name="shield" size={20} />
             </div>
             <div>
-              <div className="text-[15px] font-bold text-ink">Your codes never go dead</div>
-              <p className="mt-0.5 text-[13px] text-sub">
+              <div className="text-[16px] font-bold text-ink">Your codes never go dead</div>
+              <p className="mt-0.5 text-[14px] text-sub">
                 If your plan lapses, codes redirect to your public Google review page for 90 days.
                 No reprinting, no lock-in.
               </p>
@@ -181,9 +180,9 @@ export default async function StudioPage() {
 
         {/* Scan analytics */}
         <Card>
-          <CardHeader kicker="Performance" title="Scan analytics" />
+          <CardHeader title="Scan analytics" />
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[420px] text-left text-[13px]">
+            <table className="w-full min-w-[420px] text-left text-[14px]">
               <thead>
                 <tr className="border-b border-hairline text-faint">
                   <th className="py-2 pr-4 font-medium">Asset</th>

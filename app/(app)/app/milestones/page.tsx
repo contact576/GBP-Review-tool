@@ -20,8 +20,8 @@ export default async function MilestonesPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-[22px] font-extrabold text-ink">Milestones</h1>
-        <p className="text-[14px] text-sub">Real wins worth celebrating — and sharing.</p>
+        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Milestones</h1>
+        <p className="text-[15px] text-sub">Real wins worth celebrating — and sharing.</p>
       </div>
 
       {/* Next milestone teaser */}
@@ -32,8 +32,8 @@ export default async function MilestonesPage() {
               <Icon name="trophy" size={20} />
             </div>
             <div>
-              <div className="text-[15px] font-bold text-ink">Next up: {nextTier} reviews</div>
-              <p className="mt-0.5 text-[13px] text-sub">
+              <div className="text-[16px] font-bold text-ink">Next up: {nextTier} reviews</div>
+              <p className="mt-0.5 text-[14px] text-sub">
                 {remaining > 0
                   ? `You're ${remaining} review${remaining === 1 ? "" : "s"} away — keep the request habit going.`
                   : "You've crossed every milestone here. Incredible."}
@@ -68,7 +68,7 @@ export default async function MilestonesPage() {
 
       <div className="flex items-center gap-2 px-1">
         <Icon name="shield" size={14} className="text-faint" />
-        <p className="text-[12px] text-faint">Milestones fire on genuine achievements — never fabricated.</p>
+        <p className="text-[13px] text-faint">Milestones fire on genuine achievements — never fabricated.</p>
       </div>
     </div>
   );
