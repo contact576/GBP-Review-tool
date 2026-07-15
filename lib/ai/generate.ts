@@ -1,7 +1,7 @@
 import "server-only";
 import { completeText } from "./client";
 import { getModel, hasAiKey } from "./model";
-import { SYSTEM_PROMPTS } from "./prompts";
+import { SYSTEM_PROMPTS, buildReviewDraftSystem } from "./prompts";
 import {
   fallbackReviewDrafts,
   fallbackReplyDrafts,
@@ -10,8 +10,12 @@ import {
   fallbackReportNarration,
   fallbackFeedbackSummary,
   fallbackScoreSample,
+  resolveReviewIndustry,
+  normalizeStanding,
+  starsForStanding,
   type ReviewDraftInput,
   type ReplyDraftInput,
+  type ScoreSampleInput,
 } from "./fallbacks";
 import { runLints, type LintContext } from "@/lib/compliance/lints";
 import type { DraftVariant } from "@/lib/data/types";
@@ -31,26 +35,31 @@ function splitVariants(raw: string): string[] {
     .filter(Boolean);
 }
 
-// ── Review drafts (2–3 variants) ────────────────────────────
+// ── Review drafts (3 variants) ──────────────────────────────
 export async function generateReviewDrafts(
   input: ReviewDraftInput,
 ): Promise<{ variants: DraftVariant[]; source: AiSource }> {
+  const industry = resolveReviewIndustry(input.industryKey, input.category);
   const template = fallbackReviewDrafts(input);
+  // Full lint context INCLUDING the rating — a variant whose sentiment
+  // doesn't match the stars is replaced by its template twin, never shown raw.
   const ctx: LintContext = {
     kind: "review",
     businessName: input.business,
+    rating: input.rating,
     allowedFacts: [...input.attributes, input.service ?? "", input.staffName ?? ""],
   };
   if (!hasAiKey()) return { variants: template, source: "template" };
 
-  const user = `Business: ${input.business} (${input.category}). Rating: ${input.rating}/5.
+  const user = `Business: ${input.business}.
+Industry: ${industry.label} — ${industry.promptContext}
+Rating the customer chose: ${input.rating}/5 — match this register exactly.
 Things the customer liked: ${input.attributes.join(", ") || "(none specified)"}.
-${input.staffName ? `Staff member: ${input.staffName}.` : ""}${input.service ? ` Service: ${input.service}.` : ""}
-Write 3 distinct review options (Warm, then Short & punchy, then Detailed), separated by a line with only "---".`;
+${input.service ? `Service they came in for: ${input.service}.\n` : ""}${input.staffName ? `Staff member who helped them (${industry.terminology.staff}): ${input.staffName}.\n` : ""}Write 3 distinct review options in this order: short & natural, detailed & specific, warm & conversational. Separate each with a line of only "---".`;
 
   const raw = await completeText({
     model: getModel(),
-    system: SYSTEM_PROMPTS["review-draft"],
+    system: buildReviewDraftSystem(industry),
     user,
     maxTokens: 600,
   });
@@ -58,11 +67,14 @@ Write 3 distinct review options (Warm, then Short & punchy, then Detailed), sepa
 
   const parts = splitVariants(raw);
   if (parts.length < 2) return { variants: template, source: "template" };
-  const tones = ["Warm", "Short & punchy", "Detailed"];
-  const variants: DraftVariant[] = parts.slice(0, 3).map((text, i) => ({
-    text: sanitize(text, ctx, template[i]?.text ?? template[0]!.text),
-    tone: tones[i] ?? "Warm",
-  }));
+  const tones = ["Short & natural", "Detailed & specific", "Warm & conversational"];
+  const variants: DraftVariant[] = template.map((fallbackVariant, i) => {
+    const aiText = parts[i];
+    return {
+      text: aiText ? sanitize(aiText, ctx, fallbackVariant.text) : fallbackVariant.text,
+      tone: tones[i] ?? fallbackVariant.tone,
+    };
+  });
   return { variants, source: "ai" };
 }
 

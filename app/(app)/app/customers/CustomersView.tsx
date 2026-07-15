@@ -54,6 +54,16 @@ export function CustomersView({
   const [query, setQuery] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
 
+  // "Add customer" drawer state
+  const [addOpen, setAddOpen] = useState(false);
+  const [addPending, startAdd] = useTransition();
+  const [addName, setAddName] = useState("");
+  const [addEmail, setAddEmail] = useState("");
+  const [addPhone, setAddPhone] = useState("");
+  const [addService, setAddService] = useState(false);
+  const [addMarketing, setAddMarketing] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+
   const labels = consentLabels(region);
 
   const summary = {
@@ -124,6 +134,46 @@ export function CustomersView({
     });
   }
 
+  function resetAddForm() {
+    setAddName("");
+    setAddEmail("");
+    setAddPhone("");
+    setAddService(false);
+    setAddMarketing(false);
+    setAddError(null);
+  }
+
+  function addCustomer() {
+    const name = addName.trim();
+    const email = addEmail.trim();
+    const phone = addPhone.trim();
+    if (!name) {
+      setAddError("Enter the customer's name.");
+      return;
+    }
+    if (!email && !phone) {
+      setAddError("Add an email or a phone number so you can reach them.");
+      return;
+    }
+    startAdd(async () => {
+      await addCustomerAction({
+        name,
+        email: email || undefined,
+        phone: phone || undefined,
+        services: [],
+        serviceConsent: addService,
+        marketingConsent: addMarketing,
+        consentSourceText: addService
+          ? makeConsentSourceText(region, addMarketing)
+          : "Added manually — no consent captured yet.",
+      });
+      toast(`${name} added`, "success", "check-circle");
+      setAddOpen(false);
+      resetAddForm();
+      router.refresh();
+    });
+  }
+
   return (
     <div className="space-y-5">
       {/* Summary strip */}
@@ -148,9 +198,14 @@ export function CustomersView({
           />
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" icon="plus" onClick={() => toast("Import runs from Settings → Data", "info", "file")}>
-            Import
+          <Button size="sm" icon="plus" onClick={() => setAddOpen(true)}>
+            Add customer
           </Button>
+          <span title="CSV import arrives with the database connection" className="inline-block">
+            <Button variant="secondary" size="sm" icon="file" disabled>
+              CSV import — coming with database
+            </Button>
+          </span>
           <Button variant="secondary" size="sm" icon="download" onClick={exportAll}>
             Export CSV
           </Button>
@@ -248,6 +303,84 @@ export function CustomersView({
           </div>
         </>
       )}
+
+      {/* Add-customer drawer */}
+      <Drawer
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        title="Add customer"
+        footer={
+          <Button onClick={addCustomer} loading={addPending} icon="plus" fullWidth>
+            Add customer
+          </Button>
+        }
+      >
+        <div className="space-y-4">
+          <Field label="Name" required>
+            <Input
+              value={addName}
+              onChange={(e) => {
+                setAddName(e.target.value);
+                setAddError(null);
+              }}
+              placeholder="Customer's name"
+              aria-label="Customer's name"
+            />
+          </Field>
+          <Field label="Email" hint="Email or phone — at least one.">
+            <Input
+              type="email"
+              inputMode="email"
+              value={addEmail}
+              onChange={(e) => {
+                setAddEmail(e.target.value);
+                setAddError(null);
+              }}
+              placeholder="name@example.com"
+              iconLeft="mail"
+            />
+          </Field>
+          <Field label="Phone">
+            <Input
+              type="tel"
+              inputMode="tel"
+              value={addPhone}
+              onChange={(e) => {
+                setAddPhone(e.target.value);
+                setAddError(null);
+              }}
+              placeholder="(555) 010-2030"
+              iconLeft="phone"
+            />
+          </Field>
+
+          <div className="space-y-3 rounded-card border border-hairline bg-card p-3">
+            <div className="kicker">Consent</div>
+            <Checkbox
+              checked={addService}
+              onChange={setAddService}
+              label={labels.service}
+              hint="Required before any review request can be sent."
+            />
+            <Checkbox
+              checked={addMarketing}
+              onChange={setAddMarketing}
+              label={labels.marketing}
+              hint={labels.casl}
+            />
+            <p className="text-[12px] text-faint">
+              Check only what the customer actually agreed to — consent is recorded with today&apos;s
+              date.
+            </p>
+          </div>
+
+          {addError ? (
+            <p className="flex items-center gap-1.5 text-[12px] text-danger" role="alert">
+              <Icon name="alert" size={13} className="shrink-0" /> {addError}
+            </p>
+          ) : null}
+        </div>
+      </Drawer>
 
       {/* Detail drawer */}
       <Drawer

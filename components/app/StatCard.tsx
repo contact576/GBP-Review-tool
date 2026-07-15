@@ -7,14 +7,13 @@ import { formatNumber } from "@/lib/utils/format";
 
 /** Honest action stat — "People who found you", etc. Never "customers gained". */
 export function StatCard({
-  label, icon, value, delta, spark, sinceJoined,
+  label, icon, value, delta, spark,
 }: {
   label: string;
   icon: IconName;
   value: number;
   delta: number;
   spark: number[];
-  sinceJoined?: boolean;
 }) {
   return (
     <div className="rounded-card border border-hairline bg-card p-4 shadow-sm">
@@ -27,7 +26,7 @@ export function StatCard({
           <div className="text-[26px] font-extrabold leading-none tabular-nums text-ink">{formatNumber(value)}</div>
           <div className="mt-1 flex items-center gap-1.5">
             <Delta value={delta} />
-            <span className="text-[11px] text-faint">{sinceJoined ? "since you joined" : "vs last month"}</span>
+            <span className="text-[11px] text-faint">vs previous 30 days</span>
           </div>
         </div>
         <Sparkline data={spark} width={72} height={32} />

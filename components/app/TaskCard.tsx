@@ -22,7 +22,7 @@ export function TaskCard({ task }: { task: GbpTask }) {
     start(async () => {
       await approveTaskAction(task.id);
       setStatus("done");
-      toast("Published to your Google profile", "success", "check-circle");
+      toast("Approved — will publish when your Google profile connection is live", "success", "check-circle");
     });
   const snooze = () =>
     start(async () => {

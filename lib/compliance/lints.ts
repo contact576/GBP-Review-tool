@@ -9,7 +9,8 @@ export interface LintFlag {
     | "name_stuffing"
     | "incentive_language"
     | "attribution_dishonesty"
-    | "fabricated_specifics";
+    | "fabricated_specifics"
+    | "sentiment_mismatch";
   message: string;
 }
 
@@ -17,6 +18,8 @@ export interface LintContext {
   kind: "review" | "reply" | "post" | "campaign" | "report" | "qna";
   businessName?: string;
   allowedFacts?: string[];
+  /** Star rating the text claims to represent (reviews only). */
+  rating?: number;
 }
 
 export interface LintResult {
@@ -103,6 +106,55 @@ export function lintFabricatedSpecifics(text: string, ctx: LintContext): LintFla
   return null;
 }
 
+/**
+ * Superlatives only believable in a genuine 5-star review. A 4-star review
+ * using these reads as inflated; at ≤3 stars ANY strong positive is a
+ * mismatch (the flow should never draft promotional text for ≤3 anyway).
+ */
+const FIVE_STAR_ONLY_PATTERNS: { re: RegExp; label: string }[] = [
+  { re: /exceeded expectations/i, label: "exceeded expectations" },
+  { re: /flawless/i, label: "flawless" },
+  { re: /perfect/i, label: "perfect" },
+  { re: /\bbest\b.*\bever\b/i, label: "best … ever" },
+  { re: /incredible/i, label: "incredible" },
+  { re: /10\s*\/\s*10/i, label: "10/10" },
+];
+
+/** Any strong-positive superlative — banned outright when rating ≤ 3. */
+const STRONG_POSITIVE_PATTERNS: { re: RegExp; label: string }[] = [
+  { re: /exceeded/i, label: "exceeded" },
+  { re: /flawless/i, label: "flawless" },
+  { re: /perfect/i, label: "perfect" },
+  { re: /amazing/i, label: "amazing" },
+  { re: /incredible/i, label: "incredible" },
+  { re: /outstanding/i, label: "outstanding" },
+  { re: /\bbest\b.*\bever\b/i, label: "best … ever" },
+  { re: /highly recommend/i, label: "highly recommend" },
+  { re: /10\s*\/\s*10/i, label: "10/10" },
+  { re: /five stars/i, label: "five stars" },
+];
+
+/**
+ * Sentiment must match the star rating the text claims to represent:
+ *  - rating ≤ 3 → flag ANY strong-positive superlative.
+ *  - rating 4   → flag 5★-only superlatives; warm-positive language
+ *                 ("great", "really good", "recommend") is allowed.
+ *  - rating 5   → no flag.
+ */
+export function lintSentimentConsistency(text: string, rating: number): LintFlag | null {
+  if (rating >= 5) return null;
+  const bank = rating <= 3 ? STRONG_POSITIVE_PATTERNS : FIVE_STAR_ONLY_PATTERNS;
+  for (const { re, label } of bank) {
+    if (re.test(text)) {
+      return {
+        code: "sentiment_mismatch",
+        message: `"${label}" reads as ${rating <= 3 ? "glowing praise" : "5-star hype"} in a ${rating}-star review — tone must match the rating.`,
+      };
+    }
+  }
+  return null;
+}
+
 // ── Aggregate ───────────────────────────────────────────────
 export function runLints(text: string, ctx: LintContext): LintResult {
   const flags: LintFlag[] = [];
@@ -111,6 +163,9 @@ export function runLints(text: string, ctx: LintContext): LintResult {
   push(lintIncentiveLanguage(text));
   push(lintAttributionHonesty(text, ctx));
   push(lintFabricatedSpecifics(text, ctx));
+  if (ctx.kind === "review" && typeof ctx.rating === "number") {
+    push(lintSentimentConsistency(text, ctx.rating));
+  }
   return { ok: flags.length === 0, flags };
 }
 
