@@ -1,63 +1,133 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ds/Button";
 import { Input } from "@/components/ds/form";
 import { useToast } from "@/components/ds/Toast";
+import { inviteStaffAction, addStaffMemberAction } from "@/lib/actions";
 
-/** Invite input with a duplicate-guard demo. */
-export function InviteStaff({ existingNames }: { existingNames: string[] }) {
+/** Invite by email (persisted, duplicate-guarded) + add a staff member directly. */
+export function InviteStaff() {
   const { toast } = useToast();
+  const router = useRouter();
+  const [inviting, startInvite] = useTransition();
+  const [adding, startAdd] = useTransition();
+
+  const [email, setEmail] = useState("");
+  const [inviteError, setInviteError] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const lowered = existingNames.map((n) => n.toLowerCase().trim());
+  const [nameError, setNameError] = useState<string | null>(null);
 
   function invite() {
-    const trimmed = name.trim();
-    if (!trimmed) {
-      setError("Enter a name to invite.");
+    const value = email.trim().toLowerCase();
+    if (!value) {
+      setInviteError("Enter an email to invite.");
       return;
     }
-    if (lowered.includes(trimmed.toLowerCase())) {
-      setError("Already on your team");
+    startInvite(async () => {
+      const result = await inviteStaffAction(value);
+      if (!result.ok) {
+        setInviteError(result.error ?? "Couldn't save that invite.");
+        return;
+      }
+      setEmail("");
+      setInviteError(null);
+      toast(`Invite saved for ${value}`, "success", "send");
+      router.refresh();
+    });
+  }
+
+  function addDirect() {
+    const value = name.trim();
+    if (!value) {
+      setNameError("Enter a name to add.");
       return;
     }
-    setError(null);
-    toast(`Invite sent to ${trimmed}`, "success", "send");
-    setName("");
+    startAdd(async () => {
+      await addStaffMemberAction(value);
+      setName("");
+      setNameError(null);
+      toast(`${value} added — personal QR ready`, "success", "qr");
+      router.refresh();
+    });
   }
 
   return (
-    <div>
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <div className="flex-1">
-          <Input
-            value={name}
-            onChange={(e) => {
-              setName(e.target.value);
-              if (error) setError(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") invite();
-            }}
-            placeholder="Staff member's name"
-            iconLeft="users"
-            invalid={Boolean(error)}
-            aria-label="Staff member's name"
-          />
+    <div className="space-y-5">
+      {/* Invite by email */}
+      <div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="flex-1">
+            <Input
+              type="email"
+              inputMode="email"
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                if (inviteError) setInviteError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") invite();
+              }}
+              placeholder="teammate@business.com"
+              iconLeft="mail"
+              invalid={Boolean(inviteError)}
+              aria-label="Teammate email"
+            />
+          </div>
+          <Button icon="plus" onClick={invite} loading={inviting} className="shrink-0">
+            Invite staff
+          </Button>
         </div>
-        <Button icon="plus" onClick={invite} className="shrink-0">
-          Invite staff
-        </Button>
+        {inviteError ? (
+          <p className="mt-1.5 flex items-center gap-1 text-[12px] text-danger" role="alert">
+            <span className="inline-block size-1.5 rounded-full bg-danger" />
+            {inviteError}
+          </p>
+        ) : (
+          <p className="mt-1.5 text-[12px] text-faint">
+            Saved as a pending invite — the invite email goes out once the email service is
+            connected. Duplicates are blocked.
+          </p>
+        )}
       </div>
-      {error ? (
-        <p className="mt-1.5 flex items-center gap-1 text-[12px] text-danger" role="alert">
-          <span className="inline-block size-1.5 rounded-full bg-danger" />
-          {error}
-        </p>
-      ) : (
-        <p className="mt-1.5 text-[12px] text-faint">They&apos;ll get a personal QR code and capture link.</p>
-      )}
+
+      {/* Add directly */}
+      <div className="border-t border-hairline pt-4">
+        <div className="mb-1.5 text-[13px] font-semibold text-ink">Add a staff member directly</div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="flex-1">
+            <Input
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value);
+                if (nameError) setNameError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") addDirect();
+              }}
+              placeholder="Staff member's name"
+              iconLeft="users"
+              invalid={Boolean(nameError)}
+              aria-label="Staff member's name"
+            />
+          </div>
+          <Button variant="secondary" icon="qr" onClick={addDirect} loading={adding} className="shrink-0">
+            Add member
+          </Button>
+        </div>
+        {nameError ? (
+          <p className="mt-1.5 flex items-center gap-1 text-[12px] text-danger" role="alert">
+            <span className="inline-block size-1.5 rounded-full bg-danger" />
+            {nameError}
+          </p>
+        ) : (
+          <p className="mt-1.5 text-[12px] text-faint">
+            Creates a working staff row with their own QR code and capture link — no email needed.
+          </p>
+        )}
+      </div>
     </div>
   );
 }
