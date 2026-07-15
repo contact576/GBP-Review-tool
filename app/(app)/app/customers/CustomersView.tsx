@@ -5,16 +5,21 @@ import { useRouter } from "next/navigation";
 import { Card } from "@/components/ds/Card";
 import { Button } from "@/components/ds/Button";
 import { Badge } from "@/components/ds/misc";
-import { Input } from "@/components/ds/form";
+import { Checkbox, Field, Input } from "@/components/ds/form";
 import { Tabs, type TabItem } from "@/components/ds/Tabs";
 import { Drawer } from "@/components/ds/Drawer";
 import { useToast } from "@/components/ds/Toast";
 import { Icon, type IconName } from "@/components/icons";
 import { marketingConsented } from "@/lib/data/selectors";
-import { canSendService, canSendMarketing, consentLabels } from "@/lib/compliance/consent";
+import {
+  canSendService,
+  canSendMarketing,
+  consentLabels,
+  makeConsentSourceText,
+} from "@/lib/compliance/consent";
 import { customersToCsv, downloadCsv } from "@/lib/utils/csv";
 import { initials, maskEmail, maskPhone, formatRelative, formatDate, pluralize } from "@/lib/utils/format";
-import { sendRequestAction } from "@/lib/actions";
+import { sendRequestAction, addCustomerAction } from "@/lib/actions";
 import type { Customer, ReviewRequest, LifecycleStage, Region } from "@/lib/data/types";
 
 type TabKey = "all" | "regulars" | "never" | "reviewed" | "suppressed";
