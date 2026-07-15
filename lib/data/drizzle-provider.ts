@@ -1,6 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDb, type FoundlyDb } from "../db/client";
+import { ensureSchema } from "../db/ensure";
 import * as t from "../db/schema";
 import { emptyFoundlyData, makeSlug } from "./empty";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
@@ -1240,6 +1241,15 @@ export const drizzleProvider: DataProvider = {
 
   // ── Auth ──────────────────────────────────────────────────
   async registerUser(input: RegisterInput): Promise<RegisterResult> {
+    // Self-initialize the schema on first real signup (no terminal needed).
+    const schema = await ensureSchema();
+    if (!schema.ok) {
+      return {
+        ok: false,
+        error:
+          "The database isn't ready yet. Visit /setup to initialize it, or try again in a moment.",
+      };
+    }
     const db = getDb();
     const email = input.email.trim().toLowerCase();
     const existing = await findUserRowByEmail(db, email);

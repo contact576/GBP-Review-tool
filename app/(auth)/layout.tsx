@@ -13,6 +13,8 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           By continuing you agree to our{" "}
           <Link href="/legal/terms" className="underline hover:text-sub">Terms</Link> and{" "}
           <Link href="/legal/privacy" className="underline hover:text-sub">Privacy Policy</Link>.
+          {" · "}
+          <Link href="/setup" className="underline hover:text-sub">Setup checklist</Link>
         </p>
       </div>
     </div>
