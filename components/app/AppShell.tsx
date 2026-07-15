@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
@@ -19,12 +19,14 @@ export function AppShell({
   children,
   business,
   ownerName,
+  ownerEmail,
   trialDaysLeft,
   unread,
 }: {
   children: React.ReactNode;
   business: string;
   ownerName: string;
+  ownerEmail?: string;
   trialDaysLeft?: number;
   unread?: number;
 }) {
@@ -96,18 +98,16 @@ export function AppShell({
                   <Badge tone="gold" icon="clock">Trial · {trialDaysLeft}d left</Badge>
                 </Link>
               ) : null}
-              <Link href="/app" aria-label="Notifications" className="relative grid size-9 place-items-center rounded-btn text-sub hover:bg-primary-wash">
+              <Link href="/app/notifications" aria-label="Notifications" className="relative grid size-9 place-items-center rounded-btn text-sub hover:bg-primary-wash">
                 <Icon name="bell" size={20} />
                 {unread ? <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-danger" /> : null}
               </Link>
-              <div className="grid size-9 place-items-center rounded-chip bg-hero text-[13px] font-bold text-white">
-                {ownerName.split(" ").map((w) => w[0]).join("").slice(0, 2)}
-              </div>
+              <AccountMenu ownerName={ownerName} ownerEmail={ownerEmail} />
             </div>
           </header>
 
-          <main id="main" className="px-4 pb-24 pt-4 lg:px-8 lg:pb-10">
-            <div className="mx-auto max-w-5xl">{children}</div>
+          <main id="main" className="px-4 pb-24 pt-4 lg:px-8 lg:pb-10 xl:px-10">
+            <div className="mx-auto max-w-[1560px]">{children}</div>
           </main>
         </div>
 
@@ -163,6 +163,64 @@ export function AppShell({
         ) : null}
       </div>
     </ToastProvider>
+  );
+}
+
+/** Accessible account dropdown — button + menu, closes on Esc, blur, or item click. */
+function AccountMenu({ ownerName, ownerEmail }: { ownerName: string; ownerEmail?: string }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const initials = ownerName.split(" ").map((w) => w[0]).join("").slice(0, 2);
+
+  const close = () => setOpen(false);
+  const onBlur = (e: React.FocusEvent<HTMLDivElement>) => {
+    if (!rootRef.current?.contains(e.relatedTarget as Node | null)) close();
+  };
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") close();
+  };
+
+  const itemClass =
+    "flex w-full items-center gap-2.5 rounded-btn px-2.5 py-2 text-[14px] font-medium text-sub hover:bg-primary-wash hover:text-ink";
+
+  return (
+    <div ref={rootRef} className="relative" onBlur={onBlur} onKeyDown={onKeyDown}>
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Account menu"
+        onClick={() => setOpen((v) => !v)}
+        className="grid size-9 place-items-center rounded-chip bg-hero text-[13px] font-bold text-white"
+      >
+        {initials}
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          aria-label="Account"
+          className="absolute right-0 top-full z-30 mt-2 w-64 rounded-card border border-hairline bg-card p-1.5 shadow-lg animate-fade-in"
+        >
+          <div className="px-2.5 pb-2 pt-1.5">
+            <div className="truncate text-[14px] font-bold text-ink">{ownerName}</div>
+            {ownerEmail ? <div className="truncate text-[13px] text-sub">{ownerEmail}</div> : null}
+          </div>
+          <div className="mb-1 h-px bg-hairline" />
+          <Link role="menuitem" href="/app/settings" onClick={close} className={itemClass}>
+            <Icon name="settings" size={16} /> Settings
+          </Link>
+          <Link role="menuitem" href="/app/notifications" onClick={close} className={itemClass}>
+            <Icon name="bell" size={16} /> Notifications
+          </Link>
+          <div className="my-1 h-px bg-hairline" />
+          <form action={signOutAction}>
+            <button role="menuitem" className={itemClass}>
+              <Icon name="external" size={16} /> Sign out
+            </button>
+          </form>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

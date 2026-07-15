@@ -111,7 +111,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           </header>
 
           <main id="main" className="px-4 pb-16 pt-5 lg:px-8 lg:pb-12">
-            <div className="mx-auto max-w-6xl">{children}</div>
+            <div className="mx-auto max-w-[1560px]">{children}</div>
           </main>
         </div>
       </div>

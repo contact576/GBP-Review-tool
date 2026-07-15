@@ -128,8 +128,8 @@ function composeDetailed(s: Slots, rating: number): string {
 function composeWarm(s: Slots, rating: number): string {
   const opener =
     rating >= 5
-      ? `Stopped in${s.svc ? ` for ${s.svc}` : ""} at ${s.biz} and I'm so glad I did.`
-      : `Went in${s.svc ? ` for ${s.svc}` : ""} to ${s.biz} with high hopes, and it mostly delivered.`;
+      ? `Stopped in at ${s.biz}${s.svc ? ` for ${s.svc}` : ""} and I'm so glad I did.`
+      : `Went in to ${s.biz}${s.svc ? ` for ${s.svc}` : ""} with high hopes, and it mostly delivered.`;
   const staffClause = s.staff
     ? `, and ${s.staff} (the ${s.role} who looked after me) made it easy`
     : "";

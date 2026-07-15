@@ -44,7 +44,7 @@
   .kicker {
     font-family: theme("fontFamily.mono");
     font-weight: 700;
-    font-size: 11px;
+    font-size: 12px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: theme("colors.faint");

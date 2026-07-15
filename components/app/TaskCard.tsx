@@ -41,12 +41,12 @@ export function TaskCard({ task }: { task: GbpTask }) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h3 className={cn("text-[14px] font-bold text-ink", done && "line-through opacity-60")}>{task.title}</h3>
+            <h3 className={cn("text-[15px] font-bold text-ink", done && "line-through opacity-60")}>{task.title}</h3>
             <Badge tone={task.impact === "reviews" ? "gold" : "primary"}>{task.impact}</Badge>
           </div>
-          <p className="mt-1 text-[13px] text-sub">{task.rationale}</p>
+          <p className="mt-1 text-[14px] text-sub">{task.rationale}</p>
           {!done ? (
-            <div className="mt-2 rounded-btn border border-hairline bg-paper px-3 py-2 text-[13px] text-ink/80">
+            <div className="mt-2 rounded-btn border border-hairline bg-paper px-3 py-2 text-[14px] text-ink/80">
               {task.preview}
             </div>
           ) : null}
@@ -59,11 +59,11 @@ export function TaskCard({ task }: { task: GbpTask }) {
           <span className="ml-auto text-[12px] text-faint">~{task.effortMins} min</span>
         </div>
       ) : done ? (
-        <div className="mt-3 flex items-center gap-1.5 text-[13px] font-semibold text-primary">
+        <div className="mt-3 flex items-center gap-1.5 text-[14px] font-semibold text-primary">
           <Icon name="check-circle" size={16} /> Done this week
         </div>
       ) : (
-        <div className="mt-3 text-[13px] text-faint">Snoozed to next week</div>
+        <div className="mt-3 text-[14px] text-faint">Snoozed to next week</div>
       )}
     </div>
   );

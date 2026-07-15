@@ -38,7 +38,7 @@ export function CardHeader({
     <div className={cn("flex items-start justify-between gap-3 mb-4", className)}>
       <div>
         {kicker ? <div className="kicker mb-1">{kicker}</div> : null}
-        <h2 className="text-[17px] font-bold text-ink leading-tight">{title}</h2>
+        <h2 className="text-[18px] font-bold text-ink leading-tight">{title}</h2>
       </div>
       {action}
     </div>

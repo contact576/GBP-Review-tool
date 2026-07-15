@@ -17,6 +17,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <AppShell
         business={data.location.name}
         ownerName={data.owner.name}
+        ownerEmail={data.owner.email}
         trialDaysLeft={trialLeft}
         unread={unread}
       >
