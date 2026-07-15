@@ -340,6 +340,13 @@ export function buildSeed(): FoundlyData {
       timezone: tz,
       plan: "growth",
       createdAt: joinedAt,
+      isDemo: true,
+      settings: {
+        serviceConsentDefault: true,
+        marketingOptInVisible: true,
+        quietHours: true,
+        leaderboardVisible: true,
+      },
     },
     location: {
       id: locationId,
@@ -382,6 +389,7 @@ export function buildSeed(): FoundlyData {
       twoFactorEnabled: true,
       avatarInitials: "AC",
     },
+    invites: [],
     staff,
     customers,
     requests,

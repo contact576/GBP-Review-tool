@@ -28,14 +28,12 @@ export type PlanTier =
   | "multi"
   | "agency";
 export type Channel = "email" | "sms" | "whatsapp";
-export type Vertical =
-  | "physiotherapy"
-  | "chiropractic"
-  | "dental"
-  | "hvac"
-  | "renovation"
-  | "salon"
-  | "restaurant";
+/**
+ * Industry key — resolves against lib/industries catalog (36 industries +
+ * custom). Widened from the legacy 7-value union; legacy values remain valid
+ * catalog keys.
+ */
+export type Vertical = string;
 
 export type RequestStatus =
   | "queued"
@@ -64,16 +62,32 @@ export interface Organization {
   billingEmail: string;
 }
 
+export interface IndustryConfig {
+  customLabel?: string;
+  customServices?: string[];
+  customAttributes?: string[];
+}
+
 export interface Workspace {
   id: WorkspaceId;
   organizationId: Id;
   name: string;
   vertical: Vertical;
+  industryConfig?: IndustryConfig;
   region: Region;
   timezone: string;
   plan: PlanTier;
   createdAt: string; // ISO
+  isDemo?: boolean;
   whiteLabel?: WhiteLabelConfig;
+  settings?: WorkspaceSettings;
+}
+
+export interface WorkspaceSettings {
+  serviceConsentDefault: boolean;
+  marketingOptInVisible: boolean;
+  quietHours: boolean;
+  leaderboardVisible: boolean;
 }
 
 export interface GbpProfileState {
@@ -118,6 +132,19 @@ export interface User {
   workspaceId: WorkspaceId;
   twoFactorEnabled: boolean;
   avatarInitials: string;
+  passwordHash?: string;
+  emailVerified?: boolean;
+  googleSub?: string;
+}
+
+export interface StaffInvite {
+  id: Id;
+  workspaceId: WorkspaceId;
+  email: string;
+  role: "manager" | "staff";
+  token: string;
+  status: "pending" | "accepted" | "revoked";
+  createdAt: string;
 }
 
 export interface StaffMember {
@@ -543,6 +570,7 @@ export interface FoundlyData {
   workspace: Workspace;
   location: Location;
   owner: User;
+  invites: StaffInvite[];
   staff: StaffMember[];
   customers: Customer[];
   requests: ReviewRequest[];

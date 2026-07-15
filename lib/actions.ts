@@ -1,28 +1,138 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getDataProvider } from "@/lib/data";
-import { setSession, clearSession, type SessionRole } from "@/lib/auth/session";
+import { redirect } from "next/navigation";
+import {
+  getSession,
+  createSession,
+  createDemoSession,
+  clearSession,
+  type SessionRole,
+  type Session,
+} from "@/lib/auth/session";
+import { getProviderFor, getPublicProviders } from "@/lib/data";
+import { validatePasswordStrength } from "@/lib/auth/password";
 import type {
   CaptureCustomerInput,
   SendRequestInput,
   CreateCampaignInput,
   PostReplyInput,
+  AddCustomerInput,
+  CreateTaskInput,
+  GoogleLocationPatch,
 } from "@/lib/data/provider";
-import type { CustomerConsent, ReplyTone, Channel } from "@/lib/data/types";
+import type {
+  CustomerConsent,
+  ReplyTone,
+  Channel,
+  Region,
+  WhiteLabelConfig,
+  WorkspaceSettings,
+  IndustryConfig,
+} from "@/lib/data/types";
 
-// ── Auth ────────────────────────────────────────────────────
-export async function signInAction(role: SessionRole = "owner") {
-  await setSession(role);
+// ── Helpers ─────────────────────────────────────────────────
+async function requireSession(): Promise<Session> {
+  const session = await getSession();
+  if (!session) redirect("/sign-in");
+  return session;
 }
+
+async function scoped() {
+  const session = await requireSession();
+  const provider = await getProviderFor(session);
+  return { session, provider, ws: session.workspaceId };
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// ── Auth: registration ──────────────────────────────────────
+export interface AuthFormResult {
+  ok: boolean;
+  error?: string;
+}
+
+export async function registerAction(input: {
+  name: string;
+  email: string;
+  password: string;
+  businessName: string;
+  industryKey: string;
+  region: Region;
+}): Promise<AuthFormResult> {
+  const name = input.name.trim();
+  const email = input.email.trim().toLowerCase();
+  const businessName = input.businessName.trim();
+  if (!name) return { ok: false, error: "Please enter your name." };
+  if (!EMAIL_RE.test(email)) return { ok: false, error: "Please enter a valid email address." };
+  if (!businessName) return { ok: false, error: "Please enter your business name." };
+  const pwError = validatePasswordStrength(input.password);
+  if (pwError) return { ok: false, error: pwError };
+
+  const provider = await getProviderFor(null); // real provider for real accounts
+  const result = await provider.registerUser({
+    name,
+    email,
+    password: input.password,
+    businessName,
+    industryKey: input.industryKey || "professional_services",
+    region: input.region,
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+
+  await createSession({
+    userId: result.user.id,
+    workspaceId: result.user.workspaceId,
+    role: result.user.role,
+    isDemo: false,
+    name: result.user.name,
+    email: result.user.email,
+  });
+  return { ok: true };
+}
+
+// ── Auth: sign in ───────────────────────────────────────────
+export async function loginAction(input: {
+  email: string;
+  password: string;
+}): Promise<AuthFormResult> {
+  const email = input.email.trim().toLowerCase();
+  if (!EMAIL_RE.test(email) || !input.password) {
+    return { ok: false, error: "Invalid email or password." };
+  }
+  const provider = await getProviderFor(null);
+  const user = await provider.verifyCredentials(email, input.password);
+  if (!user) return { ok: false, error: "Invalid email or password." };
+  await createSession({
+    userId: user.id,
+    workspaceId: user.workspaceId,
+    role: user.role,
+    isDemo: false,
+    name: user.name,
+    email: user.email,
+  });
+  return { ok: true };
+}
+
+/** Explicit demo entry — sessions are flagged isDemo and use seeded data. */
+export async function enterDemoAction(role: SessionRole = "owner") {
+  await createDemoSession(role);
+}
+
+/** @deprecated kept for compatibility; demo entry only. */
+export async function signInAction(role: SessionRole = "owner") {
+  await createDemoSession(role);
+}
+
 export async function signOutAction() {
   await clearSession();
+  redirect("/sign-in");
 }
 
 // ── Capture / requests ──────────────────────────────────────
 export async function captureCustomerAction(input: CaptureCustomerInput) {
-  const provider = await getDataProvider();
-  const result = await provider.captureCustomer(input);
+  const { provider, ws } = await scoped();
+  const result = await provider.captureCustomer(ws, input);
   revalidatePath("/app");
   revalidatePath("/app/requests");
   revalidatePath("/app/customers");
@@ -30,21 +140,31 @@ export async function captureCustomerAction(input: CaptureCustomerInput) {
   return { token: result.request.token, customerName: result.customer.name };
 }
 
+export async function addCustomerAction(input: AddCustomerInput) {
+  const { provider, ws } = await scoped();
+  const customer = await provider.addCustomer(ws, input);
+  revalidatePath("/app/customers");
+  return { id: customer.id };
+}
+
 export async function sendRequestAction(input: SendRequestInput) {
-  const provider = await getDataProvider();
-  const req = await provider.sendRequest(input);
+  const { provider, ws } = await scoped();
+  const req = await provider.sendRequest(ws, input);
   revalidatePath("/app/requests");
   revalidatePath("/app/customers");
   return { token: req.token };
 }
 
+// Public (token-keyed, no session) — used by the customer review flow.
 export async function advanceRequestAction(
   token: string,
   to: "opened" | "clicked" | "posted_google" | "private_feedback",
   meta?: { rating?: 1 | 2 | 3 | 4 | 5; attributes?: string[] },
 ) {
-  const provider = await getDataProvider();
-  await provider.advanceRequest(token, to, meta);
+  for (const provider of await getPublicProviders()) {
+    const result = await provider.advanceRequest(token, to, meta);
+    if (result) break;
+  }
   revalidatePath("/app");
   revalidatePath("/app/requests");
 }
@@ -54,38 +174,63 @@ export async function submitPrivateFeedbackAction(input: {
   rating: 1 | 2 | 3;
   text: string;
 }) {
-  const provider = await getDataProvider();
-  await provider.submitPrivateFeedback(input);
+  for (const provider of await getPublicProviders()) {
+    const found = await provider.getRequestByToken(input.token);
+    if (found) {
+      await provider.submitPrivateFeedback(input);
+      break;
+    }
+  }
+  revalidatePath("/app");
+}
+
+export async function resolveFeedbackAction(feedbackId: string) {
+  const { provider, ws } = await scoped();
+  await provider.resolvePrivateFeedback(ws, feedbackId);
   revalidatePath("/app");
 }
 
 // ── Co-Pilot ────────────────────────────────────────────────
 export async function approveTaskAction(taskId: string) {
-  const provider = await getDataProvider();
-  await provider.approveTask(taskId);
+  const { provider, ws } = await scoped();
+  await provider.approveTask(ws, taskId);
   revalidatePath("/app");
   revalidatePath("/app/this-week");
 }
+
 export async function snoozeTaskAction(taskId: string) {
-  const provider = await getDataProvider();
-  await provider.snoozeTask(taskId);
+  const { provider, ws } = await scoped();
+  await provider.snoozeTask(ws, taskId);
   revalidatePath("/app/this-week");
+}
+
+export async function createTaskAction(input: CreateTaskInput) {
+  const { provider, ws } = await scoped();
+  const task = await provider.createGbpTask(ws, input);
+  revalidatePath("/app/this-week");
+  return { id: task.id };
 }
 
 // ── Reviews ─────────────────────────────────────────────────
 export async function postReplyAction(input: PostReplyInput & { tone: ReplyTone }) {
-  const provider = await getDataProvider();
-  await provider.postReply(input);
+  const { provider, ws } = await scoped();
+  await provider.postReply(ws, input);
   revalidatePath("/app/reviews");
   revalidatePath("/app");
 }
 
 // ── Campaigns ───────────────────────────────────────────────
 export async function createCampaignAction(input: CreateCampaignInput) {
-  const provider = await getDataProvider();
-  const c = await provider.createCampaign(input);
+  const { provider, ws } = await scoped();
+  const c = await provider.createCampaign(ws, input);
   revalidatePath("/app/campaigns");
   return { id: c.id, consented: c.audienceConsented, total: c.audienceTotal };
+}
+
+export async function setCampaignStatusAction(campaignId: string, status: "active" | "paused") {
+  const { provider, ws } = await scoped();
+  await provider.setCampaignStatus(ws, campaignId, status);
+  revalidatePath("/app/campaigns");
 }
 
 // ── Consent ─────────────────────────────────────────────────
@@ -93,14 +238,68 @@ export async function updateConsentAction(
   customerId: string,
   consent: Partial<CustomerConsent>,
 ) {
-  const provider = await getDataProvider();
-  await provider.updateConsent(customerId, consent);
+  const { provider, ws } = await scoped();
+  await provider.updateConsent(ws, customerId, consent);
   revalidatePath("/app/customers");
 }
 
-// ── Demo reset ──────────────────────────────────────────────
+// ── Workspace configuration ─────────────────────────────────
+export async function updateIndustryAction(industryKey: string, config?: IndustryConfig) {
+  const { provider, ws } = await scoped();
+  await provider.updateIndustry(ws, industryKey, config);
+  revalidatePath("/", "layout");
+}
+
+export async function updateWorkspaceSettingsAction(patch: Partial<WorkspaceSettings>) {
+  const { provider, ws } = await scoped();
+  await provider.updateWorkspaceSettings(ws, patch);
+  revalidatePath("/app/settings", "layout");
+}
+
+export async function updateLocationGoogleAction(patch: GoogleLocationPatch) {
+  const { provider, ws } = await scoped();
+  await provider.updateLocationGoogle(ws, patch);
+  revalidatePath("/", "layout");
+}
+
+export async function updateWhiteLabelAction(config: WhiteLabelConfig) {
+  const { provider, ws } = await scoped();
+  await provider.updateWhiteLabel(ws, config);
+  revalidatePath("/agency", "layout");
+}
+
+// ── Team ────────────────────────────────────────────────────
+export async function inviteStaffAction(
+  email: string,
+  role: "manager" | "staff" = "staff",
+): Promise<{ ok: boolean; error?: string }> {
+  const { provider, ws } = await scoped();
+  const result = await provider.createStaffInvite(ws, email, role);
+  if ("error" in result) return { ok: false, error: result.error };
+  revalidatePath("/app/settings/team");
+  return { ok: true };
+}
+
+export async function addStaffMemberAction(displayName: string) {
+  const { provider, ws } = await scoped();
+  const member = await provider.addStaffMember(ws, displayName.trim());
+  revalidatePath("/app/settings/team");
+  revalidatePath("/staff");
+  return { id: member.id };
+}
+
+// ── Notifications ───────────────────────────────────────────
+export async function markNotificationsReadAction() {
+  const { provider, ws } = await scoped();
+  await provider.markNotificationsRead(ws);
+  revalidatePath("/app", "layout");
+}
+
+// ── Demo reset (demo sessions only) ─────────────────────────
 export async function resetDemoAction() {
-  const provider = await getDataProvider();
+  const session = await requireSession();
+  if (!session.isDemo) return; // real workspaces are never reset this way
+  const provider = await getProviderFor(session);
   await provider.resetDemo();
   revalidatePath("/", "layout");
 }

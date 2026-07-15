@@ -8,27 +8,56 @@ import { Button } from "@/components/ds/Button";
 import { Card } from "@/components/ds/Card";
 import { Field, Input } from "@/components/ds/form";
 import { Divider, Kicker } from "@/components/ds/misc";
-import { signInAction } from "@/lib/actions";
+import { loginAction, enterDemoAction } from "@/lib/actions";
 import type { SessionRole } from "@/lib/auth/session";
 
-const DEMOS: { role: SessionRole; dest: string; label: string; sub: string; icon: "home" | "building" | "shield" }[] = [
-  { role: "owner", dest: "/app", label: "Enter as Owner", sub: "The full business dashboard", icon: "home" },
-  { role: "agency_admin", dest: "/agency", label: "Enter as Agency", sub: "White-label multi-client console", icon: "building" },
-  { role: "platform_admin", dest: "/admin", label: "Enter as Admin", sub: "Platform operations & health", icon: "shield" },
+const DEMOS: { role: SessionRole; dest: string; label: string }[] = [
+  { role: "owner", dest: "/app", label: "Demo: Owner" },
+  { role: "agency_admin", dest: "/agency", label: "Demo: Agency" },
+  { role: "platform_admin", dest: "/admin", label: "Demo: Admin" },
 ];
 
-export function SignInForm({ next }: { next?: string }) {
+// Matches Button variant="secondary" size="md" fullWidth — used for the
+// Google entry, which must be a plain <a> to the OAuth route, not a <button>.
+const googleLinkClass =
+  "inline-flex h-11 min-h-[44px] w-full select-none items-center justify-center gap-2 whitespace-nowrap rounded-btn border border-hairline bg-card px-4 text-[14px] font-semibold text-ink transition-all duration-150 hover:bg-primary-wash";
+
+export function SignInForm({
+  next,
+  googleEnabled,
+}: {
+  next?: string;
+  googleEnabled: boolean;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [activeRole, setActiveRole] = useState<SessionRole | null>(null);
+  const [demoPending, startDemoTransition] = useTransition();
+  const [demoRole, setDemoRole] = useState<SessionRole | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
-  function enter(role: SessionRole, dest: string) {
-    setActiveRole(role);
+  const busy = pending || demoPending;
+
+  function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
     startTransition(async () => {
-      await signInAction(role);
-      router.push(role === "owner" && next ? next : dest);
+      const result = await loginAction({ email, password });
+      if (!result.ok) {
+        setError(result.error ?? "Something went wrong. Please try again.");
+        return;
+      }
+      router.push(next && next.startsWith("/") ? next : "/app");
+      router.refresh();
+    });
+  }
+
+  function enterDemo(role: SessionRole, dest: string) {
+    setDemoRole(role);
+    startDemoTransition(async () => {
+      await enterDemoAction(role);
+      router.push(dest);
       router.refresh();
     });
   }
@@ -40,81 +69,110 @@ export function SignInForm({ next }: { next?: string }) {
         <p className="mt-1 text-[14px] text-sub">Sign in to keep the growth loop spinning.</p>
       </div>
 
-      {/* Demo entry — the fast path */}
-      <div className="mt-6 rounded-card border border-primary/25 bg-primary-wash p-4">
-        <div className="flex items-center gap-2">
-          <Icon name="sparkles" size={16} className="text-primary" />
-          <Kicker>Enter demo — one click</Kicker>
+      {error ? (
+        <div
+          role="alert"
+          className="mt-5 flex items-start gap-2 rounded-btn border border-danger/30 bg-danger-tint px-3 py-2.5 text-[13px] font-medium text-danger"
+        >
+          <Icon name="alert" size={15} className="mt-0.5 shrink-0" />
+          {error}
         </div>
-        <div className="mt-3 space-y-2">
+      ) : null}
+
+      <form className="mt-5 space-y-3" onSubmit={submit}>
+        <Field label="Email">
+          <Input
+            type="email"
+            name="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@business.com"
+            iconLeft="mail"
+            autoComplete="email"
+            required
+          />
+        </Field>
+        <Field label="Password">
+          <Input
+            type="password"
+            name="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+            iconLeft="lock"
+            autoComplete="current-password"
+            required
+          />
+        </Field>
+        <div className="flex justify-end">
+          <Link
+            href="/forgot-password"
+            className="text-[13px] font-medium text-primary hover:text-primary-dark"
+          >
+            Forgot password?
+          </Link>
+        </div>
+        <Button type="submit" fullWidth loading={pending} disabled={busy}>
+          Sign in
+        </Button>
+      </form>
+
+      <div className="my-5 flex items-center gap-3">
+        <Divider className="flex-1" />
+        <span className="text-[12px] text-faint">or</span>
+        <Divider className="flex-1" />
+      </div>
+
+      {googleEnabled ? (
+        <a href="/api/auth/google" className={googleLinkClass}>
+          <Icon name="google" size={18} />
+          Continue with Google
+        </a>
+      ) : (
+        <div>
+          <span aria-disabled="true" className={`${googleLinkClass} pointer-events-none opacity-50`}>
+            <Icon name="google" size={18} />
+            Continue with Google
+          </span>
+          <p className="mt-1.5 text-center text-[12px] text-faint">
+            Google sign-in not configured yet
+          </p>
+        </div>
+      )}
+
+      <Divider className="my-5" />
+
+      {/* Demo — explicit, clearly labeled, separate from real accounts */}
+      <div className="rounded-card border border-hairline bg-paper p-4">
+        <div className="flex items-center gap-2">
+          <Icon name="eye" size={15} className="text-sub" />
+          <Kicker>Explore the demo</Kicker>
+        </div>
+        <p className="mt-1.5 text-[13px] text-sub">
+          Browse a fully-populated sample business — clearly labeled, separate from real accounts.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
           {DEMOS.map((d) => (
-            <button
+            <Button
               key={d.role}
               type="button"
-              onClick={() => enter(d.role, d.dest)}
-              disabled={pending}
-              className="flex w-full items-center gap-3 rounded-btn border border-hairline bg-card px-3 py-3 text-left transition-colors hover:border-primary/40 disabled:opacity-60 min-h-[56px]"
+              variant="secondary"
+              size="sm"
+              onClick={() => enterDemo(d.role, d.dest)}
+              loading={demoPending && demoRole === d.role}
+              disabled={busy}
             >
-              <span className="grid size-9 shrink-0 place-items-center rounded-btn bg-primary-tint text-primary-dark">
-                <Icon name={d.icon} size={18} />
-              </span>
-              <span className="flex-1">
-                <span className="block text-[14px] font-bold text-ink">{d.label}</span>
-                <span className="block text-[12px] text-sub">{d.sub}</span>
-              </span>
-              {pending && activeRole === d.role ? (
-                <span className="size-4 shrink-0 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-              ) : (
-                <Icon name="chevron-right" size={18} className="shrink-0 text-faint" />
-              )}
-            </button>
+              {d.label}
+            </Button>
           ))}
         </div>
       </div>
 
-      <div className="my-6 flex items-center gap-3">
-        <Divider className="flex-1" />
-        <span className="text-[12px] text-faint">or sign in normally</span>
-        <Divider className="flex-1" />
-      </div>
-
-      {/* Mock Google */}
-      <Button
-        type="button"
-        variant="secondary"
-        fullWidth
-        icon="google"
-        onClick={() => enter("owner", "/app")}
-        disabled={pending}
-      >
-        Continue with Google
-      </Button>
-
-      {/* Email / password — mock */}
-      <form
-        className="mt-4 space-y-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          enter("owner", "/app");
-        }}
-      >
-        <Field label="Email">
-          <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@business.com" iconLeft="mail" autoComplete="email" />
-        </Field>
-        <Field label="Password">
-          <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" iconLeft="lock" autoComplete="current-password" />
-        </Field>
-        <div className="flex justify-end">
-          <Link href="/two-factor" className="text-[13px] font-medium text-primary hover:text-primary-dark">
-            Use two-factor code
-          </Link>
-        </div>
-        <Button type="submit" fullWidth loading={pending && activeRole === "owner"}>Sign in</Button>
-      </form>
-
       <p className="mt-5 text-center text-[13px] text-sub">
-        New to Foundly?{" "}
-        <Link href="/sign-up" className="font-semibold text-primary hover:text-primary-dark">Start free</Link>
+        New here?{" "}
+        <Link href="/sign-up" className="font-semibold text-primary hover:text-primary-dark">
+          Start your free trial
+        </Link>
       </p>
     </Card>
   );

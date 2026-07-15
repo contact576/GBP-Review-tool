@@ -1,26 +1,52 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE } from "@/lib/auth/session";
+import { verifySession } from "@/lib/auth/jwt";
 
 /**
- * Gate the authenticated surfaces only. Marketing, customer (token), and staff
- * surfaces bypass this. Unauthenticated hits redirect to /sign-in with a return.
+ * Gates the authenticated surfaces with real JWT verification.
+ * Marketing, customer (/r, /q), and staff surfaces bypass this.
  */
-const GATED = ["/app", "/agency", "/admin", "/onboarding"];
+const LEGACY_ROLES = new Set(["owner", "agency_admin", "platform_admin"]);
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  const isGated = GATED.some((p) => pathname === p || pathname.startsWith(p + "/"));
-  if (!isGated) return NextResponse.next();
+  const raw = req.cookies.get("foundly_session")?.value;
 
-  const session = req.cookies.get(SESSION_COOKIE)?.value;
-  if (session) return NextResponse.next();
+  const redirect = () => {
+    const url = req.nextUrl.clone();
+    url.pathname = "/sign-in";
+    url.searchParams.set("next", pathname);
+    return NextResponse.redirect(url);
+  };
 
-  const url = req.nextUrl.clone();
-  url.pathname = "/sign-in";
-  url.searchParams.set("next", pathname);
-  return NextResponse.redirect(url);
+  if (!raw) return redirect();
+
+  // Legacy plain-role cookie (pre-JWT builds) — accepted as demo session.
+  if (LEGACY_ROLES.has(raw)) return NextResponse.next();
+
+  const claims = await verifySession(raw);
+  if (!claims) return redirect();
+
+  // Role-scope the consoles.
+  if (pathname.startsWith("/admin") && claims.role !== "platform_admin") {
+    const url = req.nextUrl.clone();
+    url.pathname = "/app";
+    return NextResponse.redirect(url);
+  }
+  if (pathname.startsWith("/agency") && claims.role !== "agency_admin") {
+    const url = req.nextUrl.clone();
+    url.pathname = "/app";
+    return NextResponse.redirect(url);
+  }
+
+  return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/app/:path*", "/agency/:path*", "/admin/:path*", "/onboarding/:path*"],
+  matcher: [
+    "/app/:path*",
+    "/agency/:path*",
+    "/admin/:path*",
+    "/onboarding/:path*",
+    "/staff/:path*",
+  ],
 };

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { isDbBacked } from "@/lib/data";
 import { SignUpForm } from "./SignUpForm";
 
 export const metadata: Metadata = {
@@ -7,5 +8,6 @@ export const metadata: Metadata = {
 };
 
 export default function SignUpPage() {
-  return <SignUpForm />;
+  const googleEnabled = Boolean(process.env.GOOGLE_CLIENT_ID);
+  return <SignUpForm googleEnabled={googleEnabled} dbBacked={isDbBacked()} />;
 }

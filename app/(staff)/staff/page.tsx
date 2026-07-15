@@ -15,7 +15,7 @@ const ATTRS: Record<Vertical, string[]> = {
 
 export default async function StaffCapturePage() {
   const data = await getData();
-  const seeds = ATTRS[data.location.vertical] ?? ATTRS.physiotherapy;
+  const seeds = ATTRS[data.location.vertical] ?? ATTRS.physiotherapy ?? [];
 
   // "Priya" is the demo front-desk operator. Compute her rank for the stats row.
   const sorted = [...data.staff].sort((a, b) => b.captures - a.captures);

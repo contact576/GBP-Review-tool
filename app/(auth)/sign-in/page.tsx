@@ -3,7 +3,7 @@ import { SignInForm } from "./SignInForm";
 
 export const metadata: Metadata = {
   title: "Sign in",
-  description: "Sign in to Foundly, or jump straight into a live demo as an owner, agency, or admin.",
+  description: "Sign in to Foundly, or explore a clearly-labeled demo as an owner, agency, or admin.",
 };
 
 export default async function SignInPage({
@@ -13,5 +13,6 @@ export default async function SignInPage({
 }) {
   const { next } = await searchParams;
   const safeNext = next && next.startsWith("/") ? next : undefined;
-  return <SignInForm next={safeNext} />;
+  const googleEnabled = Boolean(process.env.GOOGLE_CLIENT_ID);
+  return <SignInForm next={safeNext} googleEnabled={googleEnabled} />;
 }

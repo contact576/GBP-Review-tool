@@ -320,7 +320,33 @@ export const auditLog = pgTable("audit_log", {
   seq: doublePrecision("seq").notNull(),
 });
 
+// ── QR assets ───────────────────────────────────────────────
+// Promoted out of dataset_meta JSONB: slugs need a GLOBAL unique lookup
+// (public /r/[slug] surface) and scans need atomic increments.
+export const qrAsset = pgTable(
+  "qr_asset",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    locationId: text("location_id").notNull(),
+    scope: text("scope").notNull(),
+    staffId: text("staff_id"),
+    label: text("label").notNull(),
+    slug: text("slug").notNull(),
+    targetUrl: text("target_url").notNull(),
+    scans: integer("scans").notNull().default(0),
+    pageOpens: integer("page_opens").notNull().default(0),
+    degraded: boolean("degraded").notNull().default(false),
+    seq: integer("seq"),
+  },
+  (table) => [uniqueIndex("qr_asset_slug_uq").on(table.slug)],
+);
+
 // ── Aggregate / analytical blocks (single row per workspace) ─
+// NOTE: the `qr_assets` JSONB column below is legacy — QR assets now live in
+// the relational `qr_asset` table. The column stays in the schema so
+// `drizzle-kit push` never tries to drop it on existing deployments, but the
+// provider no longer reads it (and only ever writes `[]`).
 export const datasetMeta = pgTable("dataset_meta", {
   workspaceId: text("workspace_id").primaryKey(),
   metrics: jsonb("metrics").$type<MetricSnapshot[]>().notNull(),

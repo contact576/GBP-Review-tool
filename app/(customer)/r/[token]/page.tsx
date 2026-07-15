@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getDataProvider } from "@/lib/data";
+import { findRequestByToken } from "@/lib/data";
 import { Wordmark } from "@/components/app/AppShell";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
 import { ReviewFlow } from "./ReviewFlow";
@@ -17,17 +17,11 @@ const ATTRS: Record<Vertical, string[]> = {
 
 export default async function ReviewPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  const provider = await getDataProvider();
-  const result = await provider.getRequestByToken(token);
+  const result = await findRequestByToken(token);
   if (!result) notFound();
 
-  const { location } = result;
-  const seeds = ATTRS[location.vertical] ?? ATTRS.physiotherapy;
-
-  // Resolve the capturing staff member's first name (used to ground the draft).
-  const data = await provider.getData();
-  const staff = data.staff.find((s) => s.id === result.request.staffId);
-  const staffName = staff ? staff.displayName.split(" ")[0] : undefined;
+  const { location, staffName } = result;
+  const seeds = ATTRS[location.vertical] ?? ATTRS.physiotherapy ?? [];
 
   return (
     <>

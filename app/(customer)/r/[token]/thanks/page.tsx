@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getDataProvider } from "@/lib/data";
+import { findRequestByToken } from "@/lib/data";
 import { Icon } from "@/components/icons";
 import { Wordmark } from "@/components/app/AppShell";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
@@ -7,8 +7,7 @@ import { Confetti } from "@/components/review/Confetti";
 
 export default async function ThanksPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  const provider = await getDataProvider();
-  const result = await provider.getRequestByToken(token);
+  const result = await findRequestByToken(token);
   const business = result?.location.name ?? "the business";
 
   return (

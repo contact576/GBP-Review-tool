@@ -1,41 +1,64 @@
 import { cookies } from "next/headers";
+import { signSession, verifySession, SESSION_TTL_SECONDS, type SessionClaims } from "./jwt";
 
 /**
- * Demo session — a signed-ish cookie standing in for real auth (Clerk later).
- * Value encodes the role so agency/admin surfaces can be role-gated.
+ * Session management — signed JWT in an httpOnly cookie.
+ * Real accounts carry their own user/workspace; demo entries are explicitly
+ * flagged `isDemo` and scoped to the seeded demo workspace.
  */
+
 export const SESSION_COOKIE = "foundly_session";
 
-export type SessionRole = "owner" | "agency_admin" | "platform_admin";
+/** Demo workspace constants (the seeded Harbourview tenant). */
+export const DEMO_WORKSPACE_ID = "ws_harbourview";
+export const DEMO_USER_ID = "usr_owner";
 
-export interface Session {
-  role: SessionRole;
-  name: string;
-}
-
-const ROLE_NAMES: Record<SessionRole, string> = {
-  owner: "Alex Chen",
-  agency_admin: "Northside Admin",
-  platform_admin: "Foundly Ops",
-};
+export type SessionRole = SessionClaims["role"];
+export interface Session extends SessionClaims {}
 
 export async function getSession(): Promise<Session | null> {
   const store = await cookies();
   const raw = store.get(SESSION_COOKIE)?.value;
   if (!raw) return null;
-  const role = (["owner", "agency_admin", "platform_admin"] as const).find((r) => r === raw);
-  if (!role) return null;
-  return { role, name: ROLE_NAMES[role] };
+  // Legacy plain-role cookies (pre-auth builds) — treat as demo sessions.
+  if (raw === "owner" || raw === "agency_admin" || raw === "platform_admin") {
+    return demoClaims(raw);
+  }
+  return verifySession(raw);
 }
 
-export async function setSession(role: SessionRole): Promise<void> {
+export async function createSession(claims: SessionClaims): Promise<void> {
   const store = await cookies();
-  store.set(SESSION_COOKIE, role, {
+  const token = await signSession(claims);
+  store.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 60 * 60 * 24 * 30,
+    maxAge: SESSION_TTL_SECONDS,
   });
+}
+
+export async function createDemoSession(role: SessionRole): Promise<void> {
+  await createSession(demoClaims(role));
+}
+
+export function demoClaims(role: SessionRole): Session {
+  const names: Record<string, string> = {
+    owner: "Alex Chen",
+    manager: "Alex Chen",
+    staff: "Priya Sharma",
+    agency_admin: "Northside Admin",
+    platform_admin: "Foundly Ops",
+  };
+  return {
+    userId: DEMO_USER_ID,
+    workspaceId: DEMO_WORKSPACE_ID,
+    role,
+    isDemo: true,
+    name: names[role] ?? "Demo User",
+    email: "demo@foundly.app",
+  };
 }
 
 export async function clearSession(): Promise<void> {
