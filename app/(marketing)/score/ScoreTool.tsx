@@ -111,23 +111,30 @@ export function ScoreTool() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [completed, setCompleted] = useState(0);
   const [results, setResults] = useState<Results | null>(null);
-  const [sample, setSample] = useState<{ text: string; source: string } | null>(null);
+  const [sample, setSample] = useState<{ text: string; source: string; stars: number } | null>(null);
   const [sampleLoading, setSampleLoading] = useState(false);
   const runRef = useRef(0);
+  // Latest computed growth score (state is stale inside timeout closures).
+  const scoreRef = useRef(0);
 
   async function loadSample(business: string, cat: string, myRun: number) {
     setSampleLoading(true);
     try {
+      // The sample's register must match the diagnosed profile band — a weak
+      // profile gets a measured 4-star sample, never glowing 5-star copy.
+      const band = scoreBand(scoreRef.current);
+      const standing = band === "high" ? "strong" : band === "mid" ? "average" : "weak";
+      const stars = standing === "strong" ? 5 : 4;
       const res = await fetch("/api/ai/score-sample", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ business, category: cat }),
+        body: JSON.stringify({ business, category: cat, standing, rating: stars }),
       });
       const data: unknown = await res.json();
       if (runRef.current !== myRun) return;
       if (data && typeof data === "object" && "text" in data && typeof (data as { text: unknown }).text === "string") {
         const d = data as { text: string; source?: string };
-        setSample({ text: d.text, source: d.source ?? "ai" });
+        setSample({ text: d.text, source: d.source ?? "ai", stars });
       } else {
         setSample(null);
       }
@@ -160,7 +167,9 @@ export function ScoreTool() {
       ) {
         const place = (data as { place: { rating?: unknown; reviewCount?: unknown } }).place;
         if (place && typeof place.rating === "number" && typeof place.reviewCount === "number") {
-          setResults(compute(business, cat, { rating: place.rating, reviewCount: place.reviewCount }));
+          const next = compute(business, cat, { rating: place.rating, reviewCount: place.reviewCount });
+          scoreRef.current = next.score.growth;
+          setResults(next);
         }
       }
     } catch {
@@ -177,6 +186,7 @@ export function ScoreTool() {
     }
     setErr("");
     const res = compute(business, category);
+    scoreRef.current = res.score.growth;
     setResults(res);
     setSample(null);
     const myRun = ++runRef.current;
@@ -332,11 +342,16 @@ export function ScoreTool() {
               <Kicker>A review Foundly would draft for you</Kicker>
             </div>
             <figure className="mt-4 rounded-card border border-hairline bg-card p-5">
-              <div className="flex gap-1 text-star" aria-label="Five stars">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <Icon key={i} name="star-fill" size={16} />
-                ))}
-              </div>
+              {(() => {
+                const stars = sample?.stars ?? (scoreBand(results.score.growth) === "high" ? 5 : 4);
+                return (
+                  <div className="flex gap-1 text-star" aria-label={`${stars === 5 ? "Five" : "Four"} stars`}>
+                    {Array.from({ length: stars }).map((_, i) => (
+                      <Icon key={i} name="star-fill" size={16} />
+                    ))}
+                  </div>
+                );
+              })()}
               {sampleLoading ? (
                 <div className="mt-3 space-y-2" aria-live="polite">
                   <div className="shimmer h-3.5 w-full rounded" />

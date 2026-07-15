@@ -17,10 +17,10 @@ import type { DraftVariant } from "@/lib/data/types";
 type Step = "rate" | "attributes" | "drafts" | "feedback";
 
 export function ReviewFlow({
-  token, business, category, reviewUrl, staffName, attributeSeeds,
+  token, business, category, industryKey, service, reviewUrl, staffName, attributeSeeds,
 }: {
-  token: string; business: string; category: string; reviewUrl: string;
-  staffName?: string; attributeSeeds: string[];
+  token: string; business: string; category: string; industryKey?: string; service?: string;
+  reviewUrl: string; staffName?: string; attributeSeeds: string[];
 }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>("rate");
@@ -49,7 +49,7 @@ export function ReviewFlow({
       const res = await fetch("/api/ai/review-draft", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ business, category, rating, attributes: selectedAttrs, staffName }),
+        body: JSON.stringify({ business, category, industryKey, service, rating, attributes: selectedAttrs, staffName }),
       });
       const data = await res.json();
       setDrafts(data.variants ?? []);
@@ -128,7 +128,12 @@ export function ReviewFlow({
             />
           ))}
         </div>
-        <p className="mt-3 text-center text-[11px] text-faint">{MICROCOPY.noIncentive}</p>
+        <div className="mt-3 flex justify-center">
+          <Button variant="ghost" size="sm" icon="sparkles" onClick={generate} loading={loading}>
+            Try different wording
+          </Button>
+        </div>
+        <p className="mt-2 text-center text-[11px] text-faint">{MICROCOPY.noIncentive}</p>
         <div className="mt-auto pt-6">
           <MegaCTA label="Copy &amp; open Google" icon="google" onClick={copyAndOpen} />
         </div>

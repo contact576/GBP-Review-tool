@@ -204,14 +204,22 @@ ACTION: <one line>`;
 }
 
 // ── Free-score sample review ────────────────────────────────
-export async function generateScoreSample(input: {
-  business: string;
-  category: string;
-}): Promise<{ text: string; source: AiSource }> {
+export async function generateScoreSample(
+  input: ScoreSampleInput,
+): Promise<{ text: string; source: AiSource }> {
+  const standing = normalizeStanding(input);
+  const stars = starsForStanding(standing);
   const template = fallbackScoreSample(input);
-  const ctx: LintContext = { kind: "review", businessName: input.business };
+  // Same lint policy as review drafts: the sample's sentiment must match the
+  // register its standing implies (strong reads as 5★, average/weak as 4★).
+  const ctx: LintContext = {
+    kind: "review",
+    businessName: input.business,
+    rating: stars,
+  };
   if (!hasAiKey()) return { text: template, source: "template" };
-  const user = `Business: ${input.business}. Category: ${input.category}. Write one short 5-star sample review.`;
+  const user = `Business: ${input.business}. Category: ${input.category}.
+Profile standing: ${standing}. Write one short sample review in the ${standing} register (${stars}-star).`;
   const raw = await completeText({
     model: getModel(),
     system: SYSTEM_PROMPTS["score-sample"],

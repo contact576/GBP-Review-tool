@@ -13,6 +13,7 @@ export async function POST(req: Request) {
       attributes: Array.isArray(body.attributes) ? body.attributes.map(String) : [],
       staffName: body.staffName ? String(body.staffName) : undefined,
       service: body.service ? String(body.service) : undefined,
+      industryKey: body.industryKey ? String(body.industryKey) : undefined,
     });
     return NextResponse.json(result);
   } catch {

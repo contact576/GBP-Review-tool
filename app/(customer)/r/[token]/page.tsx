@@ -1,27 +1,20 @@
 import { notFound } from "next/navigation";
 import { findRequestByToken } from "@/lib/data";
+import { resolveWorkspaceIndustry } from "@/lib/industries";
 import { Wordmark } from "@/components/app/AppShell";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
 import { ReviewFlow } from "./ReviewFlow";
-import type { Vertical } from "@/lib/data/types";
-
-const ATTRS: Record<Vertical, string[]> = {
-  physiotherapy: ["Friendly staff", "Got results", "Easy booking", "On time", "Clear explanations", "Direct billing"],
-  chiropractic: ["Pain relief", "Gentle care", "Friendly staff", "On time", "Clear plan", "Easy booking"],
-  dental: ["Painless visit", "Gentle staff", "Clean clinic", "On time", "Explained everything", "Fair pricing"],
-  hvac: ["On time", "Fair pricing", "Fixed it fast", "Tidy work", "Friendly tech", "Explained the issue"],
-  renovation: ["Quality work", "On schedule", "Great communication", "Tidy site", "Fair pricing", "Would rehire"],
-  salon: ["Loved the result", "Friendly stylist", "Relaxing", "On time", "Great value", "Easy booking"],
-  restaurant: ["Great food", "Friendly service", "Fast service", "Great value", "Cozy vibe", "Would return"],
-};
 
 export default async function ReviewPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   const result = await findRequestByToken(token);
   if (!result) notFound();
 
-  const { location, staffName } = result;
-  const seeds = ATTRS[location.vertical] ?? ATTRS.physiotherapy ?? [];
+  const { location, staffName, serviceHint } = result;
+  // Industry catalog is the single source of attribute chips — positive
+  // chips first, then the neutral/experience chips.
+  const industry = resolveWorkspaceIndustry(location.vertical, undefined);
+  const seeds = [...industry.attributes, ...industry.neutralAttributes];
 
   return (
     <>
@@ -41,6 +34,8 @@ export default async function ReviewPage({ params }: { params: Promise<{ token: 
         token={token}
         business={location.name}
         category={location.category}
+        industryKey={location.vertical}
+        service={serviceHint}
         reviewUrl={location.reviewUrl}
         staffName={staffName}
         attributeSeeds={seeds}

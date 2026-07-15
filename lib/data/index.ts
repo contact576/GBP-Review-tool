@@ -78,6 +78,8 @@ export async function findRequestByToken(token: string): Promise<
       request: import("./types").ReviewRequest;
       location: FoundlyData["location"];
       staffName?: string;
+      /** First service captured on the customer (staff-captured requests). */
+      serviceHint?: string;
     }
   | null
 > {
@@ -86,7 +88,12 @@ export async function findRequestByToken(token: string): Promise<
     if (result) {
       const data = await provider.getData(result.location.workspaceId);
       const staff = data?.staff.find((s) => s.id === result.request.staffId);
-      return { ...result, staffName: staff?.displayName.split(/\s+/)[0] };
+      const customer = data?.customers.find((c) => c.id === result.request.customerId);
+      return {
+        ...result,
+        staffName: staff?.displayName.split(/\s+/)[0],
+        serviceHint: customer?.services[0],
+      };
     }
   }
   return null;
