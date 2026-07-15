@@ -20,19 +20,24 @@ export async function middleware(req: NextRequest) {
 
   if (!raw) return redirect();
 
-  // Legacy plain-role cookie (pre-JWT builds) — accepted as demo session.
-  if (LEGACY_ROLES.has(raw)) return NextResponse.next();
-
-  const claims = await verifySession(raw);
-  if (!claims) return redirect();
+  // Resolve the role: legacy plain-role cookies (pre-JWT builds) are accepted
+  // as demo sessions, but still go through the SAME role gates below.
+  let role: string | null = null;
+  if (LEGACY_ROLES.has(raw)) {
+    role = raw;
+  } else {
+    const claims = await verifySession(raw);
+    if (!claims) return redirect();
+    role = claims.role;
+  }
 
   // Role-scope the consoles.
-  if (pathname.startsWith("/admin") && claims.role !== "platform_admin") {
+  if (pathname.startsWith("/admin") && role !== "platform_admin") {
     const url = req.nextUrl.clone();
     url.pathname = "/app";
     return NextResponse.redirect(url);
   }
-  if (pathname.startsWith("/agency") && claims.role !== "agency_admin") {
+  if (pathname.startsWith("/agency") && role !== "agency_admin") {
     const url = req.nextUrl.clone();
     url.pathname = "/app";
     return NextResponse.redirect(url);
