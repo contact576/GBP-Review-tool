@@ -1,27 +1,33 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Toggle } from "@/components/ds/form";
 import { useToast } from "@/components/ds/Toast";
+import { setCampaignStatusAction } from "@/lib/actions";
 
 export function CampaignToggle({
+  id,
   name,
   initialActive,
 }: {
+  id: string;
   name: string;
   initialActive: boolean;
 }) {
   const { toast } = useToast();
+  const router = useRouter();
+  const [, start] = useTransition();
   const [active, setActive] = useState(initialActive);
 
-  return (
-    <Toggle
-      checked={active}
-      label={`Turn ${name} ${active ? "off" : "on"}`}
-      onChange={(v) => {
-        setActive(v);
-        toast(v ? `${name} is live` : `${name} paused`, v ? "success" : "info", v ? "check-circle" : "clock");
-      }}
-    />
-  );
+  function onChange(v: boolean) {
+    setActive(v);
+    start(async () => {
+      await setCampaignStatusAction(id, v ? "active" : "paused");
+      toast(v ? `${name} is active` : `${name} paused`, v ? "success" : "info", v ? "check-circle" : "clock");
+      router.refresh();
+    });
+  }
+
+  return <Toggle checked={active} label={`Turn ${name} ${active ? "off" : "on"}`} onChange={onChange} />;
 }

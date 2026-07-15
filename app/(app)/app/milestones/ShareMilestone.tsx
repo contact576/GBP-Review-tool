@@ -5,12 +5,27 @@ import { Button } from "@/components/ds/Button";
 import { useToast } from "@/components/ds/Toast";
 import type { Milestone } from "@/lib/data/types";
 
-/** A milestone card with a mock share action. */
+/** A milestone card with a real share action: Web Share API, else clipboard. */
 export function ShareMilestone({ milestone }: { milestone: Milestone }) {
   const { toast } = useToast();
 
-  function share() {
-    toast(`Share card for "${milestone.title}" ready to post`, "success", "sparkles");
+  async function share() {
+    const text = `${milestone.title} — ${milestone.subtitle}`;
+    const url = window.location.origin;
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({ title: milestone.title, text, url });
+      } catch {
+        // User dismissed the share sheet — nothing to report.
+      }
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(`${text} ${url}`);
+      toast("Copied share text", "success", "copy");
+    } catch {
+      toast("Couldn't copy — select and copy the milestone text", "warning", "alert");
+    }
   }
 
   return (

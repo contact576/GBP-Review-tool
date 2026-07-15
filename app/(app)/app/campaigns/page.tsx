@@ -50,7 +50,7 @@ export default async function CampaignsPage() {
                     <p className="mt-1 text-[13px] text-sub">{c.body}</p>
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-2">
-                    <CampaignToggle name={c.name} initialActive={c.status === "active"} />
+                    <CampaignToggle id={c.id} name={c.name} initialActive={c.status === "active"} />
                     <div className="flex items-center gap-1 text-[12px] text-faint">
                       <Icon name={CHANNEL_ICON[c.channel]} size={14} />
                       <span className="capitalize">{c.channel}</span>

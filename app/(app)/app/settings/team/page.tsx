@@ -109,6 +109,7 @@ export default async function TeamSettingsPage() {
             </tbody>
           </table>
         </div>
+        )}
       </Card>
 
       {/* Leaderboard */}

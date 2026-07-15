@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Button } from "@/components/ds/Button";
@@ -10,12 +11,26 @@ import { Icon } from "@/components/icons";
 import { useToast } from "@/components/ds/Toast";
 import { validateBrandColor, isValidHex, readableText } from "@/lib/theme/contrast";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
+import { updateWhiteLabelAction } from "@/lib/actions";
 
 export interface StudioInitial {
   brandName: string;
   primary: string;
+  primaryDark: string;
   accent: string;
   logoText: string;
+  domain?: string;
+}
+
+/** Darken a #RRGGBB hex by a factor (used for the derived primary-dark shade). */
+function darkenHex(hex: string, factor = 0.72): string {
+  const n = parseInt(hex.slice(1), 16);
+  const channel = (shift: number) =>
+    Math.max(0, Math.min(255, Math.round(((n >> shift) & 0xff) * factor)));
+  return `#${[16, 8, 0]
+    .map((s) => channel(s).toString(16).padStart(2, "0"))
+    .join("")
+    .toUpperCase()}`;
 }
 
 export interface SampleClient {

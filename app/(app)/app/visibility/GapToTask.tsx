@@ -1,24 +1,33 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useTransition } from "react";
 import { Button } from "@/components/ds/Button";
 import { useToast } from "@/components/ds/Toast";
+import { createTaskAction } from "@/lib/actions";
 
-/** Mock: turns an un-named AEO query into a Co-Pilot task, then routes there. */
+/** Turns an un-named AEO query into a real Co-Pilot task, then routes there. */
 export function GapToTask({ query }: { query: string }) {
   const router = useRouter();
   const { toast } = useToast();
-  const [busy, setBusy] = useState(false);
+  const [pending, start] = useTransition();
 
   function onClick() {
-    setBusy(true);
-    toast("Added to This Week — we'll draft the fix", "success", "sparkles");
-    setTimeout(() => router.push("/app/this-week"), 700);
+    start(async () => {
+      await createTaskAction({
+        kind: "service",
+        title: `Add "${query}" to your services`,
+        rationale: `AI assistants don't name you for "${query}" — a described service on your profile closes that gap.`,
+        preview: `New service: ${query}. Add a short description so search and AI answers can match you to this question.`,
+        impact: "profile",
+      });
+      toast("Added to This Week", "success", "sparkles");
+      router.push("/app/this-week");
+    });
   }
 
   return (
-    <Button variant="secondary" size="sm" icon="plus" onClick={onClick} loading={busy}>
+    <Button variant="secondary" size="sm" icon="plus" onClick={onClick} loading={pending}>
       Turn gap into a task
     </Button>
   );
