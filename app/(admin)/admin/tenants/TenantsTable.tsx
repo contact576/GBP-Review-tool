@@ -3,13 +3,11 @@
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ds/Button";
 import { Input } from "@/components/ds/form";
-import { useToast } from "@/components/ds/Toast";
 import { formatMoney } from "@/lib/utils/format";
 import type { PlatformTenant } from "@/lib/data/types";
 import { TenantStatusBadge } from "../../_components/TenantStatus";
 
 export function TenantsTable({ tenants }: { tenants: PlatformTenant[] }) {
-  const { toast } = useToast();
   const [query, setQuery] = useState("");
 
   const rows = useMemo(() => {
@@ -54,14 +52,11 @@ export function TenantsTable({ tenants }: { tenants: PlatformTenant[] }) {
                 <td className="px-3 py-3"><TenantStatusBadge status={t.status} /></td>
                 <td className="px-3 py-3 text-[13px] text-sub">{t.region}</td>
                 <td className="px-3 py-3 text-right">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    icon="eye"
-                    onClick={() => toast(`Impersonating ${t.name} — session audited`, "info", "lock")}
-                  >
-                    Impersonate
-                  </Button>
+                  <span title="Available with database + support audit trail" className="inline-block">
+                    <Button variant="secondary" size="sm" icon="lock" disabled>
+                      Impersonate
+                    </Button>
+                  </span>
                 </td>
               </tr>
             ))}
@@ -72,7 +67,7 @@ export function TenantsTable({ tenants }: { tenants: PlatformTenant[] }) {
         ) : null}
       </div>
       <p className="text-[12px] text-faint">
-        {rows.length} of {tenants.length} tenants · impersonation is mock here and always written to the immutable audit log.
+        {rows.length} of {tenants.length} tenants · impersonation unlocks with the database and a support audit trail.
       </p>
     </div>
   );

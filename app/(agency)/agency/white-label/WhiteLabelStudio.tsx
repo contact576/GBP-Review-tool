@@ -68,6 +68,8 @@ function HexField({
 
 export function WhiteLabelStudio({ initial, sample }: { initial: StudioInitial; sample: SampleClient }) {
   const { toast } = useToast();
+  const router = useRouter();
+  const [saving, startSaving] = useTransition();
   const [brandName, setBrandName] = useState(initial.brandName);
   const [primary, setPrimary] = useState(initial.primary);
   const [accent, setAccent] = useState(initial.accent);
@@ -89,7 +91,23 @@ export function WhiteLabelStudio({ initial, sample }: { initial: StudioInitial; 
       toast("Fix the color values before saving", "warning", "alert");
       return;
     }
-    toast(passes ? "Branding saved — clients see it instantly" : "Saved with a contrast warning", passes ? "success" : "warning", passes ? "check-circle" : "alert");
+    startSaving(async () => {
+      await updateWhiteLabelAction({
+        brandName: brandName.trim() || initial.brandName,
+        primary,
+        primaryDark: primary === initial.primary ? initial.primaryDark : darkenHex(primary),
+        accent,
+        logoText: logoText.trim() || brandName.trim() || initial.logoText,
+        domain: initial.domain,
+        contrastValid: passes,
+      });
+      toast(
+        passes ? "Branding saved — clients see it on their next visit" : "Saved with a contrast warning",
+        passes ? "success" : "warning",
+        passes ? "check-circle" : "alert",
+      );
+      router.refresh();
+    });
   }
 
   return (
@@ -165,7 +183,7 @@ export function WhiteLabelStudio({ initial, sample }: { initial: StudioInitial; 
           )}
         </Card>
 
-        <Button variant="primary" icon="check" fullWidth onClick={save}>Save branding</Button>
+        <Button variant="primary" icon="check" fullWidth onClick={save} loading={saving}>Save branding</Button>
 
         <p className="flex items-start gap-2 rounded-card border border-hairline bg-primary-wash p-3 text-[12px] text-sub">
           <Icon name="lock" size={16} className="mt-px shrink-0 text-primary" />

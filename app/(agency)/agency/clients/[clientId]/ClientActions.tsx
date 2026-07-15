@@ -1,39 +1,30 @@
-"use client";
+import { Button, LinkButton } from "@/components/ds/Button";
+import { Icon } from "@/components/icons";
 
-import { useState } from "react";
-import { Button } from "@/components/ds/Button";
-import { useToast } from "@/components/ds/Toast";
-
-export function ClientActions({ clientName, brandName }: { clientName: string; brandName: string }) {
-  const { toast } = useToast();
-  const [sending, setSending] = useState(false);
-
-  function sendReport() {
-    setSending(true);
-    setTimeout(() => {
-      setSending(false);
-      toast(`${brandName} report sent to ${clientName}`, "success", "send");
-    }, 900);
-  }
-
+/**
+ * Honest client actions: report sending waits on the email service, so the
+ * send button is disabled with a clear note. Previewing the report is real.
+ */
+export function ClientActions({ brandName }: { brandName: string }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-2 sm:flex-row">
-        <Button variant="primary" icon="file" loading={sending} onClick={sendReport} className="sm:flex-1">
-          Send branded report
-        </Button>
-        <Button
-          variant="secondary"
-          icon="chat"
-          onClick={() => toast(`Opening ${clientName}'s reviews (demo)`, "info", "chat")}
+        <LinkButton href="/app/report" variant="primary" icon="file" className="sm:flex-1">
+          Preview report
+        </LinkButton>
+        <span
           className="sm:flex-1"
+          title="Sends when the email service is connected"
         >
-          View reviews
-        </Button>
+          <Button variant="secondary" icon="send" disabled fullWidth>
+            Send branded report
+          </Button>
+        </span>
       </div>
       <p className="flex items-start gap-1.5 text-[12px] text-faint">
-        <span className="mt-px inline-block size-1.5 shrink-0 rounded-full bg-faint" />
-        Action by agency admin (audited) — every impersonated action is logged to the immutable trail.
+        <Icon name="clock" size={13} className="mt-px shrink-0" />
+        Sending the {brandName}-branded report by email activates when the email service is
+        connected.
       </p>
     </div>
   );

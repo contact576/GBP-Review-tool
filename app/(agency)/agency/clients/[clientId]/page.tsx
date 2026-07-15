@@ -78,7 +78,7 @@ export default async function AgencyClientPage({ params }: { params: Promise<{ c
 
           <Card className="mt-4">
             <CardHeader kicker="Deliverables" title="Manage this client" />
-            <ClientActions clientName={client.name} brandName={wl.brandName} />
+            <ClientActions brandName={wl.brandName} />
             <div className="mt-4 flex items-center gap-2 rounded-btn bg-primary-wash p-3 text-[12px] text-sub">
               <Icon name="clock" size={16} className="shrink-0 text-primary" />
               <span>

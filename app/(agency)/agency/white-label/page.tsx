@@ -24,7 +24,14 @@ export default async function WhiteLabelPage() {
       </div>
 
       <WhiteLabelStudio
-        initial={{ brandName: wl.brandName, primary: wl.primary, accent: wl.accent, logoText: wl.logoText }}
+        initial={{
+          brandName: wl.brandName,
+          primary: wl.primary,
+          primaryDark: wl.primaryDark,
+          accent: wl.accent,
+          logoText: wl.logoText,
+          domain: wl.domain,
+        }}
         sample={sample}
       />
     </div>
