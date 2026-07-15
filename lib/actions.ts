@@ -10,7 +10,7 @@ import {
   type SessionRole,
   type Session,
 } from "@/lib/auth/session";
-import { getProviderFor, getPublicProviders } from "@/lib/data";
+import { getProviderFor, getPublicProviders, getRealProvider } from "@/lib/data";
 import { validatePasswordStrength } from "@/lib/auth/password";
 import type {
   CaptureCustomerInput,
@@ -69,7 +69,7 @@ export async function registerAction(input: {
   const pwError = validatePasswordStrength(input.password);
   if (pwError) return { ok: false, error: pwError };
 
-  const provider = await getProviderFor(null); // real provider for real accounts
+  const provider = await getRealProvider(); // Postgres (or memory fallback) — never demo
   const result = await provider.registerUser({
     name,
     email,
@@ -100,7 +100,7 @@ export async function loginAction(input: {
   if (!EMAIL_RE.test(email) || !input.password) {
     return { ok: false, error: "Invalid email or password." };
   }
-  const provider = await getProviderFor(null);
+  const provider = await getRealProvider();
   const user = await provider.verifyCredentials(email, input.password);
   if (!user) return { ok: false, error: "Invalid email or password." };
   await createSession({

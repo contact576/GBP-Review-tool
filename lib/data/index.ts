@@ -36,6 +36,17 @@ export async function getProviderFor(session: Session | null): Promise<DataProvi
   return dbProvider();
 }
 
+/**
+ * The real-account provider (Postgres when DATABASE_URL is set, else memory),
+ * independent of any session. Auth flows that run BEFORE a session exists —
+ * registration, email/password login, Google sign-in upsert — must use this,
+ * NOT `getProviderFor(null)` (which returns the demo memory store and would
+ * write accounts that later reads can never find).
+ */
+export async function getRealProvider(): Promise<DataProvider> {
+  return dbProvider();
+}
+
 /** Provider for public token/slug surfaces (no session). Checks both stores. */
 export async function getPublicProviders(): Promise<DataProvider[]> {
   const providers: DataProvider[] = [memoryProvider];

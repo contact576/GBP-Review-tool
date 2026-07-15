@@ -66,12 +66,36 @@ async function probePlaces(): Promise<{ ok: boolean; detail?: string; error?: st
   }
 }
 
-async function probeDb(): Promise<{ ok: boolean; schemaReady?: boolean; error?: string }> {
+async function probeDb(): Promise<{
+  ok: boolean;
+  schemaReady?: boolean;
+  accountColumnsOk?: boolean;
+  missingAccountColumns?: string[];
+  error?: string;
+}> {
   if (!process.env.DATABASE_URL) return { ok: false, error: "not_set" };
   try {
     const { checkDatabase } = await import("@/lib/db/ensure");
     const db = await checkDatabase();
-    return { ok: db.reachable, schemaReady: db.schemaReady, error: db.error };
+    if (!db.reachable) return { ok: false, error: db.error };
+
+    // Confirm the account table has every column registration/login write —
+    // proves the auth fix works against the live schema (column names only).
+    const { neon } = await import("@neondatabase/serverless");
+    const sql = neon(process.env.DATABASE_URL);
+    const rows = (await sql`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'app_user'`) as Array<{ column_name: string }>;
+    const have = new Set(rows.map((r) => r.column_name));
+    const required = ["password_hash", "email_verified", "google_sub", "created_at"];
+    const missing = required.filter((c) => !have.has(c));
+
+    return {
+      ok: true,
+      schemaReady: db.schemaReady,
+      accountColumnsOk: missing.length === 0,
+      missingAccountColumns: missing,
+    };
   } catch {
     return { ok: false, error: "check_failed" };
   }

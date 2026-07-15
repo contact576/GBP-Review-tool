@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createSession } from "@/lib/auth/session";
-import { getProviderFor } from "@/lib/data";
+import { getRealProvider } from "@/lib/data";
 import { googleSignInEnabled } from "@/lib/google/config";
 import { decodeIdToken, exchangeCode, OAUTH_STATE_COOKIE } from "@/lib/google/oauth";
 import { appUrl } from "@/lib/utils/app-url";
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
   const identity = await decodeIdToken(tokens.id_token);
   if (!identity) return fail("google");
 
-  const provider = await getProviderFor(null); // real provider for real accounts
+  const provider = await getRealProvider(); // Postgres (or memory fallback) — never demo
   const user = await provider.upsertGoogleUser({
     googleSub: identity.sub,
     email: identity.email,
