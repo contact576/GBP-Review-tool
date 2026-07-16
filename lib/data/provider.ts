@@ -24,6 +24,7 @@ import type {
   WhiteLabelConfig,
   Region,
   Integration,
+  Subscription,
 } from "./types";
 
 // ── Auth types ──────────────────────────────────────────────
@@ -194,6 +195,11 @@ export interface DataProvider {
     input: CaptureCustomerInput,
   ): Promise<{ customer: Customer; request: ReviewRequest }>;
   addCustomer(workspaceId: string, input: AddCustomerInput): Promise<Customer>;
+  /** Bulk import — de-duped by email; reuses addCustomer's insert semantics. */
+  addCustomersBulk(
+    workspaceId: string,
+    inputs: AddCustomerInput[],
+  ): Promise<{ added: number; skipped: number }>;
   sendRequest(workspaceId: string, input: SendRequestInput): Promise<ReviewRequest>;
   advanceRequest(
     token: string,
@@ -236,6 +242,17 @@ export interface DataProvider {
   ): Promise<void>;
   updateLocationGoogle(workspaceId: string, patch: GoogleLocationPatch): Promise<void>;
   updateWhiteLabel(workspaceId: string, config: WhiteLabelConfig): Promise<void>;
+
+  // Feature flags (admin)
+  /** Flip the matching FeatureFlag's `enabled` in the workspace's flag set. */
+  setFeatureFlag(workspaceId: string, key: string, enabled: boolean): Promise<void>;
+
+  // Billing / subscription
+  /** Patch the workspace subscription's status and/or tier. */
+  setSubscription(
+    workspaceId: string,
+    patch: { status?: Subscription["status"]; tier?: Subscription["tier"] },
+  ): Promise<void>;
 
   // Google data sync
   /** Pull real public Google data (aggregate rating/count + review sample). */

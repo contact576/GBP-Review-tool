@@ -336,6 +336,23 @@ export const memoryProvider: DataProvider = {
     return customer;
   },
 
+  async addCustomersBulk(workspaceId, inputs: AddCustomerInput[]) {
+    const data = mustDb(workspaceId);
+    let added = 0;
+    let skipped = 0;
+    for (const input of inputs) {
+      const email = input.email?.trim().toLowerCase();
+      // De-dupe by email against existing rows (incl. ones added in this batch).
+      if (email && data.customers.some((c) => c.email?.trim().toLowerCase() === email)) {
+        skipped += 1;
+        continue;
+      }
+      await memoryProvider.addCustomer(workspaceId, input);
+      added += 1;
+    }
+    return { added, skipped };
+  },
+
   async sendRequest(workspaceId, input: SendRequestInput) {
     const data = mustDb(workspaceId);
     const customer = data.customers.find((c) => c.id === input.customerId);
@@ -659,6 +676,20 @@ export const memoryProvider: DataProvider = {
     const data = mustDb(workspaceId);
     data.agency.whiteLabel = config;
     if (data.workspace.whiteLabel) data.workspace.whiteLabel = config;
+  },
+
+  // ── Feature flags ─────────────────────────────────────────
+  async setFeatureFlag(workspaceId, key, enabled) {
+    const data = mustDb(workspaceId);
+    const flag = data.featureFlags.find((f) => f.key === key);
+    if (flag) flag.enabled = enabled;
+  },
+
+  // ── Billing / subscription ────────────────────────────────
+  async setSubscription(workspaceId, patch) {
+    const data = mustDb(workspaceId);
+    if (patch.status !== undefined) data.subscription.status = patch.status;
+    if (patch.tier !== undefined) data.subscription.tier = patch.tier;
   },
 
   async setIntegrationStatus(workspaceId, provider, status, detail) {

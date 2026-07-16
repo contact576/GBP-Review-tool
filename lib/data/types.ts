@@ -304,7 +304,7 @@ export interface Subscription {
   workspaceId: WorkspaceId;
   tier: PlanTier;
   interval: "monthly" | "annual";
-  status: "trialing" | "active" | "past_due" | "free" | "canceled";
+  status: "trialing" | "active" | "past_due" | "free" | "canceled" | "paused";
   trialEndsAt?: string;
   currency: "USD" | "CAD";
   usage: {

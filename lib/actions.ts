@@ -12,6 +12,10 @@ import {
 } from "@/lib/auth/session";
 import { getProviderFor, getPublicProviders, getRealProvider } from "@/lib/data";
 import { validatePasswordStrength } from "@/lib/auth/password";
+import { stripeEnabled, createCheckoutSession } from "@/lib/billing/stripe";
+import { emailEnabled, sendEmail } from "@/lib/email";
+import { reviewRequestEmail, staffInviteEmail } from "@/lib/email/templates";
+import { appUrl } from "@/lib/utils/app-url";
 import type {
   CaptureCustomerInput,
   SendRequestInput,
@@ -29,6 +33,8 @@ import type {
   WhiteLabelConfig,
   WorkspaceSettings,
   IndustryConfig,
+  PlanTier,
+  Subscription,
 } from "@/lib/data/types";
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -152,7 +158,28 @@ export async function sendRequestAction(input: SendRequestInput) {
   const req = await provider.sendRequest(ws, input);
   revalidatePath("/app/requests");
   revalidatePath("/app/customers");
-  return { token: req.token };
+
+  // Best-effort delivery — never blocks the request, never fakes success.
+  let emailed = false;
+  if (emailEnabled()) {
+    try {
+      const data = await provider.getData(ws);
+      const customer = data?.customers.find((c) => c.id === input.customerId);
+      if (data && customer?.email) {
+        const base = await appUrl();
+        const { subject, html } = reviewRequestEmail({
+          business: data.location.name,
+          customerName: customer.name,
+          link: `${base}/r/${req.token}`,
+        });
+        const res = await sendEmail({ to: customer.email, subject, html });
+        emailed = res.ok;
+      }
+    } catch {
+      // ignore — email is a side effect, not part of the request contract
+    }
+  }
+  return { token: req.token, emailed };
 }
 
 // Public (token-keyed, no session) — used by the customer review flow.
@@ -333,12 +360,31 @@ export async function updateWhiteLabelAction(config: WhiteLabelConfig) {
 export async function inviteStaffAction(
   email: string,
   role: "manager" | "staff" = "staff",
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; emailed?: boolean }> {
   const { provider, ws } = await scoped();
   const result = await provider.createStaffInvite(ws, email, role);
   if ("error" in result) return { ok: false, error: result.error };
   revalidatePath("/app/settings/team");
-  return { ok: true };
+
+  // Best-effort delivery — never blocks the invite, never fakes success.
+  let emailed = false;
+  if (emailEnabled()) {
+    try {
+      const data = await provider.getData(ws);
+      if (data) {
+        const base = await appUrl();
+        const { subject, html } = staffInviteEmail({
+          business: data.location.name,
+          link: `${base}/sign-up?invite=${result.token}`,
+        });
+        const res = await sendEmail({ to: result.email, subject, html });
+        emailed = res.ok;
+      }
+    } catch {
+      // ignore — email is a side effect, not part of the invite contract
+    }
+  }
+  return { ok: true, emailed };
 }
 
 export async function addStaffMemberAction(displayName: string) {
@@ -363,6 +409,100 @@ export async function resetDemoAction() {
   const provider = await getProviderFor(session);
   await provider.resetDemo();
   revalidatePath("/", "layout");
+}
+
+// ── Feature flags (admin) ───────────────────────────────────
+export async function setFeatureFlagAction(key: string, enabled: boolean) {
+  const { provider, ws } = await scoped();
+  await provider.setFeatureFlag(ws, key, enabled);
+  revalidatePath("/admin/flags");
+  return { ok: true };
+}
+
+// ── Customer import (bulk) ──────────────────────────────────
+export async function importCustomersAction(
+  rows: AddCustomerInput[],
+): Promise<{ added: number; skipped: number }> {
+  const { provider, ws } = await scoped();
+  const result = await provider.addCustomersBulk(ws, rows);
+  revalidatePath("/app/customers");
+  return result;
+}
+
+// ── Billing / subscription ──────────────────────────────────
+export async function changePlanAction(tier: PlanTier) {
+  const { provider, ws } = await scoped();
+  await provider.setSubscription(ws, { tier });
+  revalidatePath("/app/settings/billing");
+  return { ok: true };
+}
+
+export async function pauseSubscriptionAction() {
+  const { provider, ws } = await scoped();
+  // "paused" isn't in the shared Subscription["status"] union (a Campaign
+  // status), and types.ts is out of scope for this change — cast locally so the
+  // paused state is still persisted honestly.
+  await provider.setSubscription(ws, { status: "paused" as Subscription["status"] });
+  revalidatePath("/app/settings/billing");
+  return { ok: true };
+}
+
+export async function downgradeToFreeAction() {
+  const { provider, ws } = await scoped();
+  await provider.setSubscription(ws, { tier: "free", status: "active" });
+  revalidatePath("/app/settings/billing");
+  return { ok: true };
+}
+
+/**
+ * Start a Stripe Checkout session for the price in `process.env[priceEnvKey]`.
+ * Honest degradation: with no price configured or Stripe disabled, returns a
+ * `not_configured` result so the UI can show "connect billing" instead of a
+ * broken redirect.
+ */
+export async function startCheckoutAction(
+  priceEnvKey: string,
+): Promise<
+  | { ok: true; url: string }
+  | { ok: false; reason: "not_configured" | "error"; message: string }
+> {
+  const { session, ws } = await scoped();
+  const priceId = process.env[priceEnvKey];
+  if (!priceId || !stripeEnabled()) {
+    return {
+      ok: false,
+      reason: "not_configured",
+      message: "Connect billing to enable upgrades.",
+    };
+  }
+  const base = await appUrl();
+  const res = await createCheckoutSession({
+    priceId,
+    customerEmail: session.email,
+    successUrl: `${base}/app/settings/billing?checkout=success`,
+    cancelUrl: `${base}/app/settings/billing?checkout=cancelled`,
+    workspaceId: ws,
+  });
+  if (!res.ok) {
+    return { ok: false, reason: "error", message: res.error };
+  }
+  return { ok: true, url: res.url };
+}
+
+/**
+ * Open the Stripe Billing Portal. No Stripe customer id is persisted yet, so
+ * this stays honestly `not_configured` until that wiring lands (or Stripe is
+ * disabled).
+ */
+export async function openBillingPortalAction(): Promise<
+  { ok: true; url: string } | { ok: false; reason: "not_configured"; message: string }
+> {
+  await scoped(); // require an authenticated workspace session
+  return {
+    ok: false,
+    reason: "not_configured",
+    message: "Connect billing to manage your subscription.",
+  };
 }
 
 export type { Channel };

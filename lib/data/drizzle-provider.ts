@@ -1549,6 +1549,34 @@ export const drizzleProvider: DataProvider = {
     return customer;
   },
 
+  async addCustomersBulk(workspaceId, inputs: AddCustomerInput[]) {
+    const db = getDb();
+    // Seed the de-dupe set from existing customer emails, then grow it as we
+    // insert so duplicates within the same batch are skipped too.
+    const existing = await db
+      .select({ email: t.customer.email })
+      .from(t.customer)
+      .where(eq(t.customer.workspaceId, workspaceId));
+    const seen = new Set<string>();
+    for (const row of existing) {
+      if (row.email) seen.add(row.email.trim().toLowerCase());
+    }
+
+    let added = 0;
+    let skipped = 0;
+    for (const input of inputs) {
+      const email = input.email?.trim().toLowerCase();
+      if (email && seen.has(email)) {
+        skipped += 1;
+        continue;
+      }
+      await drizzleProvider.addCustomer(workspaceId, input);
+      if (email) seen.add(email);
+      added += 1;
+    }
+    return { added, skipped };
+  },
+
   async sendRequest(workspaceId, input: SendRequestInput) {
     const db = getDb();
     const ctx = await loadContext(db, workspaceId);
@@ -2262,6 +2290,39 @@ export const drizzleProvider: DataProvider = {
         .set({ whiteLabel: config })
         .where(eq(t.workspace.id, workspaceId));
     }
+  },
+
+  // ── Feature flags ─────────────────────────────────────────
+  async setFeatureFlag(workspaceId, key, enabled) {
+    // featureFlags live inside the dataset_meta JSONB blob (read-modify-write).
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(t.datasetMeta)
+      .where(eq(t.datasetMeta.workspaceId, workspaceId))
+      .limit(1);
+    const meta = rows[0];
+    if (!meta) return;
+    const featureFlags = meta.featureFlags.map((f) =>
+      f.key === key ? { ...f, enabled } : f,
+    );
+    await db
+      .update(t.datasetMeta)
+      .set({ featureFlags })
+      .where(eq(t.datasetMeta.workspaceId, workspaceId));
+  },
+
+  // ── Billing / subscription ────────────────────────────────
+  async setSubscription(workspaceId, patch) {
+    const db = getDb();
+    const set: Partial<typeof t.subscription.$inferInsert> = {};
+    if (patch.status !== undefined) set.status = patch.status;
+    if (patch.tier !== undefined) set.tier = patch.tier;
+    if (Object.keys(set).length === 0) return;
+    await db
+      .update(t.subscription)
+      .set(set)
+      .where(eq(t.subscription.workspaceId, workspaceId));
   },
 
   async setIntegrationStatus(workspaceId, provider, status, detail) {
