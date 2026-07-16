@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ds/Card";
 import { Button } from "@/components/ds/Button";
@@ -17,9 +17,9 @@ import {
   consentLabels,
   makeConsentSourceText,
 } from "@/lib/compliance/consent";
-import { customersToCsv, downloadCsv } from "@/lib/utils/csv";
+import { customersToCsv, downloadCsv, parseCustomersCsv } from "@/lib/utils/csv";
 import { initials, maskEmail, maskPhone, formatRelative, formatDate, pluralize } from "@/lib/utils/format";
-import { sendRequestAction, addCustomerAction } from "@/lib/actions";
+import { sendRequestAction, addCustomerAction, importCustomersAction } from "@/lib/actions";
 import type { Customer, ReviewRequest, LifecycleStage, Region } from "@/lib/data/types";
 
 type TabKey = "all" | "regulars" | "never" | "reviewed" | "suppressed";
@@ -63,6 +63,13 @@ export function CustomersView({
   const [addService, setAddService] = useState(false);
   const [addMarketing, setAddMarketing] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+
+  // "Import CSV" state
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importPending, startImport] = useTransition();
+  const [importRows, setImportRows] = useState<{ name: string; email?: string; phone?: string }[]>([]);
+  const [importFileName, setImportFileName] = useState("");
 
   const labels = consentLabels(region);
 
@@ -174,6 +181,47 @@ export function CustomersView({
     });
   }
 
+  function pickImportFile() {
+    fileInputRef.current?.click();
+  }
+
+  async function onImportFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    // Reset so re-selecting the same file still fires onChange.
+    e.target.value = "";
+    if (!file) return;
+    const text = await file.text();
+    const rows = parseCustomersCsv(text);
+    setImportRows(rows);
+    setImportFileName(file.name);
+    setImportOpen(true);
+    if (rows.length === 0) {
+      toast("No valid rows found in that file", "warning", "alert");
+    }
+  }
+
+  function confirmImport() {
+    if (importRows.length === 0) return;
+    startImport(async () => {
+      const result = await importCustomersAction(
+        importRows.map((r) => ({
+          name: r.name,
+          email: r.email,
+          phone: r.phone,
+          serviceConsent: false,
+          marketingConsent: false,
+          services: [],
+          consentSourceText: "Imported via CSV",
+        })),
+      );
+      toast(`Added ${result.added} (skipped ${result.skipped})`, "success", "check-circle");
+      setImportOpen(false);
+      setImportRows([]);
+      setImportFileName("");
+      router.refresh();
+    });
+  }
+
   return (
     <div className="space-y-5">
       {/* Summary strip */}
@@ -201,16 +249,23 @@ export function CustomersView({
           <Button size="sm" icon="plus" onClick={() => setAddOpen(true)}>
             Add customer
           </Button>
-          <span title="CSV import arrives with the database connection" className="inline-block">
-            <Button variant="secondary" size="sm" icon="file" disabled>
-              CSV import — coming with database
-            </Button>
-          </span>
+          <Button variant="secondary" size="sm" icon="file" onClick={pickImportFile}>
+            Import CSV
+          </Button>
           <Button variant="secondary" size="sm" icon="download" onClick={exportAll}>
             Export CSV
           </Button>
         </div>
       </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".csv"
+        className="hidden"
+        aria-hidden="true"
+        onChange={onImportFileChange}
+      />
 
       <Tabs items={tabs} active={tab} onChange={(k) => setTab(k as TabKey)} />
 
@@ -224,7 +279,7 @@ export function CustomersView({
               action={
                 <div className="flex flex-wrap justify-center gap-2">
                   <Button size="sm" icon="plus" onClick={() => setAddOpen(true)}>Add a customer</Button>
-                  <Button size="sm" variant="secondary" icon="download">Import CSV</Button>
+                  <Button size="sm" variant="secondary" icon="file" onClick={pickImportFile}>Import CSV</Button>
                 </div>
               }
             />
@@ -321,6 +376,80 @@ export function CustomersView({
           </div>
         </>
       )}
+
+      {/* Import-preview drawer */}
+      <Drawer
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        title="Import customers"
+        footer={
+          <Button
+            onClick={confirmImport}
+            loading={importPending}
+            disabled={importRows.length === 0}
+            icon="plus"
+            fullWidth
+          >
+            {importRows.length > 0 ? `Import ${importRows.length} ${pluralize(importRows.length, "customer")}` : "Nothing to import"}
+          </Button>
+        }
+      >
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 rounded-card border border-hairline bg-card p-3">
+            <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-primary-wash text-primary-dark">
+              <Icon name="file" size={18} />
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-[14px] font-semibold text-ink">{importFileName || "Selected file"}</div>
+              <div className="text-[13px] text-sub">
+                {importRows.length} valid {pluralize(importRows.length, "row")} found
+              </div>
+            </div>
+          </div>
+
+          {importRows.length === 0 ? (
+            <div className="flex items-start gap-2 rounded-btn border border-gold/40 bg-gold-tint/50 px-3 py-2">
+              <Icon name="alert" size={16} className="mt-0.5 shrink-0 text-gold-deep" />
+              <p className="text-[13px] text-sub">
+                No usable rows. Expected columns are name, email, phone — a header row is optional.
+              </p>
+            </div>
+          ) : (
+            <div>
+              <div className="mb-2 text-[13px] font-bold text-sub">Preview</div>
+              <div className="overflow-hidden rounded-card border border-hairline">
+                <table className="w-full text-left text-[13px]">
+                  <thead className="border-b border-hairline bg-paper/60">
+                    <tr className="text-faint">
+                      <th className="px-3 py-2 font-semibold">Name</th>
+                      <th className="px-3 py-2 font-semibold">Email</th>
+                      <th className="px-3 py-2 font-semibold">Phone</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-hairline">
+                    {importRows.slice(0, 8).map((r, i) => (
+                      <tr key={`${r.name}-${i}`}>
+                        <td className="px-3 py-2 font-semibold text-ink">{r.name}</td>
+                        <td className="px-3 py-2 text-sub">{r.email ?? "—"}</td>
+                        <td className="px-3 py-2 text-sub">{r.phone ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {importRows.length > 8 ? (
+                <p className="mt-2 text-[13px] text-faint">
+                  …and {importRows.length - 8} more {pluralize(importRows.length - 8, "row")}.
+                </p>
+              ) : null}
+              <p className="mt-3 text-[13px] text-faint">
+                Imported customers start with no consent captured — you can send review requests once
+                they opt in.
+              </p>
+            </div>
+          )}
+        </div>
+      </Drawer>
 
       {/* Add-customer drawer */}
       <Drawer

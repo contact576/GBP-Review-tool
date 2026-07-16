@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Card } from "@/components/ds/Card";
 import { Badge } from "@/components/ds/misc";
 import { Toggle } from "@/components/ds/form";
 import { useToast } from "@/components/ds/Toast";
+import { setFeatureFlagAction } from "@/lib/actions";
 import type { FeatureFlag } from "@/lib/data/types";
 
 const ROLLOUT: Record<FeatureFlag["rollout"], { tone: "primary" | "gold" | "sub"; label: string }> = {
@@ -15,13 +17,26 @@ const ROLLOUT: Record<FeatureFlag["rollout"], { tone: "primary" | "gold" | "sub"
 
 export function FlagsTable({ flags }: { flags: FeatureFlag[] }) {
   const { toast } = useToast();
+  const router = useRouter();
+  const [pending, start] = useTransition();
   const [state, setState] = useState<Record<string, boolean>>(
     Object.fromEntries(flags.map((f) => [f.key, f.enabled])),
   );
 
   function flip(f: FeatureFlag, next: boolean) {
+    // Optimistic: flip locally right away, then persist.
     setState((s) => ({ ...s, [f.key]: next }));
-    toast(`${f.key} ${next ? "enabled" : "disabled"}`, next ? "success" : "info", next ? "check-circle" : "flag");
+    start(async () => {
+      try {
+        await setFeatureFlagAction(f.key, next);
+        toast(`${f.key} ${next ? "enabled" : "disabled"}`, next ? "success" : "info", next ? "check-circle" : "flag");
+        router.refresh();
+      } catch {
+        // Roll back the optimistic flip if the write failed.
+        setState((s) => ({ ...s, [f.key]: !next }));
+        toast(`Couldn't update ${f.key}`, "danger", "alert");
+      }
+    });
   }
 
   return (
@@ -41,7 +56,7 @@ export function FlagsTable({ flags }: { flags: FeatureFlag[] }) {
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span className={`text-[12px] font-semibold ${on ? "text-primary" : "text-faint"}`}>{on ? "On" : "Off"}</span>
-                <Toggle checked={on} onChange={(v) => flip(f, v)} label={`Toggle ${f.key}`} />
+                <Toggle checked={on} onChange={(v) => flip(f, v)} disabled={pending} label={`Toggle ${f.key}`} />
               </div>
             </li>
           );
