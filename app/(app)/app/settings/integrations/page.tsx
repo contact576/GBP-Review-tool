@@ -92,7 +92,7 @@ export default async function IntegrationsSettingsPage() {
                   </div>
                 </div>
                 <div className="shrink-0 sm:pl-3">
-                  <ReconnectButton label={int.label} connected={connected} />
+                  <ReconnectButton provider={int.provider} label={int.label} connected={connected} />
                 </div>
               </div>
             );
