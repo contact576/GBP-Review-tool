@@ -47,18 +47,24 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         aria-live="polite"
         role="status"
       >
-        {items.map((t) => (
-          <div
-            key={t.id}
-            className={cn(
-              "pointer-events-auto flex items-center gap-2 rounded-btn px-4 py-3 text-[14px] font-medium shadow-lg animate-slide-up max-w-sm",
-              toneStyles[t.tone],
-            )}
-          >
-            {t.icon ? <Icon name={t.icon} size={18} /> : null}
-            {t.message}
-          </div>
-        ))}
+        {items.map((t) => {
+          const assertive = t.tone === "danger";
+          return (
+            <div
+              key={t.id}
+              role={assertive ? "alert" : undefined}
+              aria-live={assertive ? "assertive" : undefined}
+              aria-atomic={assertive ? true : undefined}
+              className={cn(
+                "pointer-events-auto flex items-center gap-2 rounded-btn px-4 py-3 text-[14px] font-medium shadow-lg animate-slide-up max-w-sm",
+                toneStyles[t.tone],
+              )}
+            >
+              {t.icon ? <Icon name={t.icon} size={18} aria-hidden /> : null}
+              {t.message}
+            </div>
+          );
+        })}
       </div>
     </ToastContext.Provider>
   );

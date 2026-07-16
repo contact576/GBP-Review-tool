@@ -22,9 +22,9 @@ export function SubDial({
   const progress = (value / 100) * arcLen;
 
   return (
-    <div className="inline-flex flex-col items-center gap-1">
+    <div className="inline-flex flex-col items-center gap-1" role="img" aria-label={`${label}: ${value} of 100`}>
       <div className="relative" style={{ width: size, height: size }}>
-        <svg width={size} height={size} className="rotate-[135deg]">
+        <svg width={size} height={size} className="rotate-[135deg]" aria-hidden="true">
           <circle cx={cx} cy={cx} r={r} fill="none" stroke={onHero ? "rgba(255,255,255,0.16)" : "#E7E5DE"} strokeWidth={stroke} strokeLinecap="round" strokeDasharray={`${arcLen} ${circumference}`} />
           <circle cx={cx} cy={cx} r={r} fill="none" stroke={bandColor(value, onHero)} strokeWidth={stroke} strokeLinecap="round" strokeDasharray={`${progress} ${circumference}`} />
         </svg>

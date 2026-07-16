@@ -121,6 +121,7 @@ export function Delta({ value, suffix = "%", className }: { value: number; suffi
       )}
     >
       <Icon name={up ? "arrow-up" : "arrow-down"} size={12} />
+      <span className="sr-only">{up ? "up " : "down "}</span>
       {Math.abs(value)}
       {suffix}
     </span>

@@ -60,10 +60,15 @@ export function ScoreDial({
   const color = bandColor(value);
   const trackColor = onHero ? "rgba(255,255,255,0.16)" : "#E7E5DE";
 
+  const ariaLabel =
+    `${label}: ${value} of 100` +
+    (sublabel ? `, ${sublabel}` : "") +
+    (typeof delta === "number" ? `, ${delta >= 0 ? "up" : "down"} ${Math.abs(delta)} this month` : "");
+
   return (
-    <div className="inline-flex flex-col items-center">
+    <div className="inline-flex flex-col items-center" role="img" aria-label={ariaLabel}>
       <div className="relative" style={{ width: size, height: size }}>
-        <svg width={size} height={size} className="rotate-[135deg]">
+        <svg width={size} height={size} className="rotate-[135deg]" aria-hidden="true">
           <circle
             cx={cx} cy={cx} r={r} fill="none" stroke={trackColor}
             strokeWidth={stroke} strokeLinecap="round"
@@ -95,7 +100,6 @@ export function ScoreDial({
           </div>
         ) : null}
       </div>
-      <span className="sr-only">{label}: {value} of 100</span>
     </div>
   );
 }

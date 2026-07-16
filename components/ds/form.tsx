@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useId } from "react";
+import { cloneElement, forwardRef, isValidElement, useId, type ReactElement } from "react";
 import { cn } from "@/lib/utils/cn";
 import { Icon, type IconName } from "@/components/icons";
 
@@ -11,6 +11,26 @@ export function Field({
   label?: string; hint?: string; error?: string; required?: boolean;
   children: React.ReactNode; className?: string;
 }) {
+  const fieldId = useId();
+  const errorId = `${fieldId}-error`;
+  const hintId = `${fieldId}-hint`;
+  const describedBy = error ? errorId : hint ? hintId : undefined;
+
+  // Programmatically link the control to its error/hint text and mark it
+  // invalid, without altering the visual output.
+  let control = children;
+  if (isValidElement(children) && describedBy) {
+    const child = children as ReactElement<{
+      "aria-describedby"?: string;
+      "aria-invalid"?: boolean | "true" | "false";
+    }>;
+    const existing = child.props["aria-describedby"];
+    control = cloneElement(child, {
+      "aria-describedby": [existing, describedBy].filter(Boolean).join(" ") || undefined,
+      "aria-invalid": error ? (child.props["aria-invalid"] ?? true) : child.props["aria-invalid"],
+    });
+  }
+
   return (
     <label className={cn("block", className)}>
       {label ? (
@@ -19,11 +39,11 @@ export function Field({
           {required ? <span className="text-danger"> *</span> : null}
         </span>
       ) : null}
-      {children}
+      {control}
       {error ? (
-        <span className="mt-1 block text-[12px] text-danger" role="alert">{error}</span>
+        <span id={errorId} className="mt-1 block text-[12px] text-danger" role="alert">{error}</span>
       ) : hint ? (
-        <span className="mt-1 block text-[12px] text-faint">{hint}</span>
+        <span id={hintId} className="mt-1 block text-[12px] text-faint">{hint}</span>
       ) : null}
     </label>
   );
@@ -37,12 +57,12 @@ export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTML
     if (iconLeft) {
       return (
         <div className="relative">
-          <Icon name={iconLeft} size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint pointer-events-none" />
-          <input ref={ref} className={cn(inputBase, "pl-10", invalid ? "border-danger" : "border-hairline", className)} {...props} />
+          <Icon name={iconLeft} size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint pointer-events-none" aria-hidden />
+          <input ref={ref} aria-invalid={invalid || undefined} className={cn(inputBase, "pl-10", invalid ? "border-danger" : "border-hairline", className)} {...props} />
         </div>
       );
     }
-    return <input ref={ref} className={cn(inputBase, invalid ? "border-danger" : "border-hairline", className)} {...props} />;
+    return <input ref={ref} aria-invalid={invalid || undefined} className={cn(inputBase, invalid ? "border-danger" : "border-hairline", className)} {...props} />;
   },
 );
 
@@ -51,6 +71,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttrib
     return (
       <textarea
         ref={ref}
+        aria-invalid={invalid || undefined}
         className={cn(
           "w-full rounded-input border bg-card px-3.5 py-3 text-[15px] text-ink placeholder:text-faint transition-colors focus-visible:outline-none focus-visible:border-primary min-h-[96px] resize-y",
           invalid ? "border-danger" : "border-hairline",

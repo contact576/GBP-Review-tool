@@ -20,8 +20,13 @@ export function Sparkline({
   const area = `${line} L${width} ${height} L0 ${height} Z`;
   const gid = `spark-${color.replace("#", "")}-${data.length}`;
 
+  const first = data[0] ?? 0;
+  const last = data[data.length - 1] ?? 0;
+  const trend = last > first ? "trending up" : last < first ? "trending down" : "flat";
+  const ariaLabel = `Trend chart, ${trend}, from ${first} to ${last}`;
+
   return (
-    <svg width={width} height={height} className={cn("overflow-visible", className)} aria-hidden>
+    <svg width={width} height={height} className={cn("overflow-visible", className)} role="img" aria-label={ariaLabel}>
       {fill ? (
         <>
           <defs>

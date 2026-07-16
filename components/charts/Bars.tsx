@@ -7,8 +7,9 @@ export function FunnelBar({
   stages: { label: string; value: number }[];
 }) {
   const max = Math.max(...stages.map((s) => s.value), 1);
+  const ariaLabel = `Funnel: ${stages.map((s) => `${s.label} ${s.value}`).join(", ")}`;
   return (
-    <div className="space-y-2.5">
+    <div className="space-y-2.5" role="img" aria-label={ariaLabel}>
       {stages.map((s) => (
         <div key={s.label} className="flex items-center gap-3">
           <span className="w-20 shrink-0 text-[12px] text-sub">{s.label}</span>
@@ -45,8 +46,9 @@ export function BenchmarkBar({
       <span className={cn("w-12 text-right data-chip", isYou ? "text-primary-dark" : "text-sub")}>{value}{unit}</span>
     </div>
   );
+  const ariaLabel = `${label}. You ${you}${unit}${others.length ? ", " + others.map((o) => `${o.name} ${o.value}${unit}`).join(", ") : ""}`;
   return (
-    <div>
+    <div role="img" aria-label={ariaLabel}>
       <div className="kicker mb-2">{label}</div>
       <div className="space-y-1.5">
         {row("You", you, true)}
@@ -64,8 +66,9 @@ export function GapBar({
 }) {
   const ahead = goodWhenHigher ? you >= area : you <= area;
   const max = Math.max(you, area) * 1.15 || 1;
+  const ariaLabel = `${label}: ${ahead ? "Strength" : "Needs work"}. You ${format(you)}, area average ${format(area)}`;
   return (
-    <div>
+    <div role="img" aria-label={ariaLabel}>
       <div className="mb-1.5 flex items-center justify-between">
         <span className="text-[13px] font-medium text-ink">{label}</span>
         <span className={cn("text-[12px] font-semibold", ahead ? "text-primary" : "text-danger")}>
