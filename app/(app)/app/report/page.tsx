@@ -1,7 +1,8 @@
 import { getData } from "@/lib/data";
 import { sinceJoined } from "@/lib/data/selectors";
 import { Card, CardHeader } from "@/components/ds/Card";
-import { Badge, Delta } from "@/components/ds/misc";
+import { Badge, Delta, EmptyState } from "@/components/ds/misc";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Icon, type IconName } from "@/components/icons";
 import { SubDial } from "@/components/charts/SubDial";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
@@ -44,14 +45,14 @@ export default async function ReportPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Growth Report</h1>
-          <p className="text-[15px] text-sub">
+      <PageHeader
+        title="Growth Report"
+        sub={
+          <>
             {report ? report.period : "Last 30 days"} · generated {report ? formatDate(report.generatedAt) : formatDate(new Date().toISOString())}
-          </p>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {/* Headline */}
       <Card raised as="section">
@@ -162,7 +163,11 @@ export default async function ReportPage() {
               ))}
             </ol>
           ) : (
-            <p className="py-4 text-center text-[14px] text-faint">No tasks queued — you&apos;re all caught up.</p>
+            <EmptyState
+              icon="sparkles"
+              title="No tasks queued"
+              description="You're all caught up — nothing waiting on you."
+            />
           )}
         </Card>
       </div>

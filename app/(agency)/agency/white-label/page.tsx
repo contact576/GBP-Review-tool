@@ -1,4 +1,5 @@
 import { getData } from "@/lib/data";
+import { PageHeader } from "@/components/app/PageHeader";
 import { WhiteLabelStudio, type SampleClient } from "./WhiteLabelStudio";
 
 export default async function WhiteLabelPage() {
@@ -18,10 +19,10 @@ export default async function WhiteLabelPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[22px] font-extrabold text-ink">White-label studio</h1>
-        <p className="text-[14px] text-sub">Theme the portal and every client-facing report. The preview updates live as you type.</p>
-      </div>
+      <PageHeader
+        title="White-label"
+        sub="Theme the portal and every client-facing report. The preview updates live as you type."
+      />
 
       <WhiteLabelStudio
         initial={{

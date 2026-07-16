@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ds/Button";
 import { Input } from "@/components/ds/form";
+import { EmptyState } from "@/components/ds/misc";
 import { formatMoney } from "@/lib/utils/format";
 import type { PlatformTenant } from "@/lib/data/types";
 import { TenantStatusBadge } from "../../_components/TenantStatus";
@@ -45,12 +46,12 @@ export function TenantsTable({ tenants }: { tenants: PlatformTenant[] }) {
             {rows.map((t) => (
               <tr key={t.id} className="border-b border-hairline last:border-0 hover:bg-primary-wash/40">
                 <td className="px-3 py-3 text-[14px] font-semibold text-ink">{t.name}</td>
-                <td className="px-3 py-3 text-[13px] capitalize text-sub">{t.vertical}</td>
-                <td className="px-3 py-3 text-[13px] capitalize text-sub">{t.plan}</td>
-                <td className="px-3 py-3 text-right data-chip text-[13px] font-bold text-ink">{formatMoney(t.mrr)}</td>
-                <td className="px-3 py-3 text-right data-chip text-[13px] text-ink">{t.locations}</td>
+                <td className="px-3 py-3 text-[14px] capitalize text-sub">{t.vertical}</td>
+                <td className="px-3 py-3 text-[14px] capitalize text-sub">{t.plan}</td>
+                <td className="px-3 py-3 text-right data-chip text-[14px] font-bold text-ink">{formatMoney(t.mrr)}</td>
+                <td className="px-3 py-3 text-right data-chip text-[14px] text-ink">{t.locations}</td>
                 <td className="px-3 py-3"><TenantStatusBadge status={t.status} /></td>
-                <td className="px-3 py-3 text-[13px] text-sub">{t.region}</td>
+                <td className="px-3 py-3 text-[14px] text-sub">{t.region}</td>
                 <td className="px-3 py-3 text-right">
                   <span title="Available with database + support audit trail" className="inline-block">
                     <Button variant="secondary" size="sm" icon="lock" disabled>
@@ -63,7 +64,11 @@ export function TenantsTable({ tenants }: { tenants: PlatformTenant[] }) {
           </tbody>
         </table>
         {rows.length === 0 ? (
-          <div className="px-4 py-10 text-center text-[13px] text-faint">No tenants match “{query}”.</div>
+          <EmptyState
+            icon="search"
+            title="No tenants found"
+            description={`No tenants match “${query}”. Try a different name, vertical, or region.`}
+          />
         ) : null}
       </div>
       <p className="text-[12px] text-faint">

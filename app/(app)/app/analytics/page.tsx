@@ -2,6 +2,7 @@ import { getData } from "@/lib/data";
 import { sinceJoined, sparklinePoints } from "@/lib/data/selectors";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge, Delta } from "@/components/ds/misc";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Icon, type IconName } from "@/components/icons";
 import { Sparkline } from "@/components/charts/Sparkline";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
@@ -57,12 +58,10 @@ export default async function AnalyticsPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Analytics</h1>
-        <p className="text-[15px] text-sub">
-          The three actions that matter — measured honestly, never inflated into &ldquo;customers.&rdquo;
-        </p>
-      </div>
+      <PageHeader
+        title="Analytics"
+        sub={<>The three actions that matter — measured honestly, never inflated into &ldquo;customers.&rdquo;</>}
+      />
 
       <div className="space-y-4">
         {sections.map((s) => (

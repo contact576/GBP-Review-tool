@@ -1,6 +1,7 @@
 import { getData } from "@/lib/data";
 import { Card, CardHeader } from "@/components/ds/Card";
-import { Badge } from "@/components/ds/misc";
+import { Badge, EmptyState } from "@/components/ds/misc";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Icon } from "@/components/icons";
 import { PricingTierCard, type Tier } from "@/components/app/PricingTierCard";
 import { formatMoney, formatDate, daysUntil } from "@/lib/utils/format";
@@ -58,10 +59,7 @@ export default async function BillingSettingsPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Billing</h1>
-        <p className="text-[15px] text-sub">Your plan, usage, and invoices — with an honest way out.</p>
-      </div>
+      <PageHeader title="Billing" sub="Your plan, usage, and invoices — with an honest way out." />
 
       <SettingsNav />
 
@@ -150,7 +148,11 @@ export default async function BillingSettingsPage() {
             </table>
           </div>
         ) : (
-          <p className="py-4 text-center text-[14px] text-faint">No invoices yet.</p>
+          <EmptyState
+            icon="file"
+            title="No invoices yet"
+            description="Your invoices will appear here once billing starts."
+          />
         )}
       </Card>
 

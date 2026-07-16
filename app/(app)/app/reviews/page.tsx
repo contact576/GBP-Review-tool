@@ -1,6 +1,7 @@
 import { getData } from "@/lib/data";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge } from "@/components/ds/misc";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Icon } from "@/components/icons";
 import { formatRelative } from "@/lib/utils/format";
 import { ReviewsInbox } from "./ReviewsInbox";
@@ -12,12 +13,10 @@ export default async function ReviewsPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Reviews</h1>
-        <p className="text-[15px] text-sub">
-          Every review in one place. Reply in your voice — we draft, you approve.
-        </p>
-      </div>
+      <PageHeader
+        title="Reviews"
+        sub="Every review in one place. Reply in your voice — we draft, you approve."
+      />
 
       {unresolvedFeedback.length > 0 ? (
         <Card className="border-gold/40">

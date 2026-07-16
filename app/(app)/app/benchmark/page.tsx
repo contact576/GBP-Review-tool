@@ -3,6 +3,7 @@ import { monthlyVelocity } from "@/lib/data/selectors";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { LinkButton } from "@/components/ds/Button";
 import { Badge, DataChip } from "@/components/ds/misc";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Icon } from "@/components/icons";
 import { BenchmarkBar } from "@/components/charts/Bars";
 import { Sparkline } from "@/components/charts/Sparkline";
@@ -33,12 +34,10 @@ export default async function BenchmarkPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Benchmark</h1>
-        <p className="text-[15px] text-sub">
-          Where you stand against nearby physiotherapy clinics — the honest version.
-        </p>
-      </div>
+      <PageHeader
+        title="Benchmark"
+        sub="Where you stand against nearby physiotherapy clinics — the honest version."
+      />
 
       {/* Position line */}
       <Card raised>

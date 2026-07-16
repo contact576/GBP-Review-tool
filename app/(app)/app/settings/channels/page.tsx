@@ -1,6 +1,7 @@
 import { getData } from "@/lib/data";
 import { Card } from "@/components/ds/Card";
 import { Badge } from "@/components/ds/misc";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Icon, type IconName } from "@/components/icons";
 import { SettingsNav } from "../SettingsNav";
 
@@ -12,10 +13,7 @@ export default async function ChannelsSettingsPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Channels</h1>
-        <p className="text-[15px] text-sub">How review requests reach your customers.</p>
-      </div>
+      <PageHeader title="Channels" sub="How review requests reach your customers." />
 
       <SettingsNav />
 

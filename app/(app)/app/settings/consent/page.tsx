@@ -1,6 +1,7 @@
 import { getData } from "@/lib/data";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge } from "@/components/ds/misc";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Icon } from "@/components/icons";
 import { consentLabels } from "@/lib/compliance/consent";
 import { SettingsNav } from "../SettingsNav";
@@ -20,12 +21,10 @@ export default async function ConsentSettingsPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Consent</h1>
-        <p className="text-[15px] text-sub">
-          Two separate permissions — service and marketing — captured honestly, never bundled.
-        </p>
-      </div>
+      <PageHeader
+        title="Consent"
+        sub="Two separate permissions — service and marketing — captured honestly, never bundled."
+      />
 
       <SettingsNav />
 

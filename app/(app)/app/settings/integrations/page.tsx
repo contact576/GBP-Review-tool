@@ -1,6 +1,7 @@
 import { getData } from "@/lib/data";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge } from "@/components/ds/misc";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Icon, type IconName } from "@/components/icons";
 import { formatRelative } from "@/lib/utils/format";
 import type { Integration } from "@/lib/data/types";
@@ -44,12 +45,10 @@ export default async function IntegrationsSettingsPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Integrations</h1>
-        <p className="text-[15px] text-sub">
-          What&apos;s connected — and exactly what stops working if something drops.
-        </p>
-      </div>
+      <PageHeader
+        title="Integrations"
+        sub={<>What&apos;s connected — and exactly what stops working if something drops.</>}
+      />
 
       <SettingsNav />
 

@@ -1,5 +1,6 @@
 import { getData } from "@/lib/data";
 import { currencySymbol } from "@/lib/utils/region";
+import { PageHeader } from "@/components/app/PageHeader";
 import { EconomicsCalculator } from "./EconomicsCalculator";
 
 export default async function EconomicsPage() {
@@ -8,10 +9,10 @@ export default async function EconomicsPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[22px] font-extrabold text-ink">Economics</h1>
-        <p className="text-[14px] text-sub">Model the wholesale-to-retail margin on your book. Prefilled from your current rates.</p>
-      </div>
+      <PageHeader
+        title="Economics"
+        sub="Model the wholesale-to-retail margin on your book. Prefilled from your current rates."
+      />
 
       <EconomicsCalculator
         currencySymbol={currencySymbol(data.workspace.region)}

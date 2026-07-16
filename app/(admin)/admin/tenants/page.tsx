@@ -1,4 +1,5 @@
 import { getData } from "@/lib/data";
+import { PageHeader } from "@/components/app/PageHeader";
 import { TenantsTable } from "./TenantsTable";
 
 export default async function AdminTenantsPage() {
@@ -6,10 +7,10 @@ export default async function AdminTenantsPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[22px] font-extrabold text-ink">Tenants</h1>
-        <p className="text-[14px] text-sub">Every organization on the platform. Search, then impersonate (audited) to debug in their shoes.</p>
-      </div>
+      <PageHeader
+        title="Tenants"
+        sub="Every organization on the platform. Search, then impersonate (audited) to debug in their shoes."
+      />
 
       <TenantsTable tenants={data.platform.tenants} />
     </div>

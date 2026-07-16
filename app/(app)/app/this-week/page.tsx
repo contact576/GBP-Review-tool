@@ -1,6 +1,7 @@
 import { getData } from "@/lib/data";
 import { Card, CardHeader } from "@/components/ds/Card";
-import { Badge } from "@/components/ds/misc";
+import { Badge, EmptyState } from "@/components/ds/misc";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Icon, type IconName } from "@/components/icons";
 import { SubDial } from "@/components/charts/SubDial";
 import { TaskCard } from "@/components/app/TaskCard";
@@ -48,12 +49,10 @@ export default async function ThisWeekPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">This week</h1>
-        <p className="text-[15px] text-sub">
-          Your GBP Co-Pilot picked the highest-impact moves. Approve, and we publish for you.
-        </p>
-      </div>
+      <PageHeader
+        title="This week"
+        sub="Your GBP Co-Pilot picked the highest-impact moves. Approve, and we publish for you."
+      />
 
       {/* Profile-health summary */}
       <Card>
@@ -94,9 +93,11 @@ export default async function ThisWeekPage() {
             ))}
           </div>
         ) : (
-          <p className="py-6 text-center text-[14px] text-faint">
-            No tasks this week — you&apos;re all caught up.
-          </p>
+          <EmptyState
+            icon="sparkles"
+            title="No tasks this week"
+            description="You're all caught up — nothing needs your approval right now."
+          />
         )}
       </Card>
 
@@ -122,7 +123,11 @@ export default async function ThisWeekPage() {
             })}
           </ul>
         ) : (
-          <p className="py-6 text-center text-[14px] text-faint">Nothing published yet.</p>
+          <EmptyState
+            icon="file"
+            title="Nothing published yet"
+            description="Approved tasks and posted replies will show up here."
+          />
         )}
       </Card>
 

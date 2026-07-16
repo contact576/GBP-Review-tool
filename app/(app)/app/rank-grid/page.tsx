@@ -1,6 +1,7 @@
 import { getData } from "@/lib/data";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { EmptyState, Badge, DataChip } from "@/components/ds/misc";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Icon } from "@/components/icons";
 import { formatDate } from "@/lib/utils/format";
 import { RankGridView } from "./RankGridView";
@@ -12,10 +13,7 @@ export default async function RankGridPage() {
   if (!scan) {
     return (
       <div className="space-y-5">
-        <div>
-          <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Rank Grid</h1>
-          <p className="text-[15px] text-sub">Where you rank on the map, point by point.</p>
-        </div>
+        <PageHeader title="Rank Grid" sub="Where you rank on the map, point by point." />
         <Card>
           <EmptyState icon="grid" title="No scan yet" description="Run a rank-grid scan to see your local map coverage." />
         </Card>
@@ -31,17 +29,15 @@ export default async function RankGridPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="mb-1 flex items-center gap-2">
-            <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Rank Grid</h1>
+      <PageHeader
+        title={
+          <span className="inline-flex items-center gap-2">
+            Rank Grid
             <Badge tone="gold" icon="sparkles">Pro</Badge>
-          </div>
-          <p className="text-[15px] text-sub">
-            Your Google ranking sampled across a grid of nearby search points.
-          </p>
-        </div>
-      </div>
+          </span>
+        }
+        sub="Your Google ranking sampled across a grid of nearby search points."
+      />
 
       {/* Keyword + overview */}
       <Card raised>

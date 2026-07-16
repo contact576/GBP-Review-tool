@@ -1,6 +1,7 @@
 import { getData } from "@/lib/data";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { EmptyState } from "@/components/ds/misc";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Icon } from "@/components/icons";
 import { ShareMilestone } from "./ShareMilestone";
 
@@ -19,10 +20,7 @@ export default async function MilestonesPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Milestones</h1>
-        <p className="text-[15px] text-sub">Real wins worth celebrating — and sharing.</p>
-      </div>
+      <PageHeader title="Milestones" sub="Real wins worth celebrating — and sharing." />
 
       {/* Next milestone teaser */}
       <Card className="border-primary/30 bg-primary-wash/50">

@@ -1,6 +1,8 @@
 import { getData } from "@/lib/data";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { LinkButton } from "@/components/ds/Button";
+import { EmptyState } from "@/components/ds/misc";
 import { Icon, type IconName } from "@/components/icons";
 import { formatMoney } from "@/lib/utils/format";
 import { currencyFor } from "@/lib/utils/region";
@@ -40,12 +42,10 @@ export default async function AgencyRollupPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[22px] font-extrabold text-ink">Client rollup</h1>
-        <p className="text-[14px] text-sub">
-          Every location {whiteLabel.brandName} manages, at a glance — attention first, economics on the right.
-        </p>
-      </div>
+      <PageHeader
+        title="Clients"
+        sub={`Every location ${whiteLabel.brandName} manages, at a glance — attention first, economics on the right.`}
+      />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <MetricTile icon="users" label="Clients" value={String(count)} sub="Active locations" />
@@ -85,7 +85,11 @@ export default async function AgencyRollupPage() {
                 ))}
               </ul>
             ) : (
-              <p className="py-6 text-center text-[13px] text-faint">Every client is healthy — nothing needs a look.</p>
+              <EmptyState
+                icon="check-circle"
+                title="All clients healthy"
+                description="Nothing needs a look right now — every location you manage is in good shape."
+              />
             )}
           </Card>
         </div>

@@ -5,6 +5,8 @@ import {
 } from "@/lib/data/selectors";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { LinkButton } from "@/components/ds/Button";
+import { EmptyState } from "@/components/ds/misc";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Icon, type IconName } from "@/components/icons";
 import { HeroCard } from "@/components/app/HeroCard";
 import { DashboardStats } from "@/components/app/DashboardStats";
@@ -29,10 +31,10 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Good to see you, {data.owner.name.split(" ")[0]}</h1>
-        <p className="text-[15px] text-sub">One score, three numbers, three tasks — here&apos;s where things stand.</p>
-      </div>
+      <PageHeader
+        title={`Good to see you, ${data.owner.name.split(" ")[0]}`}
+        sub={<>One score, three numbers, three tasks — here&apos;s where things stand.</>}
+      />
 
       <HeroCard
         score={score.growth}
@@ -72,7 +74,11 @@ export default async function DashboardPage() {
                 ))}
               </div>
             ) : (
-              <p className="py-4 text-center text-[14px] text-faint">All caught up — no reviews waiting.</p>
+              <EmptyState
+                icon="chat"
+                title="All caught up"
+                description="No reviews waiting on a reply right now."
+              />
             )}
           </Card>
         </div>

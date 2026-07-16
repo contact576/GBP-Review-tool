@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getData } from "@/lib/data";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Icon, type IconName } from "@/components/icons";
 import { formatMoney, formatNumber } from "@/lib/utils/format";
 import { SeverityBadge, sevRank, type Sev } from "../_components/Severity";
@@ -55,10 +56,10 @@ export default async function AdminOverviewPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-[22px] font-extrabold text-ink">Platform health</h1>
-        <p className="text-[14px] text-sub">Alerts first, then the numbers. Severity is called out with a label and icon — never color alone.</p>
-      </div>
+      <PageHeader
+        title="Platform health"
+        sub="Alerts first, then the numbers. Severity is called out with a label and icon — never color alone."
+      />
 
       <section className="space-y-3">
         <div className="kicker">Needs attention</div>

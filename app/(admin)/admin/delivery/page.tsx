@@ -1,4 +1,5 @@
 import { getData } from "@/lib/data";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge } from "@/components/ds/misc";
 import { Icon } from "@/components/icons";
@@ -14,10 +15,10 @@ export default async function AdminDeliveryPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[22px] font-extrabold text-ink">Delivery monitor</h1>
-        <p className="text-[14px] text-sub">Bounce and carrier-filtering incidents across email and SMS channels.</p>
-      </div>
+      <PageHeader
+        title="Delivery monitor"
+        sub="Bounce and carrier-filtering incidents across email and SMS channels."
+      />
 
       <div className="flex flex-wrap items-center gap-3 rounded-card border border-hairline bg-card p-4 shadow-sm">
         <div className="flex items-center gap-2">
@@ -48,10 +49,10 @@ export default async function AdminDeliveryPage() {
                 <tr key={i.id} className="border-b border-hairline last:border-0 hover:bg-primary-wash/40">
                   <td className="px-3 py-3 text-[14px] font-semibold text-ink">{i.tenant}</td>
                   <td className="px-3 py-3"><Badge tone="neutral">{i.channel.toUpperCase()}</Badge></td>
-                  <td className="px-3 py-3 text-[13px] text-sub">{i.type}</td>
+                  <td className="px-3 py-3 text-[14px] text-sub">{i.type}</td>
                   <td className="px-3 py-3"><SeverityBadge sev={i.severity} /></td>
-                  <td className="px-3 py-3 text-right data-chip text-[13px] font-bold text-ink">{i.count}</td>
-                  <td className="px-3 py-3 text-[12px] text-sub">{formatRelative(i.at)}</td>
+                  <td className="px-3 py-3 text-right data-chip text-[14px] font-bold text-ink">{i.count}</td>
+                  <td className="px-3 py-3 text-[14px] text-sub">{formatRelative(i.at)}</td>
                 </tr>
               ))}
             </tbody>

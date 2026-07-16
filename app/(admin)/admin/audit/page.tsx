@@ -1,4 +1,5 @@
 import { getData } from "@/lib/data";
+import { PageHeader } from "@/components/app/PageHeader";
 import { AuditTable } from "./AuditTable";
 
 export default async function AdminAuditPage() {
@@ -6,10 +7,10 @@ export default async function AdminAuditPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[22px] font-extrabold text-ink">Audit log</h1>
-        <p className="text-[14px] text-sub">Every privileged action — impersonation, replies, captures — written append-only and never edited.</p>
-      </div>
+      <PageHeader
+        title="Audit log"
+        sub="Every privileged action — impersonation, replies, captures — written append-only and never edited."
+      />
 
       <AuditTable entries={data.auditLog} />
     </div>

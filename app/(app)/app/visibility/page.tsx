@@ -1,6 +1,7 @@
 import { getData } from "@/lib/data";
 import { Card, CardHeader } from "@/components/ds/Card";
-import { Badge } from "@/components/ds/misc";
+import { Badge, EmptyState } from "@/components/ds/misc";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Icon } from "@/components/icons";
 import { formatDate } from "@/lib/utils/format";
 import { GapToTask } from "./GapToTask";
@@ -15,17 +16,15 @@ export default async function VisibilityPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="mb-1 flex items-center gap-2">
-            <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">AI Visibility</h1>
+      <PageHeader
+        title={
+          <span className="inline-flex items-center gap-2">
+            AI Visibility
             <Badge tone="gold" icon="sparkles">Pro</Badge>
-          </div>
-          <p className="text-[15px] text-sub">
-            Whether AI assistants name your clinic when people ask — answer-engine optimization (AEO).
-          </p>
-        </div>
-      </div>
+          </span>
+        }
+        sub="Whether AI assistants name your clinic when people ask — answer-engine optimization (AEO)."
+      />
 
       {/* Summary */}
       <Card raised>
@@ -54,7 +53,11 @@ export default async function VisibilityPage() {
       <div className="space-y-3">
         {queries.length === 0 ? (
           <Card>
-            <p className="py-6 text-center text-[13px] text-faint">No AI Visibility snapshot yet.</p>
+            <EmptyState
+              icon="sparkles"
+              title="No AI Visibility snapshot yet"
+              description="Once we test buying questions nearby, your results will appear here."
+            />
           </Card>
         ) : (
           queries.map((q) => (

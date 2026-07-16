@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Input } from "@/components/ds/form";
-import { Badge } from "@/components/ds/misc";
+import { Badge, EmptyState } from "@/components/ds/misc";
 import { formatRelative } from "@/lib/utils/format";
 import type { AuditLog } from "@/lib/data/types";
 
@@ -44,18 +44,22 @@ export function AuditTable({ entries }: { entries: AuditLog[] }) {
               <tr key={e.id} className="border-b border-hairline last:border-0 hover:bg-primary-wash/40">
                 <td className="px-3 py-3 text-[14px] font-semibold text-ink">{e.actor}</td>
                 <td className="px-3 py-3">
-                  <code className="rounded-chip bg-primary-wash px-1.5 py-0.5 text-[12px] font-semibold text-primary-dark">{e.action}</code>
+                  <code className="rounded-chip bg-primary-wash px-1.5 py-0.5 text-[14px] font-semibold text-primary-dark">{e.action}</code>
                 </td>
-                <td className="px-3 py-3 text-[13px] text-sub">
+                <td className="px-3 py-3 text-[14px] text-sub">
                   <span className="capitalize">{e.targetType}</span> <span className="text-faint">· {e.targetId}</span>
                 </td>
-                <td className="px-3 py-3 text-[12px] text-sub">{formatRelative(e.at)}</td>
+                <td className="px-3 py-3 text-[14px] text-sub">{formatRelative(e.at)}</td>
               </tr>
             ))}
           </tbody>
         </table>
         {rows.length === 0 ? (
-          <div className="px-4 py-10 text-center text-[13px] text-faint">No entries match “{query}”.</div>
+          <EmptyState
+            icon="search"
+            title="No matching entries"
+            description={`Nothing in the audit log matches “${query}”. Try a different actor, action, or target.`}
+          />
         ) : null}
       </div>
 

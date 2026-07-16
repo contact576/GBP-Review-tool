@@ -1,4 +1,5 @@
 import { getData } from "@/lib/data";
+import { PageHeader } from "@/components/app/PageHeader";
 import { RequestsView } from "./RequestsView";
 
 export default async function RequestsPage() {
@@ -6,12 +7,10 @@ export default async function RequestsPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Requests</h1>
-        <p className="text-[15px] text-sub">
-          Track every review ask from sent to posted — and send new ones to happy customers.
-        </p>
-      </div>
+      <PageHeader
+        title="Requests"
+        sub="Track every review ask from sent to posted — and send new ones to happy customers."
+      />
 
       <RequestsView
         requests={data.requests}

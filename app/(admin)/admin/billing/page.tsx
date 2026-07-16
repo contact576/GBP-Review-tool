@@ -1,4 +1,5 @@
 import { getData } from "@/lib/data";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Icon, type IconName } from "@/components/icons";
 import { formatMoney } from "@/lib/utils/format";
@@ -29,10 +30,10 @@ export default async function AdminBillingPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-[22px] font-extrabold text-ink">Billing ops</h1>
-        <p className="text-[14px] text-sub">Subscription health, trial conversion, and dunning across every tenant.</p>
-      </div>
+      <PageHeader
+        title="Billing ops"
+        sub="Subscription health, trial conversion, and dunning across every tenant."
+      />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <SummaryTile icon="credit-card" label="Total MRR" value={formatMoney(totalMrr)} sub={`${tenants.length} tenants`} />
@@ -80,8 +81,8 @@ export default async function AdminBillingPage() {
               {tenants.map((t) => (
                 <tr key={t.id} className="border-b border-hairline last:border-0">
                   <td className="px-3 py-3 text-[14px] font-semibold text-ink">{t.name}</td>
-                  <td className="px-3 py-3 text-[13px] capitalize text-sub">{t.plan}</td>
-                  <td className="px-3 py-3 text-right data-chip text-[13px] font-bold text-ink">{formatMoney(t.mrr)}</td>
+                  <td className="px-3 py-3 text-[14px] capitalize text-sub">{t.plan}</td>
+                  <td className="px-3 py-3 text-right data-chip text-[14px] font-bold text-ink">{formatMoney(t.mrr)}</td>
                   <td className="px-3 py-3"><TenantStatusBadge status={t.status} /></td>
                 </tr>
               ))}

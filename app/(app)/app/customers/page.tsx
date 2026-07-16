@@ -1,4 +1,5 @@
 import { getData } from "@/lib/data";
+import { PageHeader } from "@/components/app/PageHeader";
 import { CustomersView } from "./CustomersView";
 
 export default async function CustomersPage() {
@@ -6,12 +7,10 @@ export default async function CustomersPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Customers</h1>
-        <p className="text-[15px] text-sub">
-          Your people, their consent, and their history — always yours to export.
-        </p>
-      </div>
+      <PageHeader
+        title="Customers"
+        sub="Your people, their consent, and their history — always yours to export."
+      />
 
       <CustomersView
         customers={data.customers}

@@ -1,7 +1,8 @@
 import { getData } from "@/lib/data";
 import { Card } from "@/components/ds/Card";
 import { LinkButton } from "@/components/ds/Button";
-import { Badge } from "@/components/ds/misc";
+import { Badge, EmptyState } from "@/components/ds/misc";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Icon, type IconName } from "@/components/icons";
 import { formatNumber } from "@/lib/utils/format";
 import { CampaignToggle } from "./CampaignToggle";
@@ -19,15 +20,11 @@ export default async function CampaignsPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Campaigns</h1>
-          <p className="text-[15px] text-sub">
-            Consent-safe automations that keep customers coming back.
-          </p>
-        </div>
-        <LinkButton href="/app/campaigns/new" icon="plus">New campaign</LinkButton>
-      </div>
+      <PageHeader
+        title="Campaigns"
+        sub="Consent-safe automations that keep customers coming back."
+        actions={<LinkButton href="/app/campaigns/new" icon="plus">New campaign</LinkButton>}
+      />
 
       {campaigns.length ? (
         <div className="space-y-4">
@@ -80,7 +77,11 @@ export default async function CampaignsPage() {
         </div>
       ) : (
         <Card>
-          <p className="py-8 text-center text-[14px] text-faint">No campaigns yet.</p>
+          <EmptyState
+            icon="megaphone"
+            title="No campaigns yet"
+            description="Create a consent-safe automation to keep customers coming back."
+          />
         </Card>
       )}
 

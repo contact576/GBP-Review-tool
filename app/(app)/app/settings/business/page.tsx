@@ -1,6 +1,7 @@
 import { getData } from "@/lib/data";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge } from "@/components/ds/misc";
+import { PageHeader } from "@/components/app/PageHeader";
 import { LinkButton } from "@/components/ds/Button";
 import { Icon } from "@/components/icons";
 import { formatRelative } from "@/lib/utils/format";
@@ -22,10 +23,7 @@ export default async function BusinessSettingsPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Settings</h1>
-        <p className="text-[15px] text-sub">Your business profile and how Foundly connects to Google.</p>
-      </div>
+      <PageHeader title="Settings" sub="Your business profile and how Foundly connects to Google." />
 
       <SettingsNav />
 

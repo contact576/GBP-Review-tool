@@ -1,6 +1,7 @@
 import { getData } from "@/lib/data";
 import { Card } from "@/components/ds/Card";
 import { EmptyState } from "@/components/ds/misc";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Icon, type IconName } from "@/components/icons";
 import { formatRelative } from "@/lib/utils/format";
 import type { Notification } from "@/lib/data/types";
@@ -23,15 +24,11 @@ export default async function NotificationsPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Notifications</h1>
-          <p className="text-[15px] text-sub">
-            Reviews, feedback, deliveries and milestones — everything worth knowing about.
-          </p>
-        </div>
-        <MarkAllRead unreadCount={unread} />
-      </div>
+      <PageHeader
+        title="Notifications"
+        sub="Reviews, feedback, deliveries and milestones — everything worth knowing about."
+        actions={<MarkAllRead unreadCount={unread} />}
+      />
 
       {notifications.length === 0 ? (
         <Card>

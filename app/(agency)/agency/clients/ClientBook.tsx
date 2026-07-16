@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils/cn";
 import { Icon } from "@/components/icons";
+import { EmptyState } from "@/components/ds/misc";
 import { Input } from "@/components/ds/form";
 import { Sparkline } from "@/components/charts/Sparkline";
 import { formatRelative } from "@/lib/utils/format";
@@ -132,7 +133,11 @@ export function ClientBook({ clients, plans }: { clients: AgencyClient[]; plans:
           </tbody>
         </table>
         {rows.length === 0 ? (
-          <div className="px-4 py-10 text-center text-[13px] text-faint">No clients match “{query}”.</div>
+          <EmptyState
+            icon="search"
+            title="No matching clients"
+            description={`No clients match “${query}”. Try a different name or city.`}
+          />
         ) : null}
       </div>
       <p className="text-[12px] text-faint">{rows.length} of {clients.length} clients · tap a column to sort · rows open the client panel.</p>

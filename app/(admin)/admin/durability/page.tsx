@@ -1,4 +1,5 @@
 import { getData } from "@/lib/data";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge } from "@/components/ds/misc";
 import { Icon } from "@/components/icons";
@@ -20,10 +21,10 @@ export default async function AdminDurabilityPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-[22px] font-extrabold text-ink">Durability watchdog</h1>
-        <p className="text-[14px] text-sub">Do captured reviews survive? The moat instrument — vanish-detection via re-import diffs.</p>
-      </div>
+      <PageHeader
+        title="Durability watchdog"
+        sub="Do captured reviews survive? The moat instrument — vanish-detection via re-import diffs."
+      />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <div className="rounded-card border border-hairline bg-card p-4 shadow-sm">
@@ -94,11 +95,11 @@ export default async function AdminDurabilityPage() {
               {records.map((r) => (
                 <tr key={r.id} className="border-b border-hairline last:border-0">
                   <td className="px-3 py-3 text-[14px] font-semibold text-ink">{r.tenant}</td>
-                  <td className="px-3 py-3 text-right data-chip text-[13px] text-ink">{r.posted}</td>
-                  <td className="px-3 py-3 text-right data-chip text-[13px] text-ink">{r.survived30d}</td>
-                  <td className="px-3 py-3 text-right data-chip text-[13px] font-bold text-primary">{r.survived60d}</td>
-                  <td className="px-3 py-3 text-right data-chip text-[13px] font-bold text-danger">{r.vanished}</td>
-                  <td className="px-3 py-3 text-right data-chip text-[13px] text-ink">{Math.round(r.filteredRate * 100)}%</td>
+                  <td className="px-3 py-3 text-right data-chip text-[14px] text-ink">{r.posted}</td>
+                  <td className="px-3 py-3 text-right data-chip text-[14px] text-ink">{r.survived30d}</td>
+                  <td className="px-3 py-3 text-right data-chip text-[14px] font-bold text-primary">{r.survived60d}</td>
+                  <td className="px-3 py-3 text-right data-chip text-[14px] font-bold text-danger">{r.vanished}</td>
+                  <td className="px-3 py-3 text-right data-chip text-[14px] text-ink">{Math.round(r.filteredRate * 100)}%</td>
                 </tr>
               ))}
             </tbody>

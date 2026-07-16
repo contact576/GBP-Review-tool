@@ -1,7 +1,8 @@
 import { getData } from "@/lib/data";
 import { appUrl } from "@/lib/utils/app-url";
 import { Card, CardHeader } from "@/components/ds/Card";
-import { Badge } from "@/components/ds/misc";
+import { Badge, EmptyState } from "@/components/ds/misc";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Icon } from "@/components/icons";
 import { QrFrame } from "@/components/app/QrFrame";
 import { QrDownload } from "@/components/app/QrDownload";
@@ -28,12 +29,10 @@ export default async function StudioPage() {
       <style>{`@media print { aside, header, nav { display: none !important; } main { padding: 0 !important; } }`}</style>
 
       <div className="space-y-5 print:hidden">
-        <div>
-          <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">QR &amp; Widgets</h1>
-          <p className="text-[15px] text-sub">
-            The tools that turn a happy visit into a review — printed, worn, and embedded.
-          </p>
-        </div>
+        <PageHeader
+          title="QR & Widgets"
+          sub="The tools that turn a happy visit into a review — printed, worn, and embedded."
+        />
 
         {/* Location QR hero */}
         <Card raised>
@@ -67,7 +66,11 @@ export default async function StudioPage() {
                 />
               </div>
             ) : (
-              <p className="text-center text-[13px] text-faint">No location QR configured.</p>
+              <EmptyState
+                icon="qr"
+                title="No location QR yet"
+                description="It'll appear here once your location QR is configured."
+              />
             )}
           </div>
         </Card>
@@ -103,7 +106,11 @@ export default async function StudioPage() {
               })}
             </div>
           ) : (
-            <p className="py-4 text-center text-[13px] text-faint">No staff QR codes yet.</p>
+            <EmptyState
+              icon="qr"
+              title="No staff QR codes yet"
+              description="Add staff to generate their own personal review QR codes."
+            />
           )}
         </Card>
 

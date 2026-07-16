@@ -1,5 +1,6 @@
 import { getData } from "@/lib/data";
 import { LinkButton } from "@/components/ds/Button";
+import { PageHeader } from "@/components/app/PageHeader";
 import { CampaignComposer } from "./CampaignComposer";
 
 export default async function NewCampaignPage() {
@@ -11,8 +12,10 @@ export default async function NewCampaignPage() {
         <LinkButton href="/app/campaigns" variant="ghost" size="sm" icon="chevron-left" className="-ml-2 mb-1">
           Campaigns
         </LinkButton>
-        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">New campaign</h1>
-        <p className="text-[15px] text-sub">A consent-safe send — we compute who&apos;s eligible before anything goes out.</p>
+        <PageHeader
+          title="New campaign"
+          sub={<>A consent-safe send — we compute who&apos;s eligible before anything goes out.</>}
+        />
       </div>
 
       <CampaignComposer

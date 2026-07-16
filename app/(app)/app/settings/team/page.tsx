@@ -1,6 +1,7 @@
 import { getData } from "@/lib/data";
 import { Card, CardHeader } from "@/components/ds/Card";
-import { Badge } from "@/components/ds/misc";
+import { Badge, EmptyState } from "@/components/ds/misc";
+import { PageHeader } from "@/components/app/PageHeader";
 import { Icon } from "@/components/icons";
 import { LeaderboardRow } from "@/components/app/widgets";
 import { formatRelative } from "@/lib/utils/format";
@@ -15,10 +16,10 @@ export default async function TeamSettingsPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[24px] font-extrabold text-ink lg:text-[28px]">Team</h1>
-        <p className="text-[15px] text-sub">Your capture crew — who&apos;s asking and who&apos;s on a streak.</p>
-      </div>
+      <PageHeader
+        title="Team"
+        sub={<>Your capture crew — who&apos;s asking and who&apos;s on a streak.</>}
+      />
 
       <SettingsNav />
 
@@ -55,9 +56,11 @@ export default async function TeamSettingsPage() {
       <Card>
         <CardHeader title="Staff members" />
         {staff.length === 0 ? (
-          <p className="py-4 text-center text-[14px] text-faint">
-            No team members yet — invite a teammate or add one directly above.
-          </p>
+          <EmptyState
+            icon="users"
+            title="No team members yet"
+            description="Invite a teammate or add one directly above."
+          />
         ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[560px] text-left text-[14px]">
@@ -122,7 +125,11 @@ export default async function TeamSettingsPage() {
             ))}
           </div>
         ) : (
-          <p className="py-4 text-center text-[14px] text-faint">No staff yet — invite your first teammate above.</p>
+          <EmptyState
+            icon="users"
+            title="No staff yet"
+            description="Invite your first teammate above to start the leaderboard."
+          />
         )}
       </Card>
     </div>

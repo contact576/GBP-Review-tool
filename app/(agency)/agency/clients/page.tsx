@@ -1,5 +1,6 @@
 import { getData } from "@/lib/data";
 import type { PlanTier } from "@/lib/data/types";
+import { PageHeader } from "@/components/app/PageHeader";
 import { ClientBook } from "./ClientBook";
 
 const PLAN_LABELS: Record<PlanTier, string> = {
@@ -16,10 +17,10 @@ export default async function ClientBookPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[22px] font-extrabold text-ink">Client book</h1>
-        <p className="text-[14px] text-sub">Sort, search, and open any location you manage under {data.agency.whiteLabel.brandName}.</p>
-      </div>
+      <PageHeader
+        title="Client book"
+        sub={`Sort, search, and open any location you manage under ${data.agency.whiteLabel.brandName}.`}
+      />
 
       <ClientBook clients={data.agency.clients} plans={PLAN_LABELS} />
     </div>

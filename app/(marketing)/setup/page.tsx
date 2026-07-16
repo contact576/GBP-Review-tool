@@ -22,6 +22,7 @@ export default async function SetupPage() {
   const encSecret = Boolean(process.env.ENCRYPTION_SECRET);
   const appUrlSet = Boolean(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL);
   const resend = Boolean(process.env.RESEND_API_KEY);
+  const stripe = Boolean(process.env.STRIPE_SECRET_KEY);
   const base = await appUrl();
 
   return (
@@ -98,6 +99,12 @@ export default async function SetupPage() {
           title="Email sending (RESEND_API_KEY) — optional, later"
           okText="Key detected — email delivery is configured."
           missingText="Not set — review-request emails, invites and password resets are queued behind this. Fine to add later."
+        />
+        <Item
+          ok={stripe}
+          title="Billing (STRIPE_SECRET_KEY) — optional, later"
+          okText="Key detected — plans, checkout and the billing portal are live."
+          missingText="Not set — the app runs on the free/trial tier; plan upgrades show an honest 'connect billing' state. Fine to add later."
         />
       </div>
 

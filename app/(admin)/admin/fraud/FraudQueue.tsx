@@ -40,9 +40,9 @@ export function FraudQueue({ flags }: { flags: FraudFlag[] }) {
               <tr key={f.id} className="border-b border-hairline last:border-0 hover:bg-primary-wash/40">
                 <td className="px-3 py-3 text-[14px] font-semibold text-ink">{f.tenant}</td>
                 <td className="px-3 py-3"><Badge tone="neutral">{KIND_LABEL[f.kind]}</Badge></td>
-                <td className="px-3 py-3 text-[13px] text-sub">{f.detail}</td>
+                <td className="px-3 py-3 text-[14px] text-sub">{f.detail}</td>
                 <td className="px-3 py-3"><SeverityBadge sev={f.severity} /></td>
-                <td className="px-3 py-3 text-[12px] text-sub">{formatRelative(f.at)}</td>
+                <td className="px-3 py-3 text-[14px] text-sub">{formatRelative(f.at)}</td>
                 <td className="px-3 py-3 text-right">
                   {done ? (
                     <Badge tone="primary" icon="check-circle">Actioned</Badge>
