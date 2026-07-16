@@ -4,7 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ds/Card";
 import { Button } from "@/components/ds/Button";
-import { Chip, Badge } from "@/components/ds/misc";
+import { Chip, Badge, EmptyState } from "@/components/ds/misc";
 import { Field, Select } from "@/components/ds/form";
 import { Tabs, type TabItem } from "@/components/ds/Tabs";
 import { Drawer } from "@/components/ds/Drawer";
@@ -185,7 +185,11 @@ export function RequestsView({
         </div>
       ) : (
         <Card>
-          <p className="py-8 text-center text-[14px] text-faint">No requests in this view.</p>
+          <EmptyState
+            icon="send"
+            title="No requests here yet"
+            description="Capture a customer or send a request, and it'll appear here so you can track opens and reviews."
+          />
         </Card>
       )}
 

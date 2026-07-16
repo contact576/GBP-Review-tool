@@ -89,8 +89,11 @@ export function AppShell({
             <div className="flex items-center gap-2 lg:hidden">
               <Wordmark small />
             </div>
-            <div className="hidden lg:block">
-              <div className="text-[13px] text-sub">{business}</div>
+            <div className="hidden min-w-0 items-center gap-2 lg:flex">
+              <span className="grid size-7 shrink-0 place-items-center rounded-btn bg-primary-wash text-primary">
+                <Icon name="map-pin" size={15} />
+              </span>
+              <span className="truncate text-[14px] font-semibold text-ink">{business}</span>
             </div>
             <div className="flex items-center gap-2">
               {typeof trialDaysLeft === "number" && trialDaysLeft > 0 ? (
@@ -106,8 +109,8 @@ export function AppShell({
             </div>
           </header>
 
-          <main id="main" className="px-4 pb-24 pt-4 lg:px-8 lg:pb-10 xl:px-10">
-            <div className="mx-auto max-w-[1560px]">{children}</div>
+          <main id="main" className="px-4 pb-24 pt-5 lg:px-8 lg:pb-12 lg:pt-7 xl:px-10">
+            <div className="mx-auto max-w-[1400px]">{children}</div>
           </main>
         </div>
 

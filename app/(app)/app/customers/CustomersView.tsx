@@ -4,7 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ds/Card";
 import { Button } from "@/components/ds/Button";
-import { Badge } from "@/components/ds/misc";
+import { Badge, EmptyState } from "@/components/ds/misc";
 import { Checkbox, Field, Input } from "@/components/ds/form";
 import { Tabs, type TabItem } from "@/components/ds/Tabs";
 import { Drawer } from "@/components/ds/Drawer";
@@ -216,7 +216,25 @@ export function CustomersView({
 
       {filtered.length === 0 ? (
         <Card>
-          <p className="py-8 text-center text-[14px] text-faint">No customers match this view.</p>
+          {customers.length === 0 ? (
+            <EmptyState
+              icon="users"
+              title="No customers yet"
+              description="Capture your first customer at the front desk, or import a list — then you can send review requests."
+              action={
+                <div className="flex flex-wrap justify-center gap-2">
+                  <Button size="sm" icon="plus" onClick={() => setAddOpen(true)}>Add a customer</Button>
+                  <Button size="sm" variant="secondary" icon="download">Import CSV</Button>
+                </div>
+              }
+            />
+          ) : (
+            <EmptyState
+              icon="search"
+              title="No customers match this view"
+              description="Try a different tab or clear your search."
+            />
+          )}
         </Card>
       ) : (
         <>

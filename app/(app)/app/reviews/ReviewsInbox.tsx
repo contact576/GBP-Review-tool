@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { Card } from "@/components/ds/Card";
 import { Button } from "@/components/ds/Button";
-import { Chip, Badge } from "@/components/ds/misc";
+import { Chip, Badge, EmptyState } from "@/components/ds/misc";
 import { Textarea } from "@/components/ds/form";
 import { Tabs, type TabItem } from "@/components/ds/Tabs";
 import { Drawer } from "@/components/ds/Drawer";
@@ -219,7 +219,11 @@ export function ReviewsInbox({
         </div>
       ) : (
         <Card>
-          <p className="py-8 text-center text-[14px] text-faint">Nothing here right now.</p>
+          <EmptyState
+            icon="chat"
+            title="No reviews here yet"
+            description="When customers post Google reviews, they'll show up here to read and reply to. Send your first request to get the loop going."
+          />
         </Card>
       )}
 
