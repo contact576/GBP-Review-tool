@@ -4,17 +4,16 @@ import { useState } from "react";
 import { Button } from "@/components/ds/Button";
 import { useToast } from "@/components/ds/Toast";
 
-/** Copyable website-widget embed snippet. */
-export function EmbedSnippet({ slug, domain }: { slug: string; domain: string }) {
+/** Copyable website-widget embed snippet — a real iframe to /w/{slug}. */
+export function EmbedSnippet({ base, slug, domain }: { base: string; slug: string; domain: string }) {
   const { toast } = useToast();
   const [copied, setCopied] = useState(false);
 
-  const snippet = `<script
-  src="https://widgets.foundly.app/embed.js"
-  data-foundly-slug="${slug}"
-  data-variant="carousel"
-  async>
-</script>`;
+  const snippet = `<iframe
+  src="${base}/w/${slug}"
+  width="100%" height="420"
+  style="border:0;overflow:hidden;max-width:520px"
+  loading="lazy" title="Customer reviews"></iframe>`;
 
   async function copy() {
     try {

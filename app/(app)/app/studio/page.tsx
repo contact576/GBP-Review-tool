@@ -164,6 +164,7 @@ export default async function StudioPage() {
             }
           />
           <EmbedSnippet
+            base={base}
             slug={locationQr?.slug ?? qrAssets[0]?.slug ?? data.location.id}
             domain={widget?.domain ?? "your-site.com"}
           />
