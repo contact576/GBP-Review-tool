@@ -3,6 +3,7 @@ import { Card, CardHeader } from "@/components/ds/Card";
 import { EmptyState } from "@/components/ds/misc";
 import { PageHeader } from "@/components/app/PageHeader";
 import { Icon } from "@/components/icons";
+import { ReferralCard } from "@/components/app/ReferralCard";
 import { ShareMilestone } from "./ShareMilestone";
 
 export default async function MilestonesPage() {
@@ -79,6 +80,8 @@ export default async function MilestonesPage() {
         <Icon name="shield" size={14} className="text-faint" />
         <p className="text-[13px] text-faint">Milestones fire on genuine achievements — never fabricated.</p>
       </div>
+
+      <ReferralCard />
     </div>
   );
 }

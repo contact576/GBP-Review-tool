@@ -2,12 +2,19 @@ import { getData } from "@/lib/data";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { EmptyState, Badge, DataChip } from "@/components/ds/misc";
 import { PageHeader } from "@/components/app/PageHeader";
+import { Paywall } from "@/components/app/Paywall";
 import { Icon } from "@/components/icons";
+import { hasFeature } from "@/lib/billing/plans";
 import { formatDate } from "@/lib/utils/format";
 import { RankGridView } from "./RankGridView";
 
 export default async function RankGridPage() {
   const data = await getData();
+  const entitled = hasFeature(
+    data.subscription.tier,
+    "rank_grid",
+    data.subscription.status === "trialing",
+  );
   const scan = (data.rankScans ?? [])[0];
 
   if (!scan) {
@@ -27,20 +34,9 @@ export default async function RankGridPage() {
   const red = points.filter((p) => p.rank === null || p.rank > 10).length;
   const total = points.length;
 
-  return (
-    <div className="space-y-5">
-      <PageHeader
-        title={
-          <span className="inline-flex items-center gap-2">
-            Rank Grid
-            <Badge tone="gold" icon="sparkles">Pro</Badge>
-          </span>
-        }
-        sub="Your Google ranking sampled across a grid of nearby search points."
-      />
-
-      {/* Keyword + overview */}
-      <Card raised>
+  // Free teaser — the keyword + coverage headline stays visible on every plan.
+  const overview = (
+    <Card raised>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <div className="kicker mb-1.5">Keyword</div>
@@ -71,8 +67,12 @@ export default async function RankGridPage() {
           <DataChip>{amber} on page</DataChip>
           <DataChip>{red} not found</DataChip>
         </div>
-      </Card>
+    </Card>
+  );
 
+  // The valuable detail — coverage grid, takeaway, and scan meta. Pro-gated.
+  const details = (
+    <div className="space-y-5">
       {/* Grid / table */}
       <Card>
         <CardHeader kicker="Coverage" title="Local map coverage" />
@@ -100,6 +100,30 @@ export default async function RankGridPage() {
         <Badge tone="neutral" icon="credit-card">Scan cost: {total} checks · 1 of 4 monthly scans used</Badge>
         <p className="text-[13px] text-faint">Grid scans query Google from each point — detected {formatDate(scan.ranAt)}.</p>
       </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        title={
+          <span className="inline-flex items-center gap-2">
+            Rank Grid
+            <Badge tone="gold" icon="sparkles">Pro</Badge>
+          </span>
+        }
+        sub="Your Google ranking sampled across a grid of nearby search points."
+      />
+
+      {overview}
+
+      {entitled ? (
+        details
+      ) : (
+        <Paywall feature="rank_grid" title="See your full Rank Grid">
+          {details}
+        </Paywall>
+      )}
     </div>
   );
 }

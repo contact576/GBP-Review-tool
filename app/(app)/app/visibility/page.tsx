@@ -2,32 +2,28 @@ import { getData } from "@/lib/data";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge, EmptyState } from "@/components/ds/misc";
 import { PageHeader } from "@/components/app/PageHeader";
+import { Paywall } from "@/components/app/Paywall";
 import { Icon } from "@/components/icons";
+import { hasFeature } from "@/lib/billing/plans";
 import { formatDate } from "@/lib/utils/format";
 import { GapToTask } from "./GapToTask";
 
 export default async function VisibilityPage() {
   const data = await getData();
+  const entitled = hasFeature(
+    data.subscription.tier,
+    "ai_visibility",
+    data.subscription.status === "trialing",
+  );
   const aeo = data.aeo;
   const queries = aeo?.queries ?? [];
   const named = aeo?.namedFraction.named ?? 0;
   const total = aeo?.namedFraction.total ?? 0;
   const detected = aeo ? formatDate(aeo.date) : formatDate(new Date().toISOString());
 
-  return (
-    <div className="space-y-5">
-      <PageHeader
-        title={
-          <span className="inline-flex items-center gap-2">
-            AI Visibility
-            <Badge tone="gold" icon="sparkles">Pro</Badge>
-          </span>
-        }
-        sub="Whether AI assistants name your clinic when people ask — answer-engine optimization (AEO)."
-      />
-
-      {/* Summary */}
-      <Card raised>
+  // Free teaser — the headline snapshot stays visible on every plan.
+  const summary = (
+    <Card raised>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <div className="kicker mb-1">This snapshot</div>
@@ -47,8 +43,12 @@ export default async function VisibilityPage() {
             </div>
           </div>
         </div>
-      </Card>
+    </Card>
+  );
 
+  // The full report — per-query breakdown + what drives being named. Pro-gated.
+  const details = (
+    <div className="space-y-5">
       {/* Per-query results */}
       <div className="space-y-3">
         {queries.length === 0 ? (
@@ -125,6 +125,30 @@ export default async function VisibilityPage() {
           AI answers change often — this is a detected snapshot from {detected}, not a live guarantee.
         </p>
       </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        title={
+          <span className="inline-flex items-center gap-2">
+            AI Visibility
+            <Badge tone="gold" icon="sparkles">Pro</Badge>
+          </span>
+        }
+        sub="Whether AI assistants name your clinic when people ask — answer-engine optimization (AEO)."
+      />
+
+      {summary}
+
+      {entitled ? (
+        details
+      ) : (
+        <Paywall feature="ai_visibility" title="See your full AI Visibility report">
+          {details}
+        </Paywall>
+      )}
     </div>
   );
 }
