@@ -8,7 +8,8 @@ import { ShareMilestone } from "./ShareMilestone";
 export default async function MilestonesPage() {
   const data = await getData();
   const milestones = data.milestones ?? [];
-  const reviewCount = data.location.reviewCount;
+  const location = data.location;
+  const reviewCount = location.reviewCount;
 
   // Next review milestone teaser.
   const tiers = [25, 50, 100];
@@ -51,15 +52,25 @@ export default async function MilestonesPage() {
       {milestones.length ? (
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           {milestones.map((m) => (
-            <ShareMilestone key={m.id} milestone={m} />
+            <ShareMilestone
+              key={m.id}
+              milestone={m}
+              business={location.name}
+              rating={location.rating}
+              reviewCount={location.reviewCount}
+            />
           ))}
         </div>
       ) : (
         <Card>
           <EmptyState
             icon="trophy"
-            title="No milestones yet"
-            description="Your first celebration unlocks at 25 reviews — you're closer than you think."
+            title="Your first milestone is on the way…"
+            description={
+              remaining > 0
+                ? `Your first shareable celebration unlocks at ${nextTier} reviews — just ${remaining} to go.`
+                : "Your first celebration unlocks at 25 reviews — you're closer than you think."
+            }
           />
         </Card>
       )}
