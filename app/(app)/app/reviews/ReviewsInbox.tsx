@@ -33,6 +33,7 @@ function toReplyTone(tone: string): ReplyTone {
 }
 
 const WEEK_MS = 7 * 86_400_000;
+const THIRTY_DAYS_MS = 30 * 86_400_000;
 
 export function ReviewsInbox({
   reviews,
@@ -49,6 +50,7 @@ export function ReviewsInbox({
 
   const [tab, setTab] = useState("all");
   const [active, setActive] = useState<Review | null>(null);
+  const [watchdogDismissed, setWatchdogDismissed] = useState(false);
 
   // Draft drawer state.
   const [draft, setDraft] = useState("");
@@ -170,7 +172,22 @@ export function ReviewsInbox({
     });
   }
 
-  const durabilityAtRisk = merged.filter(isDurabilityRisk);
+  // ── Durability watchdog: surface only what's already on the reviews ──
+  const vanished = merged.filter((r) => r.durability === "vanished");
+  const atRisk = merged.filter((r) => r.durability === "at_risk");
+  const vanishedLast30 = vanished.filter(
+    (r) => r.vanishedAt && Date.now() - new Date(r.vanishedAt).getTime() < THIRTY_DAYS_MS,
+  );
+  const hasVanished = vanished.length > 0;
+  const showWatchdog = (vanished.length > 0 || atRisk.length > 0) && !watchdogDismissed;
+
+  // Prefer the honest "last 30 days" framing when we have a vanishedAt to back it.
+  const vanishedShown = vanishedLast30.length > 0 ? vanishedLast30.length : vanished.length;
+  const watchdogHeadline = hasVanished
+    ? `${vanishedShown} ${vanishedShown === 1 ? "review" : "reviews"} vanished from Google${
+        vanishedLast30.length > 0 ? " in the last 30 days" : ""
+      }`
+    : `${atRisk.length} ${atRisk.length === 1 ? "review is" : "reviews are"} at risk of being filtered`;
 
   return (
     <div className="space-y-5">
@@ -191,20 +208,47 @@ export function ReviewsInbox({
         </div>
       </Card>
 
-      {/* Durability banner */}
-      {durabilityAtRisk.length > 0 ? (
-        <div className="flex items-start gap-3 rounded-card border border-danger/30 bg-danger-tint/60 p-4">
-          <div className="grid size-9 shrink-0 place-items-center rounded-btn bg-danger text-white">
-            <Icon name="alert" size={18} />
+      {/* Durability watchdog banner — gold when only at-risk, danger once any vanished */}
+      {showWatchdog ? (
+        <div
+          className={`flex items-start gap-3 rounded-card border p-4 ${
+            hasVanished ? "border-danger/30 bg-danger-tint/60" : "border-gold/40 bg-gold-tint/50"
+          }`}
+        >
+          <div
+            className={`grid size-9 shrink-0 place-items-center rounded-btn text-white ${
+              hasVanished ? "bg-danger" : "bg-gold text-ink"
+            }`}
+          >
+            <Icon name={hasVanished ? "alert" : "flag"} size={18} />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[14px] font-bold text-ink">
-              {durabilityAtRisk.length} {durabilityAtRisk.length === 1 ? "review needs" : "reviews need"} a durability check
-            </div>
-            <p className="text-[14px] text-sub">
-              Google sometimes filters or removes reviews. We flag anything vanished or at risk so nothing quietly disappears.
+            <div className="text-[14px] font-bold text-ink">{watchdogHeadline}</div>
+            <p className="mt-0.5 text-[14px] text-sub">
+              Google sometimes filters or removes reviews. We track which of yours stick, so nothing
+              quietly disappears.
+              {hasVanished && atRisk.length > 0
+                ? ` ${atRisk.length} more ${atRisk.length === 1 ? "is" : "are"} at risk of being filtered.`
+                : ""}
             </p>
+            {tab !== "vanished" ? (
+              <button
+                type="button"
+                onClick={() => setTab("vanished")}
+                className="mt-2 inline-flex items-center gap-1 text-[13px] font-semibold text-primary hover:text-primary-dark"
+              >
+                See flagged {hasVanished ? "reviews" : "review"} <Icon name="chevron-right" size={14} />
+              </button>
+            ) : null}
           </div>
+          <button
+            type="button"
+            onClick={() => setWatchdogDismissed(true)}
+            aria-label="Dismiss durability alert"
+            className="grid size-8 shrink-0 place-items-center rounded-btn text-faint hover:bg-black/5 hover:text-ink"
+          >
+            <Icon name="x" size={16} />
+          </button>
         </div>
       ) : null}
 
