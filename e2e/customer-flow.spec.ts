@@ -32,7 +32,7 @@ test.describe("customer review flow (demo workspace)", () => {
     await page.getByRole("button", { name: "Write my review" }).click();
 
     // Three draft cards with three different texts.
-    await expect(page.getByRole("heading", { name: /starting point/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Pick your favourite/ })).toBeVisible();
     const texts = await collectDraftTexts(page);
     expect(new Set(texts).size).toBe(3);
 
@@ -92,7 +92,7 @@ test.describe("customer review flow (demo workspace)", () => {
     await page.getByRole("button", { name: "On time" }).click();
     await page.getByRole("button", { name: "Write my review" }).click();
 
-    await expect(page.getByRole("heading", { name: /starting point/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Pick your favourite/ })).toBeVisible();
     const texts = await collectDraftTexts(page);
     expect(new Set(texts).size).toBe(3);
     for (const text of texts) {
