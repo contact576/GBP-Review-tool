@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils/cn";
 import { Icon } from "@/components/icons";
@@ -9,8 +9,20 @@ import { MegaCTA } from "@/components/review/MegaCTA";
 import { captureCustomerAction } from "@/lib/actions";
 import { consentLabels, makeConsentSourceText } from "@/lib/compliance/consent";
 import type { Region } from "@/lib/data/types";
+import type { CaptureCustomerInput } from "@/lib/data/provider";
 
 type ChannelChoice = "email" | "sms";
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Inline contact validation — returns a reason string, or null when acceptable. */
+function validateContact(channel: ChannelChoice, value: string): string | null {
+  const v = value.trim();
+  if (!v) return null; // empty is handled by the disabled state, not an inline error
+  if (channel === "email") return EMAIL_RE.test(v) ? null : "Enter a valid email address.";
+  const digits = v.replace(/\D/g, "");
+  return digits.length >= 7 && digits.length <= 15 ? null : "Enter a valid phone number.";
+}
 
 export function CaptureForm({
   locationId,
@@ -34,15 +46,50 @@ export function CaptureForm({
   const [name, setName] = useState("");
   const [channel, setChannel] = useState<ChannelChoice>("email");
   const [contact, setContact] = useState("");
+  const [contactTouched, setContactTouched] = useState(false);
   const [selectedAttrs, setSelectedAttrs] = useState<string[]>([]);
   const [serviceConsent, setServiceConsent] = useState(false);
   const [marketingConsent, setMarketingConsent] = useState(false);
   const [tally, setTally] = useState(0);
-  const [sentTo, setSentTo] = useState<string | null>(null);
+  const [sentTo, setSentTo] = useState<{ name: string; mode: "sent" | "queued" } | null>(null);
+  const [offline, setOffline] = useState(false);
+  const [queueCount, setQueueCount] = useState(0);
+  const queueRef = useRef<CaptureCustomerInput[]>([]);
 
   const nameOk = name.trim().length > 0;
-  const contactOk = contact.trim().length > 0;
+  const contactFilled = contact.trim().length > 0;
+  const contactErr = contactTouched ? validateContact(channel, contact) : null;
+  const contactOk = contactFilled && !validateContact(channel, contact);
   const canSend = nameOk && contactOk && serviceConsent && !pending;
+
+  // Flush any queued captures when connectivity returns.
+  useEffect(() => {
+    async function drain() {
+      if (!navigator.onLine || queueRef.current.length === 0) return;
+      const items = queueRef.current;
+      queueRef.current = [];
+      setQueueCount(0);
+      const failed: CaptureCustomerInput[] = [];
+      for (const p of items) {
+        try { await captureCustomerAction(p); } catch { failed.push(p); }
+      }
+      if (failed.length) {
+        queueRef.current = failed;
+        setQueueCount(failed.length);
+      } else {
+        toast("Queued invites sent", "success", "check-circle");
+      }
+    }
+    const onOnline = () => { setOffline(false); void drain(); };
+    const onOffline = () => setOffline(true);
+    setOffline(!navigator.onLine);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+  }, [toast]);
 
   function toggleAttr(a: string) {
     setSelectedAttrs((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]));
@@ -52,53 +99,93 @@ export function CaptureForm({
     setName("");
     setChannel("email");
     setContact("");
+    setContactTouched(false);
     setSelectedAttrs([]);
     setServiceConsent(false);
     setMarketingConsent(false);
   }
 
+  function enqueue(p: CaptureCustomerInput) {
+    queueRef.current = [...queueRef.current, p];
+    setQueueCount(queueRef.current.length);
+  }
+
+  function flashSuccess(customerName: string, mode: "sent" | "queued") {
+    resetForm();
+    setSentTo({ name: customerName, mode });
+    setTimeout(() => setSentTo(null), 1600);
+  }
+
   function onSend() {
-    if (!nameOk || !contactOk) return;
+    const customerName = name.trim();
+    if (!customerName) return;
+    setContactTouched(true);
+    if (!contactOk) return; // empty or invalid contact — inline error already shows
+
     // Dual-consent guard: service consent is legally required to send anything.
     if (!serviceConsent) {
       toast("Tick the service-consent box before sending", "warning", "shield");
       return;
     }
-    const customerName = name.trim();
-    const consentSourceText = makeConsentSourceText(region, marketingConsent);
+
+    const payload: CaptureCustomerInput = {
+      locationId,
+      name: customerName,
+      email: channel === "email" ? contact.trim() : undefined,
+      phone: channel === "sms" ? contact.trim() : undefined,
+      staffId,
+      channel,
+      services: selectedAttrs,
+      serviceConsent,
+      marketingConsent,
+      consentSourceText: makeConsentSourceText(region, marketingConsent),
+    };
+
+    // Optimistic tally — this customer is captured the moment the desk taps send.
+    setTally((t) => t + 1);
+
+    // Offline: keep the capture and send it when the connection returns.
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      enqueue(payload);
+      toast(`Saved — sends to ${customerName} when you're back online`, "info", "clock");
+      flashSuccess(customerName, "queued");
+      return;
+    }
 
     startTransition(async () => {
-      await captureCustomerAction({
-        locationId,
-        name: customerName,
-        email: channel === "email" ? contact.trim() : undefined,
-        phone: channel === "sms" ? contact.trim() : undefined,
-        staffId,
-        channel,
-        services: selectedAttrs,
-        serviceConsent,
-        marketingConsent,
-        consentSourceText,
-      });
-      setTally((t) => t + 1);
-      resetForm();
-      setSentTo(customerName);
-      toast(`Invite sent to ${customerName}`, "success", "check-circle");
-      setTimeout(() => setSentTo(null), 1500);
+      try {
+        await captureCustomerAction(payload);
+        toast(`Invite sent to ${customerName}`, "success", "check-circle");
+        flashSuccess(customerName, "sent");
+      } catch {
+        // Network dropped mid-send — never lose the capture.
+        enqueue(payload);
+        toast(`Saved — we'll retry ${customerName} shortly`, "warning", "clock");
+        flashSuccess(customerName, "queued");
+      }
     });
   }
 
   return (
     <div className="relative">
-      {/* Big success moment (1.5s), then the form is already reset behind it. */}
+      {/* Big success moment (1.6s), then the form is already reset behind it. */}
       {sentTo ? (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-paper px-6 text-center animate-fade-in">
-          <div className="grid size-24 place-items-center rounded-full bg-primary-tint text-primary">
-            <Icon name="check-circle" size={56} />
+          <div
+            className={cn(
+              "grid size-24 place-items-center rounded-full animate-slide-up",
+              sentTo.mode === "sent" ? "bg-primary-tint text-primary" : "bg-gold-tint text-gold-deep",
+            )}
+          >
+            <Icon name={sentTo.mode === "sent" ? "check-circle" : "clock"} size={56} />
           </div>
           <div>
-            <div className="text-[24px] font-extrabold text-ink">Sent to {sentTo}</div>
-            <p className="mt-1 text-[14px] text-sub">Ready for the next one.</p>
+            <div className="text-[24px] font-extrabold text-ink">
+              {sentTo.mode === "sent" ? `Sent to ${sentTo.name}` : `Saved for ${sentTo.name}`}
+            </div>
+            <p className="mt-1 text-[14px] text-sub">
+              {sentTo.mode === "sent" ? "Ready for the next one." : "Sends automatically when you're back online."}
+            </p>
           </div>
         </div>
       ) : null}
@@ -129,12 +216,25 @@ export function CaptureForm({
           </div>
           <Link
             href="/staff/qr"
-            className="grid min-h-[44px] place-items-center rounded-card border border-hairline bg-card px-3 text-primary shadow-sm"
+            className="grid min-h-[44px] place-items-center rounded-card border border-hairline bg-card px-3 text-primary shadow-sm transition-colors hover:bg-primary-wash"
             aria-label="Show kiosk QR"
           >
             <Icon name="qr" size={20} />
           </Link>
         </div>
+
+        {/* Offline / queue status — honest, never a dead end */}
+        {offline ? (
+          <div className="mt-3 flex items-start gap-2 rounded-btn border border-gold/40 bg-gold-tint px-3 py-2.5 text-[13px] font-medium text-gold-deep">
+            <Icon name="clock" size={16} className="mt-px shrink-0" />
+            You&apos;re offline — captures are saved and send automatically when you reconnect.
+          </div>
+        ) : queueCount > 0 ? (
+          <div className="mt-3 flex items-center gap-2 rounded-btn border border-hairline bg-card px-3 py-2 text-[12px] font-medium text-sub">
+            <Icon name="clock" size={14} className="shrink-0 text-gold-deep" />
+            {queueCount} waiting to send — retrying automatically.
+          </div>
+        ) : null}
 
         {/* Name */}
         <div className="mt-6">
@@ -166,10 +266,10 @@ export function CaptureForm({
                 key={opt.key}
                 type="button"
                 aria-pressed={channel === opt.key}
-                onClick={() => setChannel(opt.key)}
+                onClick={() => { setChannel(opt.key); setContactTouched(false); }}
                 className={cn(
                   "flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-[10px] text-[14px] font-semibold transition-colors",
-                  channel === opt.key ? "bg-primary text-white shadow-sm" : "text-sub",
+                  channel === opt.key ? "bg-primary text-white shadow-sm" : "text-sub hover:text-ink",
                 )}
               >
                 <Icon name={opt.icon} size={16} />
@@ -186,12 +286,14 @@ export function CaptureForm({
 
         {/* Contact */}
         <div className="mt-4">
-          <Field label={channel === "email" ? "Their email" : "Their mobile number"}>
+          <Field label={channel === "email" ? "Their email" : "Their mobile number"} error={contactErr ?? undefined}>
             <Input
               type={channel === "email" ? "email" : "tel"}
               inputMode={channel === "email" ? "email" : "tel"}
               value={contact}
               onChange={(e) => setContact(e.target.value)}
+              onBlur={() => setContactTouched(true)}
+              invalid={Boolean(contactErr)}
               placeholder={channel === "email" ? "name@email.com" : "(555) 123-4567"}
               autoComplete="off"
               enterKeyHint="done"
@@ -242,13 +344,13 @@ export function CaptureForm({
       <div className="fixed inset-x-0 bottom-[60px] z-20">
         <div className="mx-auto w-full max-w-[540px] bg-gradient-to-t from-paper via-paper to-transparent px-4 pb-3 pt-5">
           {nameOk && contactOk && !serviceConsent ? (
-            <p className="mb-2 text-center text-[12px] font-medium text-danger">
-              Service consent is required before you can send.
+            <p className="mb-2 flex items-center justify-center gap-1 text-center text-[12px] font-medium text-danger">
+              <Icon name="shield" size={13} /> Service consent is required before you can send.
             </p>
           ) : null}
           <MegaCTA
-            label={pending ? "Sending…" : "Send review invite"}
-            icon="send"
+            label={pending ? "Sending…" : offline ? "Save invite" : "Send review invite"}
+            icon={offline ? "clock" : "send"}
             onClick={onSend}
             disabled={!canSend}
             loading={pending}

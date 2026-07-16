@@ -20,7 +20,7 @@ function isActive(pathname: string, href: string): boolean {
 export function StaffTabs() {
   const pathname = usePathname();
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-hairline bg-card">
+    <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-hairline bg-card pb-[env(safe-area-inset-bottom)]">
       {TABS.map((tab) => {
         const active = isActive(pathname, tab.href);
         return (
@@ -29,10 +29,13 @@ export function StaffTabs() {
             href={tab.href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "flex min-h-[60px] flex-1 flex-col items-center justify-center gap-0.5 py-2.5 text-[11px] font-semibold transition-colors",
-              active ? "text-primary" : "text-faint",
+              "relative flex min-h-[60px] flex-1 flex-col items-center justify-center gap-0.5 py-2.5 text-[11px] font-semibold transition-colors",
+              active ? "text-primary" : "text-faint hover:text-sub",
             )}
           >
+            {active ? (
+              <span aria-hidden className="absolute inset-x-6 top-0 h-0.5 rounded-full bg-primary" />
+            ) : null}
             <Icon name={tab.icon} size={22} />
             {tab.label}
           </Link>

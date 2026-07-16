@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils/cn";
 import { Icon } from "@/components/icons";
 import { Badge } from "@/components/ds/misc";
 
-/** An editable AI draft card with tone tag + regenerate. */
+/** An editable, selectable AI draft card with tone tag + regenerate. */
 export function DraftCard({
   text, tone, selected, onSelect, onEdit, onRegenerate, regenerating,
 }: {
@@ -21,29 +21,54 @@ export function DraftCard({
 
   return (
     <div
-      className={cn(
-        "rounded-card border bg-card p-4 transition-all",
-        selected ? "border-primary ring-2 ring-primary/20" : "border-hairline",
-      )}
+      role="radio"
+      aria-checked={selected}
+      tabIndex={0}
       onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect?.();
+        }
+      }}
+      className={cn(
+        "cursor-pointer rounded-card border bg-card p-4 transition-all duration-150 focus-visible:outline-none",
+        selected
+          ? "border-primary shadow-lg ring-2 ring-primary/20"
+          : "border-hairline shadow-sm hover:border-primary/40",
+      )}
     >
-      <div className="mb-2 flex items-center justify-between">
-        <Badge tone="primary">{tone}</Badge>
+      <div className="mb-2.5 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span
+            className={cn(
+              "grid size-5 place-items-center rounded-full border transition-colors",
+              selected ? "border-primary bg-primary text-white" : "border-hairline text-transparent",
+            )}
+            aria-hidden
+          >
+            <Icon name="check" size={12} />
+          </span>
+          <Badge tone={selected ? "primary" : "neutral"}>{tone}</Badge>
+        </div>
         <div className="flex items-center gap-1">
           <button
             type="button"
             aria-label="Edit draft"
-            onClick={(e) => { e.stopPropagation(); setEditing((v) => !v); }}
-            className="grid size-8 place-items-center rounded-btn text-sub hover:bg-primary-wash"
+            onClick={(e) => { e.stopPropagation(); setEditing((v) => !v); onSelect?.(); }}
+            className={cn(
+              "grid size-9 place-items-center rounded-btn text-sub transition-colors hover:bg-primary-wash hover:text-ink",
+              editing && "bg-primary-wash text-primary",
+            )}
           >
             <Icon name="pencil" size={16} />
           </button>
           {onRegenerate ? (
             <button
               type="button"
-              aria-label="Regenerate draft"
+              aria-label="Regenerate this wording"
               onClick={(e) => { e.stopPropagation(); onRegenerate(); }}
-              className="grid size-8 place-items-center rounded-btn text-sub hover:bg-primary-wash"
+              className="grid size-9 place-items-center rounded-btn text-sub transition-colors hover:bg-primary-wash hover:text-ink"
             >
               <Icon name="refresh" size={16} className={regenerating ? "animate-spin" : ""} />
             </button>
