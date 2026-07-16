@@ -114,6 +114,36 @@ export function isDbBacked(): boolean {
   return Boolean(process.env.DATABASE_URL);
 }
 
+/** Public review-widget payload for an embeddable QR slug (no session). */
+export interface WidgetData {
+  business: string;
+  rating: number;
+  reviewCount: number;
+  reviewUrl: string;
+  reviews: { author: string; rating: number; text: string }[];
+}
+
+export async function getWidgetData(slug: string): Promise<WidgetData | null> {
+  for (const provider of await getPublicProviders()) {
+    const wsId = await provider.getWorkspaceIdBySlug(slug);
+    if (!wsId) continue;
+    const data = await provider.getData(wsId);
+    if (!data) continue;
+    const reviews = data.reviews
+      .filter((r) => r.text.trim().length > 0 && r.rating >= 4)
+      .slice(0, 6)
+      .map((r) => ({ author: r.author, rating: r.rating, text: r.text }));
+    return {
+      business: data.location.name,
+      rating: data.location.rating,
+      reviewCount: data.location.reviewCount,
+      reviewUrl: data.location.reviewUrl,
+      reviews,
+    };
+  }
+  return null;
+}
+
 export { DEMO_WORKSPACE_ID };
 export type { DataProvider } from "./provider";
 export * from "./types";

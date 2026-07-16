@@ -2093,6 +2093,16 @@ export const drizzleProvider: DataProvider = {
   },
 
   // ── QR ────────────────────────────────────────────────────
+  async getWorkspaceIdBySlug(slug) {
+    const db = getDb();
+    const rows = await db
+      .select({ ws: t.qrAsset.workspaceId })
+      .from(t.qrAsset)
+      .where(eq(t.qrAsset.slug, slug))
+      .limit(1);
+    return rows[0]?.ws ?? null;
+  },
+
   async mintRequestFromQrSlug(slug) {
     // Slug-keyed global lookup (slugs are globally unique); all writes are
     // scoped to the asset's OWN workspace.

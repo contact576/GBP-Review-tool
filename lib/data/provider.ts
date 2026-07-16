@@ -229,6 +229,8 @@ export interface DataProvider {
   mintRequestFromQrSlug(
     slug: string,
   ): Promise<{ token: string; business: string } | null>;
+  /** Resolve a public QR slug to its workspace id (read-only, no side effects). */
+  getWorkspaceIdBySlug(slug: string): Promise<string | null>;
 
   // Workspace configuration
   updateIndustry(

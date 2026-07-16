@@ -575,6 +575,13 @@ export const memoryProvider: DataProvider = {
   },
 
   // ── QR ────────────────────────────────────────────────────
+  async getWorkspaceIdBySlug(slug) {
+    for (const data of allWorkspaces()) {
+      if (data.qrAssets.some((q) => q.slug === slug)) return data.workspace.id;
+    }
+    return null;
+  },
+
   async mintRequestFromQrSlug(slug) {
     for (const data of allWorkspaces()) {
       const asset = data.qrAssets.find((q) => q.slug === slug);
