@@ -69,13 +69,30 @@ Add to Vercel as: **`NEXT_PUBLIC_APP_URL`** = your live URL, e.g. `https://YOUR-
 
 ---
 
-## Later (not needed now)
+## Later — activate when ready (all built, ready-but-inactive)
 
-| Service | Unlocks | Where |
-|---|---|---|
-| **Resend** (`RESEND_API_KEY`) | Real email sending (review requests, password resets) | resend.com — free tier |
-| **Stripe** | Real subscription billing | stripe.com |
-| **Twilio** | SMS review requests (needs A2P carrier approval, 1–5 days) | twilio.com |
+These are fully coded. Until you add the keys, the app degrades honestly ("connect
+email to send", "connect billing to enable upgrades") and never fakes anything.
+
+### Email — Resend (unlocks review-request/invite/reset emails)
+1. Create a free account at **resend.com** → API Keys → create key.
+2. In Vercel → Settings → Environment Variables add:
+   - `RESEND_API_KEY` = the key
+   - `EMAIL_FROM` = `Foundly <onboarding@resend.dev>` (or your verified domain sender)
+3. Redeploy. Sending turns on automatically; `/setup` shows it green.
+
+### Billing — Stripe (unlocks plan upgrades + the customer portal)
+1. Create an account at **stripe.com**. In Developers → API keys copy the **Secret key**.
+2. Create a recurring **Price** for each paid plan you want (Starter/Growth/Pro/Multi/Agency).
+3. In Vercel add:
+   - `STRIPE_SECRET_KEY` = your secret key
+   - `STRIPE_WEBHOOK_SECRET` = from Developers → Webhooks (endpoint `/(your-domain)/api/webhooks/stripe`)
+   - `STRIPE_PRICE_GROWTH`, `STRIPE_PRICE_PRO`, `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_MULTI`, `STRIPE_PRICE_AGENCY` = the matching Price IDs
+4. Redeploy. Upgrade buttons on `/app/settings/billing` now open real Stripe Checkout.
+
+### SMS — Twilio (needs A2P 10DLC carrier approval, 1–5 days)
+Register a Twilio A2P brand/campaign first (long lead time). SMS stays honestly
+"pending" until approved; email is the working default meanwhile.
 
 ## Checklist
 
