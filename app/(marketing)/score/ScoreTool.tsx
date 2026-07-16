@@ -8,9 +8,10 @@ import { Badge, Kicker } from "@/components/ds/misc";
 import { Field, Input, Select } from "@/components/ds/form";
 import { ScoreDial } from "@/components/charts/ScoreDial";
 import { SubDial } from "@/components/charts/SubDial";
-import { GapBar } from "@/components/charts/Bars";
+import { GapBar, BenchmarkBar } from "@/components/charts/Bars";
 import { computePublicScore, scoreBand } from "@/lib/data/selectors";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
+import { downloadScoreCard } from "./scoreCard";
 
 const CATEGORIES = [
   "Physiotherapy", "Chiropractic", "Dental", "HVAC", "Renovation",
@@ -117,6 +118,13 @@ export function ScoreTool() {
   // Latest computed growth score (state is stale inside timeout closures).
   const scoreRef = useRef(0);
 
+  // ── Compare-a-competitor state ──────────────────────────────
+  const [compName, setCompName] = useState("");
+  const [compErr, setCompErr] = useState("");
+  const [comparing, setComparing] = useState(false);
+  const [competitor, setCompetitor] = useState<Results | null>(null);
+  const compRunRef = useRef(0);
+
   async function loadSample(business: string, cat: string, myRun: number) {
     setSampleLoading(true);
     try {
@@ -177,6 +185,70 @@ export function ScoreTool() {
     }
   }
 
+  // Competitor lookup — reuses the exact same synthetic-then-real path as the
+  // primary business, keyed on the user's chosen category, so "you vs them"
+  // is scored on identical footing. Honest keyless fallback preserved.
+  async function lookupCompetitor(business: string, cat: string, myRun: number) {
+    try {
+      const res = await fetch("/api/score/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ business, category: cat }),
+      });
+      const data: unknown = await res.json();
+      if (compRunRef.current !== myRun) return;
+      if (
+        data &&
+        typeof data === "object" &&
+        "real" in data &&
+        (data as { real: unknown }).real === true &&
+        "place" in data
+      ) {
+        const place = (data as { place: { rating?: unknown; reviewCount?: unknown } }).place;
+        if (place && typeof place.rating === "number" && typeof place.reviewCount === "number") {
+          setCompetitor(compute(business, cat, { rating: place.rating, reviewCount: place.reviewCount }));
+        }
+      }
+    } catch {
+      // Lookup failed — keep the labelled synthetic preview for the competitor.
+    } finally {
+      if (compRunRef.current === myRun) setComparing(false);
+    }
+  }
+
+  function handleCompare(e: React.FormEvent) {
+    e.preventDefault();
+    if (!results) return;
+    const business = compName.trim();
+    if (!business) {
+      setCompErr("Enter a business name to compare.");
+      return;
+    }
+    if (business.toLowerCase() === results.business.toLowerCase()) {
+      setCompErr("Enter a different business than your own.");
+      return;
+    }
+    setCompErr("");
+    const cat = results.category;
+    // Synthetic preview shows instantly, then upgrades to real data if a Places
+    // key is configured — same contract as the primary business.
+    setCompetitor(compute(business, cat));
+    setComparing(true);
+    const myRun = ++compRunRef.current;
+    void lookupCompetitor(business, cat, myRun);
+  }
+
+  function handleDownloadCard() {
+    if (!results) return;
+    downloadScoreCard({
+      business: results.business,
+      growth: results.score.growth,
+      reviews: results.score.reviews,
+      profile: results.score.profile,
+      bandLabel: bandLabel(results.score.growth),
+    });
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const business = name.trim();
@@ -189,6 +261,11 @@ export function ScoreTool() {
     scoreRef.current = res.score.growth;
     setResults(res);
     setSample(null);
+    // A fresh primary scan invalidates any prior head-to-head.
+    setCompetitor(null);
+    setCompErr("");
+    setComparing(false);
+    compRunRef.current++;
     const myRun = ++runRef.current;
     void lookupReal(business, category, myRun);
 
@@ -311,6 +388,11 @@ export function ScoreTool() {
                 <SubDial value={results.score.profile} label="Profile" onHero />
               </div>
             </div>
+            <div className="mt-5 flex justify-center sm:justify-end">
+              <Button type="button" onClick={handleDownloadCard} variant="gold" size="sm" icon="download">
+                Download score card
+              </Button>
+            </div>
           </div>
 
           {/* Gaps vs area */}
@@ -331,6 +413,60 @@ export function ScoreTool() {
                 ? "Rating and review count from your public Google listing."
                 : "Estimated preview — connect your business for real data."}
             </p>
+          </Card>
+
+          {/* Compare a competitor */}
+          <Card>
+            <div className="mb-4">
+              <Kicker>Compare another business</Kicker>
+              <h3 className="mt-1 text-[17px] font-bold text-ink">See how you stack up</h3>
+              <p className="mt-1 text-[13px] text-sub">
+                Enter any nearby {results.category.toLowerCase()} to run the same Score on them.
+              </p>
+            </div>
+            <form onSubmit={handleCompare} className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+              <Field label="Competitor business name" error={compErr || undefined}>
+                <Input
+                  value={compName}
+                  onChange={(e) => setCompName(e.target.value)}
+                  placeholder="e.g. Downtown Dental"
+                  iconLeft="building"
+                  autoComplete="off"
+                />
+              </Field>
+              <Button type="submit" variant="secondary" size="lg" icon="search" loading={comparing} className="sm:mb-0">
+                Compare
+              </Button>
+            </form>
+
+            {competitor ? (
+              <div className="mt-6 border-t border-hairline pt-6 animate-fade-in">
+                {/* Growth Score — you vs them */}
+                <div className="flex items-center justify-center gap-6 sm:gap-10">
+                  <ScoreDial value={results.score.growth} size={128} label={results.business} />
+                  <span className="kicker text-faint">vs</span>
+                  <ScoreDial value={competitor.score.growth} size={128} label={competitor.business} />
+                </div>
+                {/* Rating + review count — you vs them */}
+                <div className="mt-6 space-y-5">
+                  <BenchmarkBar
+                    label="Star rating"
+                    you={results.rating}
+                    others={[{ name: competitor.business, value: competitor.rating }]}
+                  />
+                  <BenchmarkBar
+                    label="Total reviews"
+                    you={results.reviewCount}
+                    others={[{ name: competitor.business, value: competitor.reviewCount }]}
+                  />
+                </div>
+                <p className="mt-4 text-[12px] text-faint">
+                  {competitor.source === "real"
+                    ? "Their rating and review count from their public Google listing."
+                    : "Estimated preview for them — connect a business for real data."}
+                </p>
+              </div>
+            ) : null}
           </Card>
 
           {/* Magic block — AI sample review */}
