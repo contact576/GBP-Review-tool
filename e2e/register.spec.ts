@@ -31,7 +31,7 @@ test("register → skip onboarding → truthful empty dashboard → sign out/in 
   const hero = page.locator(".on-hero");
   await expect(hero).toContainText(business);
   // …with truthful zero states (score 0, nothing to reply to)…
-  await expect(hero).toContainText("0 of 100");
+  await expect(hero.getByRole("img", { name: /0 of 100/ }).first()).toBeVisible();
   await expect(page.getByText(/All caught up/)).toBeVisible();
   // …and ZERO demo leakage: no Harbourview data, no demo banner.
   await expect(page.getByText(/Harbourview/)).toHaveCount(0);
