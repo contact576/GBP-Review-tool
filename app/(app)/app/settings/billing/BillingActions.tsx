@@ -39,19 +39,3 @@ export function BillingActions({ customers }: { customers: Customer[] }) {
     </div>
   );
 }
-
-/** Honest cancel path — always routes to pause/downgrade, never hides the option. */
-export function CancelPath() {
-  const { toast } = useToast();
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      onClick={() =>
-        toast("Opening pause & downgrade options — nothing is deleted", "info", "clock")
-      }
-    >
-      Pause or cancel plan
-    </Button>
-  );
-}
