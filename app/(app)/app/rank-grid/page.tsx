@@ -1,9 +1,11 @@
 import { getData } from "@/lib/data";
+import { cn } from "@/lib/utils/cn";
 import { Card, CardHeader } from "@/components/ds/Card";
-import { EmptyState, Badge, DataChip } from "@/components/ds/misc";
+import { EmptyState, Badge } from "@/components/ds/misc";
 import { PageHeader } from "@/components/app/PageHeader";
 import { Paywall } from "@/components/app/Paywall";
 import { Icon } from "@/components/icons";
+import { StatTile } from "@/components/charts/StatTile";
 import { hasFeature } from "@/lib/billing/plans";
 import { formatDate } from "@/lib/utils/format";
 import { RankGridView } from "./RankGridView";
@@ -34,46 +36,49 @@ export default async function RankGridPage() {
   const red = points.filter((p) => p.rank === null || p.rank > 10).length;
   const total = points.length;
 
+  const kpis = [
+    { label: "Average rank", value: scan.avgRank.toFixed(1) },
+    { label: "Share of local pack", value: `${Math.round(scan.shareOfLocalPack * 100)}%` },
+    { label: "Top-3 points", value: `${green}/${total}` },
+    { label: "Not found", value: red },
+  ];
+
   // Free teaser — the keyword + coverage headline stays visible on every plan.
   const overview = (
     <Card raised>
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="kicker mb-1.5">Keyword</div>
-            <span className="inline-flex items-center gap-1.5 rounded-chip border border-primary bg-primary-tint px-3 py-2 text-[13px] font-semibold text-primary-dark">
-              <Icon name="search" size={14} /> {scan.keyword}
-            </span>
-            <p className="mt-2 text-[12px] text-faint">
-              {scan.gridSize}×{scan.gridSize} grid · scanned {formatDate(scan.ranAt)}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <div className="rounded-card border border-hairline bg-card px-4 py-3 text-center">
-              <div className="text-[24px] font-extrabold leading-none tabular-nums text-ink">
-                {scan.avgRank.toFixed(1)}
-              </div>
-              <div className="mt-1 text-[11px] text-faint">Average rank</div>
-            </div>
-            <div className="rounded-card border border-hairline bg-card px-4 py-3 text-center">
-              <div className="text-[24px] font-extrabold leading-none tabular-nums text-ink">
-                {Math.round(scan.shareOfLocalPack * 100)}%
-              </div>
-              <div className="mt-1 text-[11px] text-faint">Share of local pack</div>
-            </div>
-          </div>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="kicker mb-1.5">Keyword</div>
+          <span className="inline-flex items-center gap-1.5 rounded-chip border border-primary bg-primary-tint px-3 py-2 text-[13px] font-semibold text-primary-dark">
+            <Icon name="search" size={14} /> {scan.keyword}
+          </span>
+          <p className="mt-2 data-chip text-faint">
+            {scan.gridSize}×{scan.gridSize} grid · scanned {formatDate(scan.ranAt)}
+          </p>
         </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <DataChip>{green} top-3 points</DataChip>
-          <DataChip>{amber} on page</DataChip>
-          <DataChip>{red} not found</DataChip>
+        <div className="flex flex-wrap gap-2">
+          <Badge tone="primary">{amber} on page</Badge>
         </div>
+      </div>
+
+      <div className="mt-5 grid grid-cols-2 gap-y-6 border-t border-hairline pt-5 sm:grid-cols-4 sm:gap-y-0 sm:divide-x sm:divide-hairline">
+        {kpis.map((k, i) => (
+          <StatTile
+            key={k.label}
+            boxless
+            label={k.label}
+            value={k.value}
+            className={cn("sm:px-5", i === 0 && "sm:pl-0")}
+          />
+        ))}
+      </div>
     </Card>
   );
 
   // The valuable detail — coverage grid, takeaway, and scan meta. Pro-gated.
   const details = (
     <div className="space-y-5">
-      {/* Grid / table */}
+      {/* Geo-grid */}
       <Card>
         <CardHeader kicker="Coverage" title="Local map coverage" />
         <RankGridView scan={scan} />
