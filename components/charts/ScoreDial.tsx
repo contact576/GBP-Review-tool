@@ -75,7 +75,7 @@ export function ScoreDial({
             strokeDasharray={`${arcLen} ${circumference}`}
           />
           <circle
-            cx={cx} cy={cx} r={r} fill="none" stroke={onHero ? "#E8A33D" : color}
+            cx={cx} cy={cx} r={r} fill="none" stroke={onHero ? "#8FE3CE" : color}
             strokeWidth={stroke} strokeLinecap="round"
             strokeDasharray={`${progress} ${circumference}`}
             className="transition-[stroke-dasharray] duration-350"
@@ -95,7 +95,7 @@ export function ScoreDial({
         <div className={cn("text-[14px] font-semibold", onHero ? "text-white" : "text-ink")}>{label}</div>
         {sublabel ? <div className={cn("text-[12px]", onHero ? "text-white/70" : "text-sub")}>{sublabel}</div> : null}
         {typeof delta === "number" ? (
-          <div className={cn("mt-0.5 text-[12px] font-semibold", onHero ? "text-gold" : delta >= 0 ? "text-primary" : "text-danger")}>
+          <div className={cn("mt-0.5 text-[12px] font-semibold", onHero ? "text-white/85" : delta >= 0 ? "text-primary" : "text-danger")}>
             {delta >= 0 ? "↑" : "↓"} {Math.abs(delta)} this month
           </div>
         ) : null}
