@@ -16,6 +16,7 @@ export default async function RequestsPage() {
         requests={data.requests}
         customers={data.customers}
         locationId={data.location.id}
+        reviewUrl={data.location.reviewUrl}
       />
     </div>
   );

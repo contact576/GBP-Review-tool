@@ -2,11 +2,13 @@
 
 import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { cn } from "@/lib/utils/cn";
 import { Card } from "@/components/ds/Card";
 import { Button } from "@/components/ds/Button";
 import { Badge, EmptyState } from "@/components/ds/misc";
 import { Checkbox, Field, Input } from "@/components/ds/form";
 import { Tabs, type TabItem } from "@/components/ds/Tabs";
+import { Table, type Column, type SortDirection } from "@/components/ds/Table";
 import { Drawer } from "@/components/ds/Drawer";
 import { useToast } from "@/components/ds/Toast";
 import { Icon, type IconName } from "@/components/icons";
@@ -23,6 +25,7 @@ import { sendRequestAction, addCustomerAction, importCustomersAction } from "@/l
 import type { Customer, ReviewRequest, LifecycleStage, Region } from "@/lib/data/types";
 
 type TabKey = "all" | "regulars" | "never" | "reviewed" | "suppressed";
+type DrawerTab = "overview" | "consent" | "activity";
 
 const LIFECYCLE: Record<LifecycleStage, { label: string; tone: "neutral" | "primary" | "gold" | "danger" | "sub" }> = {
   new: { label: "New", tone: "sub" },
@@ -52,7 +55,13 @@ export function CustomersView({
 
   const [tab, setTab] = useState<TabKey>("all");
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<{ key: string; direction: SortDirection }>({
+    key: "name",
+    direction: "asc",
+  });
   const [openId, setOpenId] = useState<string | null>(null);
+  const [drawerTab, setDrawerTab] = useState<DrawerTab>("overview");
+  const [revealContact, setRevealContact] = useState(false);
 
   // "Add customer" drawer state
   const [addOpen, setAddOpen] = useState(false);
@@ -116,11 +125,37 @@ export function CustomersView({
     });
   }, [customers, tab, query]);
 
+  const sorted = useMemo(() => {
+    const arr = [...filtered];
+    const dir = sort.direction === "asc" ? 1 : -1;
+    arr.sort((a, b) => {
+      switch (sort.key) {
+        case "visits":
+          return (a.visitCount - b.visitCount) * dir;
+        case "lastAsked": {
+          const av = a.lastRequestAt ? new Date(a.lastRequestAt).getTime() : 0;
+          const bv = b.lastRequestAt ? new Date(b.lastRequestAt).getTime() : 0;
+          return (av - bv) * dir;
+        }
+        case "name":
+        default:
+          return a.name.localeCompare(b.name) * dir;
+      }
+    });
+    return arr;
+  }, [filtered, sort]);
+
   const openCustomer = openId ? customers.find((c) => c.id === openId) ?? null : null;
   const customerRequests = useMemo(
     () => (openCustomer ? requests.filter((r) => r.customerId === openCustomer.id) : []),
     [openCustomer, requests],
   );
+
+  function openDetail(id: string) {
+    setOpenId(id);
+    setDrawerTab("overview");
+    setRevealContact(false);
+  }
 
   function exportAll() {
     downloadCsv("customers.csv", customersToCsv(customers));
@@ -222,6 +257,57 @@ export function CustomersView({
     });
   }
 
+  // ── Ledger columns (desktop) ──
+  const columns: Column<Customer>[] = [
+    {
+      key: "name",
+      header: "Customer",
+      sortable: true,
+      ariaLabel: "Sort by name",
+      render: (c) => (
+        <div className="flex items-center gap-2.5">
+          <div className="grid size-8 shrink-0 place-items-center rounded-chip bg-primary-tint text-[12px] font-bold text-primary-dark">
+            {initials(c.name)}
+          </div>
+          <span className="font-semibold text-ink">{c.name}</span>
+        </div>
+      ),
+    },
+    {
+      key: "contact",
+      header: "Contact",
+      cellClassName: "text-sub tabular-nums",
+      render: (c) => (c.email ? maskEmail(c.email) : c.phone ? maskPhone(c.phone) : "—"),
+    },
+    {
+      key: "consent",
+      header: "Consent",
+      render: (c) => <ConsentChips c={c} />,
+    },
+    {
+      key: "visits",
+      header: "Visits",
+      numeric: true,
+      sortable: true,
+      ariaLabel: "Sort by visits",
+      accessor: (c) => c.visitCount,
+    },
+    {
+      key: "lifecycle",
+      header: "Lifecycle",
+      render: (c) => <Badge tone={LIFECYCLE[c.lifecycleStage].tone}>{LIFECYCLE[c.lifecycleStage].label}</Badge>,
+    },
+    {
+      key: "lastAsked",
+      header: "Last asked",
+      align: "right",
+      sortable: true,
+      ariaLabel: "Sort by last asked",
+      cellClassName: "text-sub tabular-nums whitespace-nowrap",
+      render: (c) => (c.lastRequestAt ? formatRelative(c.lastRequestAt) : "Never"),
+    },
+  ];
+
   return (
     <div className="space-y-5">
       {/* Summary strip */}
@@ -269,7 +355,7 @@ export function CustomersView({
 
       <Tabs items={tabs} active={tab} onChange={(k) => setTab(k as TabKey)} />
 
-      {filtered.length === 0 ? (
+      {sorted.length === 0 ? (
         <Card>
           {customers.length === 0 ? (
             <EmptyState
@@ -293,61 +379,27 @@ export function CustomersView({
         </Card>
       ) : (
         <>
-          {/* Desktop table */}
-          <Card padded={false} className="hidden overflow-hidden lg:block">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-[14px]">
-                <thead className="border-b border-hairline bg-paper/60">
-                  <tr className="text-faint">
-                    <th className="px-4 py-3 font-semibold">Customer</th>
-                    <th className="px-4 py-3 font-semibold">Contact</th>
-                    <th className="px-4 py-3 font-semibold">Consent</th>
-                    <th className="px-4 py-3 font-semibold">Visits</th>
-                    <th className="px-4 py-3 font-semibold">Lifecycle</th>
-                    <th className="px-4 py-3 font-semibold">Last asked</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-hairline">
-                  {filtered.map((c) => (
-                    <tr
-                      key={c.id}
-                      onClick={() => setOpenId(c.id)}
-                      className="cursor-pointer transition-colors hover:bg-primary-wash/50"
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2.5">
-                          <div className="grid size-8 shrink-0 place-items-center rounded-chip bg-primary-tint text-[12px] font-bold text-primary-dark">
-                            {initials(c.name)}
-                          </div>
-                          <span className="font-semibold text-ink">{c.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sub">
-                        {c.email ? maskEmail(c.email) : c.phone ? maskPhone(c.phone) : "—"}
-                      </td>
-                      <td className="px-4 py-3">
-                        <ConsentChips c={c} />
-                      </td>
-                      <td className="px-4 py-3 text-sub tabular-nums">{c.visitCount}</td>
-                      <td className="px-4 py-3">
-                        <Badge tone={LIFECYCLE[c.lifecycleStage].tone}>{LIFECYCLE[c.lifecycleStage].label}</Badge>
-                      </td>
-                      <td className="px-4 py-3 text-sub">
-                        {c.lastRequestAt ? formatRelative(c.lastRequestAt) : "Never"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
+          {/* Desktop hairline ledger */}
+          <div className="hidden lg:block">
+            <Table
+              columns={columns}
+              data={sorted}
+              rowKey={(c) => c.id}
+              onRowClick={(c) => openDetail(c.id)}
+              isRowSelected={(c) => c.id === openId}
+              sort={sort}
+              onSortChange={(key, direction) => setSort({ key, direction })}
+              stickyHeader
+              caption="Customers — name, contact, consent, visits, lifecycle and last asked"
+            />
+          </div>
 
           {/* Mobile card list */}
           <div className="space-y-2.5 lg:hidden">
-            {filtered.map((c) => (
+            {sorted.map((c) => (
               <button
                 key={c.id}
-                onClick={() => setOpenId(c.id)}
+                onClick={() => openDetail(c.id)}
                 className="w-full rounded-card border border-hairline bg-card p-4 text-left transition-colors hover:border-primary/40"
               >
                 <div className="flex items-start justify-between gap-3">
@@ -357,7 +409,7 @@ export function CustomersView({
                     </div>
                     <div className="min-w-0">
                       <div className="truncate text-[15px] font-semibold text-ink">{c.name}</div>
-                      <div className="text-[13px] text-faint">
+                      <div className="text-[13px] text-faint tabular-nums">
                         {c.email ? maskEmail(c.email) : c.phone ? maskPhone(c.phone) : "No contact"}
                       </div>
                     </div>
@@ -366,7 +418,7 @@ export function CustomersView({
                 </div>
                 <div className="mt-3 flex items-center justify-between">
                   <ConsentChips c={c} />
-                  <span className="text-[12px] text-faint">
+                  <span className="text-[12px] text-faint tabular-nums">
                     {c.visitCount} {pluralize(c.visitCount, "visit")}
                     {c.lastRequestAt ? ` · asked ${formatRelative(c.lastRequestAt)}` : ""}
                   </span>
@@ -420,18 +472,18 @@ export function CustomersView({
               <div className="overflow-hidden rounded-card border border-hairline">
                 <table className="w-full text-left text-[13px]">
                   <thead className="border-b border-hairline bg-paper/60">
-                    <tr className="text-faint">
-                      <th className="px-3 py-2 font-semibold">Name</th>
-                      <th className="px-3 py-2 font-semibold">Email</th>
-                      <th className="px-3 py-2 font-semibold">Phone</th>
+                    <tr className="font-mono text-[11px] uppercase tracking-[0.08em] text-faint">
+                      <th className="px-3 py-2 font-bold">Name</th>
+                      <th className="px-3 py-2 font-bold">Email</th>
+                      <th className="px-3 py-2 font-bold">Phone</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-hairline">
                     {importRows.slice(0, 8).map((r, i) => (
                       <tr key={`${r.name}-${i}`}>
                         <td className="px-3 py-2 font-semibold text-ink">{r.name}</td>
-                        <td className="px-3 py-2 text-sub">{r.email ?? "—"}</td>
-                        <td className="px-3 py-2 text-sub">{r.phone ?? "—"}</td>
+                        <td className="px-3 py-2 text-sub tabular-nums">{r.email ?? "—"}</td>
+                        <td className="px-3 py-2 text-sub tabular-nums">{r.phone ?? "—"}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -557,20 +609,32 @@ export function CustomersView({
         {openCustomer ? (
           <div className="space-y-5">
             {/* Identity header */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-start gap-3">
               <div className="grid size-12 shrink-0 place-items-center rounded-card bg-primary-tint text-[16px] font-bold text-primary-dark">
                 {initials(openCustomer.name)}
               </div>
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="text-[17px] font-bold text-ink">{openCustomer.name}</div>
-                <div className="flex flex-wrap items-center gap-2 text-[13px] text-sub">
-                  {openCustomer.email ? <span>{maskEmail(openCustomer.email)}</span> : null}
-                  {openCustomer.phone ? <span>{maskPhone(openCustomer.phone)}</span> : null}
+                <div className="mt-1 flex flex-wrap items-center gap-2">
                   <Badge tone={LIFECYCLE[openCustomer.lifecycleStage].tone}>
                     {LIFECYCLE[openCustomer.lifecycleStage].label}
                   </Badge>
+                  <span className="data-chip text-faint">
+                    {openCustomer.visitCount} {pluralize(openCustomer.visitCount, "visit")}
+                  </span>
                 </div>
               </div>
+              {openCustomer.email || openCustomer.phone ? (
+                <button
+                  type="button"
+                  onClick={() => setRevealContact((v) => !v)}
+                  aria-pressed={revealContact}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-btn border border-hairline bg-card px-2.5 py-1.5 text-[12px] font-semibold text-sub transition-colors hover:border-primary/30 hover:text-ink"
+                >
+                  <Icon name="eye" size={14} />
+                  {revealContact ? "Hide" : "Reveal"}
+                </button>
+              ) : null}
             </div>
 
             {openCustomer.suppressedReason ? (
@@ -582,32 +646,100 @@ export function CustomersView({
               </div>
             ) : null}
 
-            {/* Consent panel */}
-            <div>
-              <div className="mb-2 text-[13px] font-bold text-sub">Consent</div>
-              <div className="space-y-2.5">
-                <ConsentRow
-                  title="Service messages"
-                  given={canSendService(openCustomer)}
-                  at={openCustomer.consent.serviceConsentAt}
-                  source={labels.service}
-                  channel={openCustomer.consent.consentChannel}
-                />
-                <ConsentRow
-                  title="Marketing offers"
-                  given={canSendMarketing(openCustomer)}
-                  at={openCustomer.consent.marketingConsentAt}
-                  source={labels.marketing}
-                  channel={openCustomer.consent.consentChannel}
-                  casl={openCustomer.consent.caslCaptured ? labels.casl : undefined}
-                />
-              </div>
-              <p className="mt-2 text-[13px] text-faint">{openCustomer.consent.consentSourceText}</p>
-            </div>
+            {/* Underline sub-tabs */}
+            <Tabs
+              variant="underline"
+              items={[
+                { key: "overview", label: "Overview" },
+                { key: "consent", label: "Consent" },
+                { key: "activity", label: "Activity" },
+              ]}
+              active={drawerTab}
+              onChange={(k) => setDrawerTab(k as DrawerTab)}
+            />
 
-            {/* Timeline */}
-            <div>
-              <div className="mb-2 text-[13px] font-bold text-sub">History</div>
+            {/* Overview — two-column key/value spec rows (masked reveal preserved) */}
+            {drawerTab === "overview" ? (
+              <dl className="rounded-card border border-hairline bg-card px-4">
+                <SpecRow label="Email">
+                  {openCustomer.email ? (
+                    <span className="tabular-nums">{revealContact ? openCustomer.email : maskEmail(openCustomer.email)}</span>
+                  ) : (
+                    <span className="text-faint">—</span>
+                  )}
+                </SpecRow>
+                <SpecRow label="Phone">
+                  {openCustomer.phone ? (
+                    <span className="tabular-nums">{revealContact ? openCustomer.phone : maskPhone(openCustomer.phone)}</span>
+                  ) : (
+                    <span className="text-faint">—</span>
+                  )}
+                </SpecRow>
+                <SpecRow label="Source">
+                  <span className="capitalize">{openCustomer.source.replace("_", " ")}</span>
+                </SpecRow>
+                <SpecRow label="Visits" numeric>
+                  {openCustomer.visitCount}
+                </SpecRow>
+                <SpecRow label="Last visit">
+                  {openCustomer.lastVisitAt ? <span className="tabular-nums">{formatDate(openCustomer.lastVisitAt)}</span> : <span className="text-faint">—</span>}
+                </SpecRow>
+                <SpecRow label="Last asked">
+                  {openCustomer.lastRequestAt ? <span className="tabular-nums">{formatDate(openCustomer.lastRequestAt)}</span> : <span className="text-faint">Never</span>}
+                </SpecRow>
+                <SpecRow label="Services">
+                  {openCustomer.services.length ? openCustomer.services.join(", ") : <span className="text-faint">—</span>}
+                </SpecRow>
+                {openCustomer.tags.length ? (
+                  <SpecRow label="Tags">
+                    <span className="inline-flex flex-wrap justify-end gap-1">
+                      {openCustomer.tags.map((t) => (
+                        <Badge key={t} tone="neutral">{t}</Badge>
+                      ))}
+                    </span>
+                  </SpecRow>
+                ) : null}
+              </dl>
+            ) : null}
+
+            {/* Consent panel */}
+            {drawerTab === "consent" ? (
+              <div>
+                <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                  <ConsentChips c={openCustomer} />
+                </div>
+                <div className="space-y-2.5">
+                  <ConsentRow
+                    title="Service messages"
+                    given={canSendService(openCustomer)}
+                    at={openCustomer.consent.serviceConsentAt}
+                    source={labels.service}
+                    channel={openCustomer.consent.consentChannel}
+                  />
+                  <ConsentRow
+                    title="Marketing offers"
+                    given={canSendMarketing(openCustomer)}
+                    at={openCustomer.consent.marketingConsentAt}
+                    source={labels.marketing}
+                    channel={openCustomer.consent.consentChannel}
+                    casl={openCustomer.consent.caslCaptured ? labels.casl : undefined}
+                  />
+                </div>
+                <p className="mt-2 text-[13px] text-faint">{openCustomer.consent.consentSourceText}</p>
+
+                {!canSendService(openCustomer) ? (
+                  <div className="mt-3 flex items-start gap-2 rounded-btn border border-gold/40 bg-gold-tint/50 px-3 py-2">
+                    <Icon name="lock" size={16} className="mt-0.5 shrink-0 text-gold-deep" />
+                    <p className="text-[13px] text-sub">
+                      Sending is locked — this customer hasn&apos;t consented to service messages.
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {/* Activity timeline — mono timestamps */}
+            {drawerTab === "activity" ? (
               <ol className="space-y-3">
                 <TimelineItem
                   icon="plus"
@@ -633,15 +765,6 @@ export function CustomersView({
                   />
                 ))}
               </ol>
-            </div>
-
-            {!canSendService(openCustomer) ? (
-              <div className="flex items-start gap-2 rounded-btn border border-gold/40 bg-gold-tint/50 px-3 py-2">
-                <Icon name="lock" size={16} className="mt-0.5 shrink-0 text-gold-deep" />
-                <p className="text-[13px] text-sub">
-                  Sending is locked — this customer hasn&apos;t consented to service messages.
-                </p>
-              </div>
             ) : null}
           </div>
         ) : null}
@@ -661,6 +784,26 @@ function ConsentChips({ c }: { c: Customer }) {
       <Badge tone={marketing ? "gold" : "sub"} icon={marketing ? "check" : "x"}>
         Marketing
       </Badge>
+    </div>
+  );
+}
+
+/** Two-column key/value spec row — mono-caps label left, value right. */
+function SpecRow({
+  label,
+  numeric,
+  children,
+}: {
+  label: string;
+  numeric?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 border-b border-hairline py-2.5 last:border-0">
+      <dt className="shrink-0 pt-0.5 font-mono text-[11px] uppercase tracking-[0.08em] text-faint">{label}</dt>
+      <dd className={cn("min-w-0 break-words text-right text-[14px] text-ink", numeric && "tabular-nums")}>
+        {children}
+      </dd>
     </div>
   );
 }
@@ -691,7 +834,7 @@ function ConsentRow({
       <p className="mt-1 text-[13px] text-sub">{source}</p>
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12px] text-faint">
         <span className="capitalize">Captured {channel.replace("_", " ")}</span>
-        {at ? <span>· {formatDate(at)}</span> : null}
+        {at ? <span className="data-chip">· {formatDate(at)}</span> : null}
         {casl ? <Badge tone="neutral" icon="shield">CASL</Badge> : null}
       </div>
       {casl ? <p className="mt-1 text-[11px] text-faint">{casl}</p> : null}
@@ -718,7 +861,10 @@ function TimelineItem({
       <div className="min-w-0 flex-1">
         <div className="text-[14px] font-semibold text-ink">{label}</div>
         {detail ? <div className="text-[13px] capitalize text-sub">{detail}</div> : null}
-        <div className="text-[11px] text-faint">{formatRelative(at)}</div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-faint">
+          <span className="data-chip">{formatDate(at)}</span>
+          <span className="text-[11px]">· {formatRelative(at)}</span>
+        </div>
       </div>
     </li>
   );

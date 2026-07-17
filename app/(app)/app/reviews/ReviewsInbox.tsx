@@ -6,19 +6,24 @@ import { Button } from "@/components/ds/Button";
 import { Chip, Badge, EmptyState } from "@/components/ds/misc";
 import { Textarea } from "@/components/ds/form";
 import { Tabs, type TabItem } from "@/components/ds/Tabs";
+import { Table, type Column, type SortDirection } from "@/components/ds/Table";
 import { Drawer } from "@/components/ds/Drawer";
 import { useToast } from "@/components/ds/Toast";
 import { Icon } from "@/components/icons";
+import { StatTile } from "@/components/charts";
 import { ReviewCard, Stars } from "@/components/review/ReviewCard";
+import { PublicGoogleReviewLink } from "@/components/review/PublicGoogleReviewLink";
 import { postReplyAction } from "@/lib/actions";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
-import { formatRelative } from "@/lib/utils/format";
+import { formatRelative, initials } from "@/lib/utils/format";
 import type { Review, ReplyTone, DraftVariant } from "@/lib/data/types";
 
 interface BusinessLite {
   name: string;
   rating: number;
   reviewCount: number;
+  /** Google "write a review" deep link — the public link kept at parity on the 1–3★ cut. */
+  reviewUrl: string;
 }
 
 const REPLY_TONES: ReplyTone[] = ["warm", "professional", "brief"];
@@ -35,6 +40,25 @@ function toReplyTone(tone: string): ReplyTone {
 const WEEK_MS = 7 * 86_400_000;
 const THIRTY_DAYS_MS = 30 * 86_400_000;
 
+/**
+ * Dense-row rating chrome renders in INK, never the gold star hue — the star
+ * hue is reserved for the literal filled-star input in the mobile review flow.
+ */
+function InkStars({ rating }: { rating: number }) {
+  return (
+    <span className="inline-flex items-center gap-0.5" aria-label={`${rating} out of 5 stars`}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <Icon
+          key={n}
+          name={n <= rating ? "star-fill" : "star"}
+          size={13}
+          className={n <= rating ? "text-ink" : "text-hairline"}
+        />
+      ))}
+    </span>
+  );
+}
+
 export function ReviewsInbox({
   reviews,
   business,
@@ -49,6 +73,10 @@ export function ReviewsInbox({
   const [repliedText, setRepliedText] = useState<Record<string, string>>({});
 
   const [tab, setTab] = useState("all");
+  const [sort, setSort] = useState<{ key: string; direction: SortDirection }>({
+    key: "date",
+    direction: "desc",
+  });
   const [active, setActive] = useState<Review | null>(null);
   const [watchdogDismissed, setWatchdogDismissed] = useState(false);
 
@@ -90,6 +118,8 @@ export function ReviewsInbox({
       needs: merged.filter(needsReplyNow).length,
       replied: merged.filter(isReplied).length,
       detected: merged.filter(isDetected).length,
+      low: merged.filter((r) => r.rating <= 3).length,
+      high: merged.filter((r) => r.rating >= 4).length,
       vanished: merged.filter(isDurabilityRisk).length,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -108,6 +138,10 @@ export function ReviewsInbox({
         return merged.filter(isReplied);
       case "detected":
         return merged.filter(isDetected);
+      case "low":
+        return merged.filter((r) => r.rating <= 3);
+      case "high":
+        return merged.filter((r) => r.rating >= 4);
       case "vanished":
         return merged.filter(isDurabilityRisk);
       default:
@@ -116,11 +150,23 @@ export function ReviewsInbox({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [merged, tab, repliedText]);
 
+  const sorted = useMemo(() => {
+    const arr = [...filtered];
+    const dir = sort.direction === "asc" ? 1 : -1;
+    arr.sort((a, b) => {
+      if (sort.key === "rating") return (a.rating - b.rating) * dir;
+      return (new Date(a.publishedAt).getTime() - new Date(b.publishedAt).getTime()) * dir;
+    });
+    return arr;
+  }, [filtered, sort]);
+
   const tabs: TabItem[] = [
     { key: "all", label: "All", count: counts.all },
     { key: "needs", label: "Needs reply", count: counts.needs },
     { key: "replied", label: "Replied", count: counts.replied },
     { key: "detected", label: "Detected", count: counts.detected },
+    { key: "low", label: "1–3★", count: counts.low },
+    { key: "high", label: "4–5★", count: counts.high },
     { key: "vanished", label: "Vanished", count: counts.vanished },
   ];
 
@@ -189,22 +235,71 @@ export function ReviewsInbox({
       }`
     : `${atRisk.length} ${atRisk.length === 1 ? "review is" : "reviews are"} at risk of being filtered`;
 
+  // ── Ledger columns (desktop) ──
+  const columns: Column<Review>[] = [
+    {
+      key: "author",
+      header: "Reviewer",
+      width: "200px",
+      render: (r) => (
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className="grid size-8 shrink-0 place-items-center rounded-chip bg-primary-tint text-[12px] font-bold text-primary-dark">
+            {initials(r.author)}
+          </div>
+          <span className="truncate font-semibold text-ink">{r.author}</span>
+        </div>
+      ),
+    },
+    {
+      key: "rating",
+      header: "Rating",
+      width: "116px",
+      sortable: true,
+      ariaLabel: "Sort by rating",
+      render: (r) => <InkStars rating={r.rating} />,
+    },
+    {
+      key: "text",
+      header: "Review",
+      cellClassName: "max-w-[420px]",
+      render: (r) => <span className="line-clamp-2 text-[13px] leading-snug text-ink/90">{r.text}</span>,
+    },
+    {
+      key: "status",
+      header: "Status",
+      align: "right",
+      width: "230px",
+      render: (r) => (
+        <ReviewStatusPills
+          review={r}
+          replied={isReplied(r)}
+          needsReply={needsReplyNow(r)}
+          detected={isDetected(r)}
+        />
+      ),
+    },
+    {
+      key: "date",
+      header: "Posted",
+      align: "right",
+      width: "116px",
+      sortable: true,
+      ariaLabel: "Sort by date posted",
+      cellClassName: "text-sub tabular-nums whitespace-nowrap",
+      render: (r) => formatRelative(r.publishedAt),
+    },
+  ];
+
   return (
     <div className="space-y-5">
-      {/* Summary strip */}
-      <Card>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[24px] font-extrabold tabular-nums text-ink">{business.rating.toFixed(1)}</span>
-              <Icon name="star-fill" size={18} className="text-star" />
-            </div>
-            <div className="kicker mt-0.5">Rating</div>
-          </div>
-          <Stat label="Total reviews" value={business.reviewCount} />
-          <Stat label="New this week" value={newThisWeek} />
-          <Stat label="Needs reply" value={counts.needs} tone={counts.needs > 0 ? "gold" : "neutral"} />
-          <Stat label="Detected from requests" value={counts.detected} tone="primary" />
+      {/* Summary strip — boxless StatTile spec-cells */}
+      <Card padded={false}>
+        <div className="grid grid-cols-2 divide-x divide-y divide-hairline sm:grid-cols-5 sm:divide-y-0">
+          <StatTile boxless className="p-4 sm:p-5" label="AVG RATING" value={business.rating.toFixed(1)} deltaCaption="of 5" />
+          <StatTile boxless className="p-4 sm:p-5" label="TOTAL REVIEWS" value={business.reviewCount} />
+          <StatTile boxless className="p-4 sm:p-5" label="NEW THIS WEEK" value={newThisWeek} />
+          <StatTile boxless className="p-4 sm:p-5" label="NEEDS REPLY" value={counts.needs} />
+          <StatTile boxless className="p-4 sm:p-5" label="DETECTED" value={counts.detected} />
         </div>
       </Card>
 
@@ -254,13 +349,31 @@ export function ReviewsInbox({
 
       <Tabs items={tabs} active={tab} onChange={setTab} />
 
-      {/* Review list */}
-      {filtered.length ? (
-        <div className="space-y-3">
-          {filtered.map((r) => (
-            <ReviewCard key={r.id} review={r} onReply={() => openReply(r)} />
-          ))}
-        </div>
+      {/* Honesty law: the 1–3★ cut always surfaces the public Google link at full parity. */}
+      {tab === "low" ? <PublicGoogleReviewLink reviewUrl={business.reviewUrl} prominent /> : null}
+
+      {/* Review list — hairline ledger on desktop, stacked cards on mobile */}
+      {sorted.length ? (
+        <>
+          <div className="hidden lg:block">
+            <Table
+              columns={columns}
+              data={sorted}
+              rowKey={(r) => r.id}
+              onRowClick={openReply}
+              isRowSelected={(r) => active?.id === r.id}
+              sort={sort}
+              onSortChange={(key, direction) => setSort({ key, direction })}
+              stickyHeader
+              caption="Reviews — reviewer, rating, status and date"
+            />
+          </div>
+          <div className="space-y-3 lg:hidden">
+            {sorted.map((r) => (
+              <ReviewCard key={r.id} review={r} onReply={() => openReply(r)} />
+            ))}
+          </div>
+        </>
       ) : (
         <Card>
           <EmptyState
@@ -340,21 +453,39 @@ export function ReviewsInbox({
   );
 }
 
-function Stat({
-  label,
-  value,
-  tone = "neutral",
+/**
+ * Semantic status-pill system (soft-bg + deep-text): green/replied, danger for
+ * needs-action & vanished, gold for at-risk (warning family), neutral info for a
+ * detected match. Meaning is always carried by the label + icon, never colour alone.
+ */
+function ReviewStatusPills({
+  review,
+  replied,
+  needsReply,
+  detected,
 }: {
-  label: string;
-  value: number;
-  tone?: "neutral" | "primary" | "gold";
+  review: Review;
+  replied: boolean;
+  needsReply: boolean;
+  detected: boolean;
 }) {
-  const color =
-    tone === "primary" ? "text-primary-dark" : tone === "gold" ? "text-gold-deep" : "text-ink";
   return (
-    <div>
-      <div className={`text-[24px] font-extrabold tabular-nums ${color}`}>{value}</div>
-      <div className="kicker mt-0.5">{label}</div>
+    <div className="flex flex-wrap items-center justify-end gap-1.5">
+      {review.durability === "vanished" ? (
+        <Badge tone="danger" icon="alert">Vanished</Badge>
+      ) : review.durability === "at_risk" ? (
+        <Badge tone="gold" icon="flag">At risk</Badge>
+      ) : null}
+      {replied ? (
+        <Badge tone="primary" icon="check-circle">Replied</Badge>
+      ) : needsReply ? (
+        <Badge tone="danger" icon="chat">Needs reply</Badge>
+      ) : null}
+      {detected ? (
+        <span title={MICROCOPY.detectedMatch}>
+          <Badge tone="neutral" icon="sparkles">Detected</Badge>
+        </span>
+      ) : null}
     </div>
   );
 }

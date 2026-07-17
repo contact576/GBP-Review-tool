@@ -53,6 +53,7 @@ export default async function ReviewsPage() {
           name: data.location.name,
           rating: data.location.rating,
           reviewCount: data.location.reviewCount,
+          reviewUrl: data.location.reviewUrl,
         }}
       />
     </div>
