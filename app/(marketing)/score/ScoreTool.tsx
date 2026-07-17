@@ -518,7 +518,13 @@ export function ScoreTool() {
               climbing. No card for 14 days.
             </p>
             <div className="mt-5">
-              <LinkButton href="/sign-up" size="lg" variant="gold" icon="sparkles">
+              <LinkButton
+                href="/sign-up"
+                size="lg"
+                variant="secondary"
+                icon="sparkles"
+                className="border-transparent bg-white text-hero hover:bg-white/90"
+              >
                 Start free — get reviews like this every week
               </LinkButton>
             </div>

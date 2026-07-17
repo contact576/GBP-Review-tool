@@ -18,7 +18,7 @@ const STEPS: { icon: "gift" | "sparkles" | "shield"; title: string; body: string
 
 export default function TrialStartPage() {
   return (
-    <Card raised>
+    <Card raised className="p-6 sm:p-8">
       <div className="text-center">
         <Kicker>The reverse trial</Kicker>
         <h1 className="mt-2 text-[26px] font-extrabold leading-tight tracking-tight text-ink">

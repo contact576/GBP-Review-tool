@@ -44,7 +44,11 @@ const INDUSTRIES: { key: string; label: string }[] = [
 // Matches Button variant="secondary" size="md" fullWidth — a plain <a> to the
 // OAuth route, not a <button>.
 const googleLinkClass =
-  "inline-flex h-11 min-h-[44px] w-full select-none items-center justify-center gap-2 whitespace-nowrap rounded-btn border border-hairline bg-card px-4 text-[14px] font-semibold text-ink transition-all duration-150 hover:bg-primary-wash";
+  "inline-flex h-[52px] min-h-[52px] w-full select-none items-center justify-center gap-2 whitespace-nowrap rounded-btn border border-hairline bg-card px-4 text-[14px] font-semibold text-ink transition-all duration-150 hover:bg-primary-wash hover:border-primary/30";
+
+// Fintech-grade field sizing for auth (~54px), applied via className so the
+// shared Input/Select tokens stay untouched.
+const authFieldSize = "h-[54px] min-h-[54px]";
 
 export function SignUpForm({
   googleEnabled,
@@ -93,7 +97,7 @@ export function SignUpForm({
   }
 
   return (
-    <Card raised>
+    <Card raised className="p-6 sm:p-8">
       <div className="text-center">
         <h1 className="text-[24px] font-extrabold leading-tight tracking-tight text-ink">
           Start your 14-day Growth trial
@@ -154,7 +158,7 @@ export function SignUpForm({
         </div>
       ) : null}
 
-      <form className="space-y-3" onSubmit={submit}>
+      <form className="space-y-3.5" onSubmit={submit}>
         <Field label="Your name">
           <Input
             name="name"
@@ -163,6 +167,7 @@ export function SignUpForm({
             placeholder="Alex Chen"
             iconLeft="users"
             autoComplete="name"
+            className={authFieldSize}
             required
           />
         </Field>
@@ -175,6 +180,7 @@ export function SignUpForm({
             placeholder="you@business.com"
             iconLeft="mail"
             autoComplete="email"
+            className={authFieldSize}
             required
           />
         </Field>
@@ -188,7 +194,7 @@ export function SignUpForm({
               placeholder="Create a password"
               iconLeft="lock"
               autoComplete="new-password"
-              className="pr-16"
+              className={`pr-16 ${authFieldSize}`}
               required
             />
             <button
@@ -209,6 +215,7 @@ export function SignUpForm({
             placeholder="Harbourview Physiotherapy"
             iconLeft="building"
             autoComplete="organization"
+            className={authFieldSize}
             required
           />
         </Field>
@@ -217,6 +224,7 @@ export function SignUpForm({
             name="industry"
             value={industryKey}
             onChange={(e) => setIndustryKey(e.target.value)}
+            className={authFieldSize}
           >
             {INDUSTRIES.map((i) => (
               <option key={i.key} value={i.key}>
@@ -230,6 +238,7 @@ export function SignUpForm({
             name="country"
             value={region}
             onChange={(e) => setRegion(e.target.value === "US" ? "US" : "CA")}
+            className={authFieldSize}
           >
             <option value="CA">Canada</option>
             <option value="US">United States</option>
@@ -270,7 +279,7 @@ export function SignUpForm({
           </p>
         ) : null}
 
-        <Button type="submit" fullWidth loading={pending}>
+        <Button type="submit" size="lg" fullWidth loading={pending}>
           Create account
         </Button>
       </form>

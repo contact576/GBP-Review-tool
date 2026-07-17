@@ -8,14 +8,22 @@ import { currencySymbol } from "@/lib/utils/region";
 import { Icon } from "@/components/icons";
 import { LinkButton } from "@/components/ds/Button";
 import { Badge, Kicker } from "@/components/ds/misc";
-import { PricingTierCard, type Tier } from "@/components/app/PricingTierCard";
+
+interface Tier {
+  name: string;
+  price: number;
+  tagline: string;
+  cta: string;
+  href: string;
+  anchor?: boolean;
+  features: string[];
+}
 
 function tiers(): Tier[] {
   return [
     {
       name: "Free",
       price: 0,
-      cadence: "forever",
       tagline: "Everything you need to start collecting real reviews.",
       cta: "Start free",
       href: "/sign-up",
@@ -29,7 +37,6 @@ function tiers(): Tier[] {
     {
       name: "Starter",
       price: 39,
-      cadence: "mo",
       tagline: "For a single location getting into a steady rhythm.",
       cta: "Start 14-day trial",
       href: "/sign-up",
@@ -44,7 +51,6 @@ function tiers(): Tier[] {
     {
       name: "Growth",
       price: 99,
-      cadence: "mo",
       tagline: "The full loop, on autopilot — our most popular plan.",
       cta: "Start 14-day trial",
       href: "/sign-up",
@@ -61,7 +67,6 @@ function tiers(): Tier[] {
     {
       name: "Pro",
       price: 179,
-      cadence: "mo",
       tagline: "For competitive markets where rank and AI visibility win.",
       cta: "Start 14-day trial",
       href: "/sign-up",
@@ -113,7 +118,7 @@ export function PricingBoard() {
       {/* Core tiers */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
         {tiers().map((t) => (
-          <PricingTierCard key={t.name} tier={t} currencySymbol={symbol} annual={annual} />
+          <TierCard key={t.name} tier={t} symbol={symbol} annual={annual} />
         ))}
       </div>
 
@@ -122,7 +127,7 @@ export function PricingBoard() {
         <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <Kicker>Teams &amp; agencies</Kicker>
-            <h3 className="mt-1 text-[20px] font-extrabold tracking-tight text-ink">Running more than one location?</h3>
+            <h3 className="mt-1 text-[20px] font-bold tracking-tight text-ink">Running more than one location?</h3>
           </div>
           <Link href="/agencies" className="inline-flex items-center gap-1 text-[14px] font-semibold text-primary hover:text-primary-dark">
             Explore the agency program <Icon name="arrow-right" size={16} />
@@ -170,6 +175,61 @@ export function PricingBoard() {
   );
 }
 
+// ── Tier card — featured tier via deep-green polarity inversion (no ribbon) ──
+function TierCard({ tier, symbol, annual }: { tier: Tier; symbol: string; annual?: boolean }) {
+  const featured = Boolean(tier.anchor);
+  const price = annual ? Math.round(tier.price * 10) : tier.price;
+  const per = tier.price === 0 ? "" : annual ? "/yr" : "/mo";
+
+  return (
+    <div
+      className={cn(
+        "flex flex-col rounded-card p-6",
+        featured
+          ? "bg-hero on-hero text-white shadow-halo ring-1 ring-primary/30"
+          : "border border-hairline bg-card shadow-sm",
+      )}
+    >
+      <div className={cn("kicker", featured ? "text-white/70" : "text-faint")}>{tier.name}</div>
+
+      <div className="mt-2 flex items-end gap-1">
+        <span className={cn("text-[32px] font-extrabold tabular-nums tracking-tight", featured ? "text-white" : "text-ink")}>
+          {tier.price === 0 ? "Free" : `${symbol}${price}`}
+        </span>
+        {per ? <span className={cn("mb-1 text-[13px]", featured ? "text-white/60" : "text-faint")}>{per}</span> : null}
+      </div>
+
+      <p className={cn("mt-2 text-[13px]", featured ? "text-white/75" : "text-sub")}>{tier.tagline}</p>
+
+      <ul className="mt-5 flex-1 space-y-2">
+        {tier.features.map((f) => (
+          <li key={f} className={cn("flex items-start gap-2 text-[13px]", featured ? "text-white/90" : "text-ink/90")}>
+            <Icon name="check" size={16} className={cn("mt-0.5 shrink-0", featured ? "text-white" : "text-primary")} />
+            {f}
+          </li>
+        ))}
+      </ul>
+
+      <div className="mt-6">
+        {featured ? (
+          <LinkButton
+            href={tier.href}
+            variant="secondary"
+            fullWidth
+            className="border-transparent bg-white text-hero hover:bg-white/90"
+          >
+            {tier.cta}
+          </LinkButton>
+        ) : (
+          <LinkButton href={tier.href} variant="secondary" fullWidth>
+            {tier.cta}
+          </LinkButton>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Segmented<T extends string>({
   options, value, onChange,
 }: {
@@ -207,7 +267,7 @@ function BandCard({
     <div className={cn("flex flex-col rounded-card border bg-paper p-5", highlight ? "border-primary/40" : "border-hairline")}>
       <div className="flex items-center justify-between">
         <div className="text-[15px] font-bold text-ink">{title}</div>
-        {highlight ? <Badge tone="gold" icon="building">Resell it</Badge> : null}
+        {highlight ? <Badge tone="primary" icon="building">Resell it</Badge> : null}
       </div>
       <div className="mt-2 flex items-end gap-1">
         <span className="text-[26px] font-extrabold tabular-nums text-ink">{price}</span>

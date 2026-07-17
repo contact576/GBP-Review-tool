@@ -13,7 +13,7 @@ export function ForgotPasswordForm() {
 
   if (submitted) {
     return (
-      <Card raised>
+      <Card raised className="p-6 sm:p-8">
         <div className="flex flex-col items-center px-2 py-4 text-center">
           <span className="grid size-12 place-items-center rounded-card bg-primary-wash text-primary">
             <Icon name="check-circle" size={24} />
@@ -41,7 +41,7 @@ export function ForgotPasswordForm() {
   }
 
   return (
-    <Card raised>
+    <Card raised className="p-6 sm:p-8">
       <div className="text-center">
         <h1 className="text-[24px] font-extrabold tracking-tight text-ink">
           Reset your password
@@ -52,7 +52,7 @@ export function ForgotPasswordForm() {
       </div>
 
       <form
-        className="mt-5 space-y-4"
+        className="mt-6 space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
           setSubmitted(true);
@@ -67,10 +67,11 @@ export function ForgotPasswordForm() {
             placeholder="you@business.com"
             iconLeft="mail"
             autoComplete="email"
+            className="h-[54px] min-h-[54px]"
             required
           />
         </Field>
-        <Button type="submit" fullWidth>
+        <Button type="submit" size="lg" fullWidth>
           Send reset link
         </Button>
       </form>

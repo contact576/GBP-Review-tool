@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
 import type { IconName } from "@/components/icons";
 import { Icon } from "@/components/icons";
-import { Card } from "@/components/ds/Card";
 import { LinkButton } from "@/components/ds/Button";
-import { Badge, Kicker } from "@/components/ds/misc";
+import { Band, Container, Eyebrow, SectionHead, CtaBand, heroSecondaryBtn } from "../../_components/primitives";
 
 interface VerticalContent {
   label: string;
@@ -172,88 +171,92 @@ export default async function VerticalPage({ params }: { params: Promise<{ verti
 
   return (
     <div>
-      {/* Hero */}
-      <section className="mx-auto max-w-4xl px-4 pb-12 pt-14 text-center sm:px-6 lg:pt-20">
-        <Badge tone="primary" icon="map-pin">{content.eyebrow}</Badge>
-        <h1 className="mx-auto mt-5 max-w-3xl text-[34px] font-extrabold leading-[1.08] tracking-tight text-ink sm:text-[48px]">
-          {content.headline}
-        </h1>
-        <p className="mx-auto mt-5 max-w-xl text-[16px] leading-relaxed text-sub sm:text-[18px]">
-          {content.subhead}
-        </p>
-        <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
-          <LinkButton href="/score" size="lg" icon="sparkles">Get my free Growth Score</LinkButton>
-          <LinkButton href="/sign-up" size="lg" variant="secondary" iconRight="chevron-right">Start free trial</LinkButton>
-        </div>
-      </section>
+      {/* ── Hero — paper ─────────────────────────────────── */}
+      <Band tone="paper">
+        <Container size="md" className="text-center">
+          <Eyebrow className="justify-center">{content.eyebrow}</Eyebrow>
+          <h1 className="mx-auto mt-4 max-w-3xl text-[34px] font-extrabold leading-[1.08] tracking-tight text-ink sm:text-[48px]">
+            {content.headline}
+          </h1>
+          <p className="mx-auto mt-5 max-w-xl text-[16px] leading-relaxed text-sub sm:text-[18px]">
+            {content.subhead}
+          </p>
+          <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+            <LinkButton href="/score" size="lg" icon="sparkles">Get my free Growth Score</LinkButton>
+            <LinkButton href="/sign-up" size="lg" variant="secondary" iconRight="chevron-right">Start free trial</LinkButton>
+          </div>
+        </Container>
+      </Band>
 
-      {/* Proof stats */}
-      <section className="border-y border-hairline bg-card">
-        <div className="mx-auto grid max-w-4xl grid-cols-1 divide-y divide-hairline px-4 py-8 sm:grid-cols-3 sm:divide-x sm:divide-y-0 sm:px-6">
-          {content.proof.map((p) => (
-            <div key={p.label} className="px-2 py-4 text-center sm:py-2">
-              <div className="text-[34px] font-extrabold tabular-nums text-primary-dark">{p.stat}</div>
-              <div className="mt-1 text-[13px] text-sub">{p.label}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Moments */}
-      <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:py-20">
-        <div className="mx-auto max-w-2xl text-center">
-          <Kicker>How it works for {content.label.toLowerCase()}</Kicker>
-          <h2 className="mt-2 text-[28px] font-extrabold tracking-tight text-ink sm:text-[34px]">
-            Built around your real moments
-          </h2>
-        </div>
-        <div className="mt-10 grid grid-cols-1 gap-5 lg:grid-cols-3">
-          {content.moments.map((m) => (
-            <Card key={m.title} className="flex flex-col">
-              <div className="grid size-12 place-items-center rounded-btn bg-primary-tint text-primary-dark">
-                <Icon name={m.icon} size={24} />
+      {/* ── Proof stats — white spec cells ───────────────── */}
+      <Band tone="white" className="py-12 sm:py-16">
+        <Container size="md">
+          <div className="grid grid-cols-1 divide-y divide-hairline rounded-card border border-hairline bg-paper sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+            {content.proof.map((p) => (
+              <div key={p.label} className="px-4 py-6 text-center">
+                <div className="text-[34px] font-extrabold tabular-nums tracking-tight text-primary-dark">{p.stat}</div>
+                <div className="mt-1 text-[13px] text-sub">{p.label}</div>
               </div>
-              <h3 className="mt-4 text-[17px] font-bold text-ink">{m.title}</h3>
-              <p className="mt-2 text-[13px] leading-relaxed text-sub">{m.body}</p>
-            </Card>
-          ))}
-        </div>
-      </section>
-
-      {/* Quote */}
-      <section className="mx-auto max-w-3xl px-4 pb-16 sm:px-6">
-        <figure className="rounded-card border border-hairline bg-card p-8 shadow-lg">
-          <div className="flex gap-1 text-star" aria-label="Five stars">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <Icon key={i} name="star-fill" size={18} />
             ))}
           </div>
-          <blockquote className="mt-4 text-[19px] font-semibold leading-snug tracking-tight text-ink sm:text-[22px]">
-            &ldquo;{content.quote.text}&rdquo;
-          </blockquote>
-          <figcaption className="mt-4 text-[13px] text-sub">
-            <span className="font-bold text-ink">{content.quote.name}</span> · {content.quote.role}
-          </figcaption>
-        </figure>
-      </section>
+        </Container>
+      </Band>
 
-      {/* CTA */}
-      <section className="mx-auto max-w-6xl px-4 pb-20 sm:px-6">
-        <div className="on-hero rounded-card bg-hero px-6 py-14 text-center text-white shadow-lg sm:px-12">
-          <h2 className="mx-auto max-w-2xl text-[28px] font-extrabold leading-tight tracking-tight sm:text-[36px]">
-            Ready to be the obvious choice?
-          </h2>
-          <p className="mx-auto mt-3 max-w-md text-[15px] text-white/75">
-            Run your free Growth Score, or start a 14-day Growth trial — no card required.
-          </p>
-          <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row">
-            <LinkButton href="/score" size="lg" variant="gold" icon="sparkles">Free Growth Score</LinkButton>
-            <LinkButton href="/sign-up" size="lg" variant="secondary" className="border-white/20 bg-white/10 text-white hover:bg-white/20">
+      {/* ── Moments — paper ──────────────────────────────── */}
+      <Band tone="paper">
+        <Container>
+          <SectionHead
+            eyebrow={`How it works for ${content.label.toLowerCase()}`}
+            title="Built around your real moments"
+            align="center"
+          />
+          <div className="mt-10 grid grid-cols-1 gap-5 lg:grid-cols-3">
+            {content.moments.map((m) => (
+              <div key={m.title} className="flex flex-col rounded-card border border-hairline bg-card p-6">
+                <div className="grid size-12 place-items-center rounded-btn bg-primary-tint text-primary-dark">
+                  <Icon name={m.icon} size={24} />
+                </div>
+                <h3 className="mt-4 text-[17px] font-bold text-ink">{m.title}</h3>
+                <p className="mt-2 text-[13px] leading-relaxed text-sub">{m.body}</p>
+              </div>
+            ))}
+          </div>
+        </Container>
+      </Band>
+
+      {/* ── Quote — white ────────────────────────────────── */}
+      <Band tone="white">
+        <Container size="sm">
+          <figure className="rounded-card border border-hairline bg-paper p-8">
+            <div className="flex gap-1 text-star" aria-label="Five stars">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <Icon key={i} name="star-fill" size={18} />
+              ))}
+            </div>
+            <blockquote className="mt-4 text-[19px] font-semibold leading-snug tracking-tight text-ink sm:text-[22px]">
+              &ldquo;{content.quote.text}&rdquo;
+            </blockquote>
+            <figcaption className="mt-4 text-[13px] text-sub">
+              <span className="font-bold text-ink">{content.quote.name}</span> · {content.quote.role}
+            </figcaption>
+          </figure>
+        </Container>
+      </Band>
+
+      {/* ── Close — deep-green ───────────────────────────── */}
+      <CtaBand
+        eyebrow="No card required"
+        title="Ready to be the obvious choice?"
+        lede="Run your free Growth Score, or start a 14-day Growth trial — no card required."
+        actions={
+          <>
+            <LinkButton href="/score" size="lg" icon="sparkles">Get my free Growth Score</LinkButton>
+            <LinkButton href="/sign-up" size="lg" variant="secondary" className={heroSecondaryBtn}>
               Start free trial
             </LinkButton>
-          </div>
-        </div>
-      </section>
+          </>
+        }
+      />
     </div>
   );
 }

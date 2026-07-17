@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { LinkButton } from "@/components/ds/Button";
+import { Band, Container, Eyebrow, SectionHead, CtaBand, heroSecondaryBtn } from "../_components/primitives";
 import { PricingBoard } from "./PricingBoard";
 
 export const metadata: Metadata = {
@@ -28,35 +30,56 @@ const FAQ = [
 
 export default function PricingPage() {
   return (
-    <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:py-16">
-      <div className="mx-auto max-w-2xl text-center">
-        <h1 className="text-[32px] font-extrabold leading-tight tracking-tight text-ink sm:text-[44px]">
-          Pricing that grows with you
-        </h1>
-        <p className="mx-auto mt-4 max-w-lg text-[16px] leading-relaxed text-sub">
-          Start free, prove it works, then scale. Every paid plan begins with 14 days of Growth — no
-          credit card, no fake countdowns.
-        </p>
-      </div>
+    <div>
+      {/* ── Hero + board — paper ─────────────────────────── */}
+      <Band tone="paper">
+        <Container>
+          <div className="mx-auto max-w-2xl text-center">
+            <Eyebrow className="justify-center">Pricing</Eyebrow>
+            <h1 className="mt-3 text-[32px] font-extrabold leading-tight tracking-tight text-ink sm:text-[44px]">
+              Pricing that grows with you
+            </h1>
+            <p className="mx-auto mt-4 max-w-lg text-[16px] leading-relaxed text-sub">
+              Start free, prove it works, then scale. Every paid plan begins with 14 days of Growth —
+              no credit card, no fake countdowns.
+            </p>
+          </div>
 
-      <div className="mt-12">
-        <PricingBoard />
-      </div>
+          <div className="mt-12">
+            <PricingBoard />
+          </div>
+        </Container>
+      </Band>
 
-      {/* FAQ */}
-      <div className="mx-auto mt-20 max-w-3xl">
-        <h2 className="text-center text-[24px] font-extrabold tracking-tight text-ink sm:text-[30px]">
-          Questions, answered plainly
-        </h2>
-        <dl className="mt-8 divide-y divide-hairline rounded-card border border-hairline bg-card">
-          {FAQ.map((item) => (
-            <div key={item.q} className="p-5 sm:p-6">
-              <dt className="text-[15px] font-bold text-ink">{item.q}</dt>
-              <dd className="mt-1.5 text-[14px] leading-relaxed text-sub">{item.a}</dd>
-            </div>
-          ))}
-        </dl>
-      </div>
+      {/* ── FAQ — white ──────────────────────────────────── */}
+      <Band tone="white">
+        <Container size="sm">
+          <SectionHead eyebrow="FAQ" title="Questions, answered plainly" align="center" />
+          <dl className="mt-8 divide-y divide-hairline rounded-card border border-hairline bg-paper">
+            {FAQ.map((item) => (
+              <div key={item.q} className="p-5 sm:p-6">
+                <dt className="text-[15px] font-bold text-ink">{item.q}</dt>
+                <dd className="mt-1.5 text-[14px] leading-relaxed text-sub">{item.a}</dd>
+              </div>
+            ))}
+          </dl>
+        </Container>
+      </Band>
+
+      {/* ── Close — deep-green ───────────────────────────── */}
+      <CtaBand
+        eyebrow="No card to start"
+        title="Try the full Growth plan free"
+        lede="Run the whole loop for 14 days, then keep a free plan forever. Nothing auto-charges."
+        actions={
+          <>
+            <LinkButton href="/sign-up" size="lg" icon="sparkles">Start 14-day trial</LinkButton>
+            <LinkButton href="/score" size="lg" variant="secondary" className={heroSecondaryBtn}>
+              Get my free Score
+            </LinkButton>
+          </>
+        }
+      />
     </div>
   );
 }

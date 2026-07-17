@@ -20,7 +20,11 @@ const DEMOS: { role: SessionRole; dest: string; label: string }[] = [
 // Matches Button variant="secondary" size="md" fullWidth — used for the
 // Google entry, which must be a plain <a> to the OAuth route, not a <button>.
 const googleLinkClass =
-  "inline-flex h-11 min-h-[44px] w-full select-none items-center justify-center gap-2 whitespace-nowrap rounded-btn border border-hairline bg-card px-4 text-[14px] font-semibold text-ink transition-all duration-150 hover:bg-primary-wash";
+  "inline-flex h-[52px] min-h-[52px] w-full select-none items-center justify-center gap-2 whitespace-nowrap rounded-btn border border-hairline bg-card px-4 text-[14px] font-semibold text-ink transition-all duration-150 hover:bg-primary-wash hover:border-primary/30";
+
+// Fintech-grade field sizing for auth (~54px), applied via className so the
+// shared Input/Select tokens stay untouched.
+const authFieldSize = "h-[54px] min-h-[54px]";
 
 export function SignInForm({
   next,
@@ -63,7 +67,7 @@ export function SignInForm({
   }
 
   return (
-    <Card raised>
+    <Card raised className="p-6 sm:p-8">
       <div className="text-center">
         <h1 className="text-[24px] font-extrabold tracking-tight text-ink">Welcome back</h1>
         <p className="mt-1 text-[14px] text-sub">Sign in to keep the growth loop spinning.</p>
@@ -79,7 +83,7 @@ export function SignInForm({
         </div>
       ) : null}
 
-      <form className="mt-5 space-y-3" onSubmit={submit}>
+      <form className="mt-6 space-y-4" onSubmit={submit}>
         <Field label="Email">
           <Input
             type="email"
@@ -89,6 +93,7 @@ export function SignInForm({
             placeholder="you@business.com"
             iconLeft="mail"
             autoComplete="email"
+            className={authFieldSize}
             required
           />
         </Field>
@@ -101,6 +106,7 @@ export function SignInForm({
             placeholder="••••••••"
             iconLeft="lock"
             autoComplete="current-password"
+            className={authFieldSize}
             required
           />
         </Field>
@@ -112,7 +118,7 @@ export function SignInForm({
             Forgot password?
           </Link>
         </div>
-        <Button type="submit" fullWidth loading={pending} disabled={busy}>
+        <Button type="submit" size="lg" fullWidth loading={pending} disabled={busy}>
           Sign in
         </Button>
       </form>
