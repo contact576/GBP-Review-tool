@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { Input } from "@/components/ds/form";
-import { Badge, EmptyState } from "@/components/ds/misc";
+import { Badge } from "@/components/ds/misc";
+import { Table, type Column } from "@/components/ds/Table";
 import { formatRelative } from "@/lib/utils/format";
 import type { AuditLog } from "@/lib/data/types";
 
@@ -18,6 +19,38 @@ export function AuditTable({ entries }: { entries: AuditLog[] }) {
     );
   }, [entries, query]);
 
+  const columns: Column<AuditLog>[] = [
+    {
+      key: "actor",
+      header: "Actor",
+      render: (e) => <span className="text-[14px] font-semibold text-ink">{e.actor}</span>,
+    },
+    {
+      key: "action",
+      header: "Action",
+      render: (e) => (
+        <code className="rounded-chip bg-primary-wash px-1.5 py-0.5 text-[13px] font-semibold text-primary-dark">
+          {e.action}
+        </code>
+      ),
+    },
+    {
+      key: "target",
+      header: "Target",
+      render: (e) => (
+        <span className="text-[14px] text-sub">
+          <span className="capitalize">{e.targetType}</span> <span className="text-faint">· {e.targetId}</span>
+        </span>
+      ),
+    },
+    {
+      key: "at",
+      header: "When",
+      align: "right",
+      render: (e) => <span className="text-[13px] tabular-nums text-sub">{formatRelative(e.at)}</span>,
+    },
+  ];
+
   return (
     <div className="space-y-3">
       <div className="max-w-sm">
@@ -30,38 +63,16 @@ export function AuditTable({ entries }: { entries: AuditLog[] }) {
         />
       </div>
 
-      <div className="overflow-x-auto rounded-card border border-hairline bg-card shadow-sm">
-        <table className="w-full min-w-[680px] border-collapse text-left">
-          <thead>
-            <tr className="border-b border-hairline">
-              {["Actor", "Action", "Target", "When"].map((h) => (
-                <th key={h} className="px-3 py-2.5 kicker text-faint">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((e) => (
-              <tr key={e.id} className="border-b border-hairline last:border-0 hover:bg-primary-wash/40">
-                <td className="px-3 py-3 text-[14px] font-semibold text-ink">{e.actor}</td>
-                <td className="px-3 py-3">
-                  <code className="rounded-chip bg-primary-wash px-1.5 py-0.5 text-[14px] font-semibold text-primary-dark">{e.action}</code>
-                </td>
-                <td className="px-3 py-3 text-[14px] text-sub">
-                  <span className="capitalize">{e.targetType}</span> <span className="text-faint">· {e.targetId}</span>
-                </td>
-                <td className="px-3 py-3 text-[14px] text-sub">{formatRelative(e.at)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {rows.length === 0 ? (
-          <EmptyState
-            icon="search"
-            title="No matching entries"
-            description={`Nothing in the audit log matches “${query}”. Try a different actor, action, or target.`}
-          />
-        ) : null}
-      </div>
+      <Table
+        columns={columns}
+        data={rows}
+        rowKey={(e) => e.id}
+        stickyHeader
+        caption="Append-only privileged-action audit log"
+        emptyIcon="search"
+        emptyTitle="No matching entries"
+        emptyDescription={`Nothing in the audit log matches “${query}”. Try a different actor, action, or target.`}
+      />
 
       <div className="flex items-center gap-2">
         <Badge tone="sub" icon="lock">Append-only · immutable</Badge>

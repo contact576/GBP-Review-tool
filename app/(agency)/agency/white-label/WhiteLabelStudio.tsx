@@ -41,6 +41,51 @@ export interface SampleClient {
   newReviews30d: number;
 }
 
+/** Curated, AA-friendly starter accents — a fast on-brand pick before fine-tuning the hex. */
+const PRESETS: { hex: string; name: string }[] = [
+  { hex: "#0C7A63", name: "Foundly green" },
+  { hex: "#1E5AA8", name: "Harbor blue" },
+  { hex: "#2A6F4E", name: "Forest" },
+  { hex: "#7A4DB8", name: "Amethyst" },
+  { hex: "#B23A2E", name: "Clay red" },
+  { hex: "#0F766E", name: "Teal" },
+  { hex: "#9A3412", name: "Rust" },
+  { hex: "#1F2A44", name: "Midnight" },
+];
+
+/** Circular swatch selector — active swatch takes the universal green ring. */
+function SwatchRow({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const current = value.toUpperCase();
+  return (
+    <div>
+      <div className="kicker mb-2 text-faint">Preset palette</div>
+      <div className="flex flex-wrap gap-2.5">
+        {PRESETS.map((p) => {
+          const active = current === p.hex.toUpperCase();
+          return (
+            <button
+              key={p.hex}
+              type="button"
+              onClick={() => onChange(p.hex)}
+              aria-label={`${p.name} (${p.hex})`}
+              aria-pressed={active}
+              title={p.name}
+              className={cn(
+                "grid size-9 place-items-center rounded-full transition-transform hover:scale-105",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card",
+                active && "ring-2 ring-primary ring-offset-2 ring-offset-card",
+              )}
+              style={{ backgroundColor: p.hex, color: readableText(p.hex) }}
+            >
+              {active ? <Icon name="check" size={16} aria-hidden /> : null}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function HexField({
   label, value, onChange, valid,
 }: { label: string; value: string; onChange: (v: string) => void; valid: boolean }) {
@@ -123,6 +168,7 @@ export function WhiteLabelStudio({ initial, sample }: { initial: StudioInitial; 
             <Field label="Logo text" hint="First letter becomes the logo mark.">
               <Input value={logoText} onChange={(e) => setLogoText(e.target.value)} placeholder="Northside" />
             </Field>
+            <SwatchRow value={primary} onChange={setPrimary} />
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <HexField label="Primary" value={primary} onChange={setPrimary} valid={primaryValid} />
               <HexField label="Accent" value={accent} onChange={setAccent} valid={accentValid} />

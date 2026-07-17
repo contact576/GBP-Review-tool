@@ -3,24 +3,13 @@ import { getData } from "@/lib/data";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { LinkButton } from "@/components/ds/Button";
 import { Badge } from "@/components/ds/misc";
-import { Icon, type IconName } from "@/components/icons";
+import { Icon } from "@/components/icons";
 import { ScoreDial } from "@/components/charts/ScoreDial";
+import { StatTile } from "@/components/charts/StatTile";
 import { readableText } from "@/lib/theme/contrast";
 import { formatRelative } from "@/lib/utils/format";
 import { StatusBadge } from "../../../_components/StatusBadge";
 import { ClientActions } from "./ClientActions";
-
-function Metric({ icon, label, value }: { icon: IconName; label: string; value: string }) {
-  return (
-    <div className="rounded-card border border-hairline bg-card p-3.5 shadow-sm">
-      <div className="flex items-center gap-1.5 text-sub">
-        <Icon name={icon} size={15} />
-        <span className="text-[12px] font-medium">{label}</span>
-      </div>
-      <div className="mt-1.5 text-[22px] font-extrabold leading-none tabular-nums text-ink">{value}</div>
-    </div>
-  );
-}
 
 export default async function AgencyClientPage({ params }: { params: Promise<{ clientId: string }> }) {
   const { clientId } = await params;
@@ -64,14 +53,11 @@ export default async function AgencyClientPage({ params }: { params: Promise<{ c
 
         <div className="lg:col-span-2">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Metric icon="star" label="Rating" value={client.rating.toFixed(1)} />
-            <Metric icon="chart" label="New reviews · 30d" value={String(client.newReviews30d)} />
-            <Metric icon="chat" label="Needs reply" value={String(client.needsReply)} />
-            <div className="rounded-card border border-hairline bg-card p-3.5 shadow-sm">
-              <div className="flex items-center gap-1.5 text-sub">
-                <Icon name="credit-card" size={15} />
-                <span className="text-[12px] font-medium">Plan</span>
-              </div>
+            <StatTile label="Rating" value={client.rating.toFixed(1)} />
+            <StatTile label="New reviews · 30d" value={client.newReviews30d} />
+            <StatTile label="Needs reply" value={client.needsReply} />
+            <div className="rounded-card border border-hairline bg-card p-4 shadow-sm">
+              <div className="kicker normal-case">Plan</div>
               <div className="mt-2"><Badge tone="primary">{client.plan}</Badge></div>
             </div>
           </div>

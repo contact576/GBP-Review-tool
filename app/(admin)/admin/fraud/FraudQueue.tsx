@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ds/Button";
 import { Badge } from "@/components/ds/misc";
+import { Table, type Column } from "@/components/ds/Table";
 import { useToast } from "@/components/ds/Toast";
 import { formatRelative } from "@/lib/utils/format";
 import type { FraudFlag } from "@/lib/data/types";
@@ -23,38 +24,56 @@ export function FraudQueue({ flags }: { flags: FraudFlag[] }) {
     toast(`${KIND_LABEL[f.kind]} flag on ${f.tenant} actioned`, "success", "check-circle");
   }
 
+  const columns: Column<FraudFlag>[] = [
+    {
+      key: "tenant",
+      header: "Tenant",
+      render: (f) => <span className="text-[14px] font-semibold text-ink">{f.tenant}</span>,
+    },
+    {
+      key: "kind",
+      header: "Signal",
+      render: (f) => <Badge tone="neutral">{KIND_LABEL[f.kind]}</Badge>,
+    },
+    {
+      key: "detail",
+      header: "Detail",
+      render: (f) => <span className="text-[14px] text-sub">{f.detail}</span>,
+    },
+    {
+      key: "severity",
+      header: "Severity",
+      render: (f) => <SeverityBadge sev={f.severity} />,
+    },
+    {
+      key: "at",
+      header: "When",
+      render: (f) => <span className="text-[13px] tabular-nums text-sub">{formatRelative(f.at)}</span>,
+    },
+    {
+      key: "action",
+      header: "",
+      align: "right",
+      render: (f) =>
+        reviewed[f.id] ? (
+          <Badge tone="primary" icon="check-circle">Actioned</Badge>
+        ) : (
+          <Button variant="secondary" size="sm" icon="shield" onClick={() => act(f)}>
+            Review
+          </Button>
+        ),
+    },
+  ];
+
   return (
-    <div className="overflow-x-auto rounded-card border border-hairline bg-card shadow-sm">
-      <table className="w-full min-w-[760px] border-collapse text-left">
-        <thead>
-          <tr className="border-b border-hairline">
-            {["Tenant", "Signal", "Detail", "Severity", "When", ""].map((h, i) => (
-              <th key={h || i} className="px-3 py-2.5 kicker text-faint">{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {flags.map((f) => {
-            const done = reviewed[f.id];
-            return (
-              <tr key={f.id} className="border-b border-hairline last:border-0 hover:bg-primary-wash/40">
-                <td className="px-3 py-3 text-[14px] font-semibold text-ink">{f.tenant}</td>
-                <td className="px-3 py-3"><Badge tone="neutral">{KIND_LABEL[f.kind]}</Badge></td>
-                <td className="px-3 py-3 text-[14px] text-sub">{f.detail}</td>
-                <td className="px-3 py-3"><SeverityBadge sev={f.severity} /></td>
-                <td className="px-3 py-3 text-[14px] text-sub">{formatRelative(f.at)}</td>
-                <td className="px-3 py-3 text-right">
-                  {done ? (
-                    <Badge tone="primary" icon="check-circle">Actioned</Badge>
-                  ) : (
-                    <Button variant="secondary" size="sm" icon="shield" onClick={() => act(f)}>Review</Button>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+    <Table
+      columns={columns}
+      data={flags}
+      rowKey={(f) => f.id}
+      caption="Fraud queue — suspicious capture signals"
+      emptyIcon="shield"
+      emptyTitle="Queue clear"
+      emptyDescription="No suspicious capture signals are awaiting triage."
+    />
   );
 }

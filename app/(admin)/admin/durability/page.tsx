@@ -3,6 +3,8 @@ import { PageHeader } from "@/components/app/PageHeader";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge } from "@/components/ds/misc";
 import { Icon } from "@/components/icons";
+import { StatTile } from "@/components/charts/StatTile";
+import { DurabilityTable } from "./DurabilityTable";
 
 function filterTone(rate: number): { tone: "primary" | "gold" | "danger"; label: string } {
   if (rate >= 0.2) return { tone: "danger", label: "High filter rate" };
@@ -27,22 +29,10 @@ export default async function AdminDurabilityPage() {
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <div className="rounded-card border border-hairline bg-card p-4 shadow-sm">
-          <div className="kicker text-faint">Posted</div>
-          <div className="mt-1.5 text-[26px] font-extrabold leading-none tabular-nums text-ink">{totalPosted}</div>
-        </div>
-        <div className="rounded-card border border-hairline bg-card p-4 shadow-sm">
-          <div className="kicker text-faint">Survived 60d</div>
-          <div className="mt-1.5 text-[26px] font-extrabold leading-none tabular-nums text-primary">{totalSurvived}</div>
-        </div>
-        <div className="rounded-card border border-hairline bg-card p-4 shadow-sm">
-          <div className="kicker text-faint">Vanished</div>
-          <div className="mt-1.5 text-[26px] font-extrabold leading-none tabular-nums text-danger">{totalVanished}</div>
-        </div>
-        <div className="rounded-card border border-hairline bg-card p-4 shadow-sm">
-          <div className="kicker text-faint">Survival rate</div>
-          <div className="mt-1.5 text-[26px] font-extrabold leading-none tabular-nums text-ink">{survivalRate}%</div>
-        </div>
+        <StatTile label="Posted" value={totalPosted} deltaCaption="Captured across tenants" />
+        <StatTile label="Survived 60d" value={totalSurvived} deltaCaption="Still live at 60 days" />
+        <StatTile label="Vanished" value={totalVanished} favorableWhenUp={false} deltaCaption="Dropped after posting" />
+        <StatTile label="Survival rate" value={`${survivalRate}%`} deltaCaption="Survived ÷ posted" />
       </div>
 
       <Card>
@@ -57,7 +47,7 @@ export default async function AdminDurabilityPage() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="text-[14px] font-semibold text-ink">{r.tenant}</div>
                   <div className="flex items-center gap-2">
-                    <span className="text-[12px] text-sub">Filtered {Math.round(r.filteredRate * 100)}%</span>
+                    <span className="text-[12px] tabular-nums text-sub">Filtered {Math.round(r.filteredRate * 100)}%</span>
                     <Badge tone={ft.tone} icon={ft.tone === "danger" ? "alert" : ft.tone === "gold" ? "flag" : "check-circle"}>
                       {ft.label}
                     </Badge>
@@ -69,7 +59,7 @@ export default async function AdminDurabilityPage() {
                   <div className="h-full bg-danger" style={{ width: `${vanishedPct}%` }} />
                 </div>
 
-                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-sub">
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] tabular-nums text-sub">
                   <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-primary" /> {r.survived60d} survived 60d</span>
                   <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-danger" /> {r.vanished} vanished</span>
                   <span className="text-faint">· {r.posted} posted · {r.survived30d} at 30d</span>
@@ -80,32 +70,13 @@ export default async function AdminDurabilityPage() {
         </div>
       </Card>
 
-      <Card>
-        <CardHeader kicker="Raw" title="Durability table" />
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] border-collapse text-left">
-            <thead>
-              <tr className="border-b border-hairline">
-                {["Tenant", "Posted", "Survived 30d", "Survived 60d", "Vanished", "Filtered"].map((h) => (
-                  <th key={h} className={`px-3 py-2.5 kicker text-faint ${h !== "Tenant" ? "text-right" : ""}`}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {records.map((r) => (
-                <tr key={r.id} className="border-b border-hairline last:border-0">
-                  <td className="px-3 py-3 text-[14px] font-semibold text-ink">{r.tenant}</td>
-                  <td className="px-3 py-3 text-right data-chip text-[14px] text-ink">{r.posted}</td>
-                  <td className="px-3 py-3 text-right data-chip text-[14px] text-ink">{r.survived30d}</td>
-                  <td className="px-3 py-3 text-right data-chip text-[14px] font-bold text-primary">{r.survived60d}</td>
-                  <td className="px-3 py-3 text-right data-chip text-[14px] font-bold text-danger">{r.vanished}</td>
-                  <td className="px-3 py-3 text-right data-chip text-[14px] text-ink">{Math.round(r.filteredRate * 100)}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <Icon name="trend" size={16} className="text-sub" aria-hidden />
+          <span className="kicker text-faint">Raw · durability ledger</span>
         </div>
-      </Card>
+        <DurabilityTable records={records} />
+      </div>
 
       <div className="flex items-start gap-2 rounded-card border border-hairline bg-primary-wash p-4 text-[13px] text-sub">
         <Icon name="eye" size={18} className="mt-px shrink-0 text-primary" />

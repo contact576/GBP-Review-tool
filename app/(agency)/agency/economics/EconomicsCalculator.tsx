@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Field, Input } from "@/components/ds/form";
-import { Icon, type IconName } from "@/components/icons";
+import { StatTile } from "@/components/charts/StatTile";
 
 function money(sym: string, n: number): string {
   return `${sym}${Math.round(n).toLocaleString("en")}`;
@@ -12,19 +12,6 @@ function money(sym: string, n: number): string {
 function clampNum(v: string, min = 0): number {
   const n = Number(v);
   return Number.isFinite(n) && n >= min ? n : min;
-}
-
-function Result({ icon, label, value, sub, hero }: { icon: IconName; label: string; value: string; sub?: string; hero?: boolean }) {
-  return (
-    <div className={hero ? "rounded-card bg-hero p-4 text-white shadow-lg" : "rounded-card border border-hairline bg-card p-4 shadow-sm"}>
-      <div className={`flex items-center gap-1.5 ${hero ? "text-white/80" : "text-sub"}`}>
-        <Icon name={icon} size={15} />
-        <span className="text-[12px] font-medium">{label}</span>
-      </div>
-      <div className={`mt-1.5 text-[28px] font-extrabold leading-none tabular-nums ${hero ? "text-white" : "text-ink"}`}>{value}</div>
-      {sub ? <div className={`mt-1 text-[12px] ${hero ? "text-white/70" : "text-faint"}`}>{sub}</div> : null}
-    </div>
-  );
 }
 
 export function EconomicsCalculator({
@@ -77,11 +64,20 @@ export function EconomicsCalculator({
 
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
-          <Result icon="credit-card" label="Monthly revenue" value={money(currencySymbol, monthlyRevenue)} sub={`${nLoc} × ${money(currencySymbol, nRetail)}`} />
-          <Result icon="arrow-down" label="Wholesale cost" value={money(currencySymbol, monthlyCost)} sub={`${nLoc} × ${money(currencySymbol, nWhole)}`} />
+          <StatTile label="Monthly revenue" value={money(currencySymbol, monthlyRevenue)} deltaCaption={`${nLoc} × ${money(currencySymbol, nRetail)}`} />
+          <StatTile label="Wholesale cost" value={money(currencySymbol, monthlyCost)} deltaCaption={`${nLoc} × ${money(currencySymbol, nWhole)}`} />
         </div>
-        <Result icon="trend" label="Monthly margin" value={money(currencySymbol, monthlyMargin)} sub={`${marginPct}% margin across ${nLoc} locations`} hero />
-        <Result icon="chart" label="Annual margin" value={money(currencySymbol, annualMargin)} sub="Monthly margin × 12" />
+        {/* Deep-green hero — the single dark anchor for the earned margin */}
+        <div className="rounded-card bg-hero p-4 shadow-lg sm:p-5">
+          <StatTile
+            onHero
+            boxless
+            label="Monthly margin"
+            value={money(currencySymbol, monthlyMargin)}
+            deltaCaption={`${marginPct}% margin across ${nLoc} locations`}
+          />
+        </div>
+        <StatTile label="Annual margin" value={money(currencySymbol, annualMargin)} deltaCaption="Monthly margin × 12" />
       </div>
     </div>
   );

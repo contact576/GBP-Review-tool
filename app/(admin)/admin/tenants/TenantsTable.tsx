@@ -3,21 +3,110 @@
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ds/Button";
 import { Input } from "@/components/ds/form";
-import { EmptyState } from "@/components/ds/misc";
+import { Table, type Column, type SortDirection } from "@/components/ds/Table";
 import { formatMoney } from "@/lib/utils/format";
 import type { PlatformTenant } from "@/lib/data/types";
 import { TenantStatusBadge } from "../../_components/TenantStatus";
 
+type SortKey = "name" | "vertical" | "plan" | "mrr" | "locations" | "region";
+
+function sortValue(t: PlatformTenant, key: SortKey): number | string {
+  const v = t[key];
+  return typeof v === "number" ? v : String(v).toLowerCase();
+}
+
 export function TenantsTable({ tenants }: { tenants: PlatformTenant[] }) {
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
+    key: "mrr",
+    direction: "desc",
+  });
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return tenants;
-    return tenants.filter(
-      (t) => t.name.toLowerCase().includes(q) || t.vertical.toLowerCase().includes(q) || t.region.toLowerCase().includes(q),
-    );
-  }, [tenants, query]);
+    const filtered = q
+      ? tenants.filter(
+          (t) =>
+            t.name.toLowerCase().includes(q) ||
+            t.vertical.toLowerCase().includes(q) ||
+            t.region.toLowerCase().includes(q),
+        )
+      : tenants;
+    return [...filtered].sort((a, b) => {
+      const av = sortValue(a, sort.key);
+      const bv = sortValue(b, sort.key);
+      const cmp =
+        typeof av === "number" && typeof bv === "number"
+          ? av - bv
+          : String(av).localeCompare(String(bv));
+      return sort.direction === "asc" ? cmp : -cmp;
+    });
+  }, [tenants, query, sort]);
+
+  const columns: Column<PlatformTenant>[] = [
+    {
+      key: "name",
+      header: "Tenant",
+      sortable: true,
+      ariaLabel: "Sort by tenant",
+      render: (t) => <span className="text-[14px] font-semibold text-ink">{t.name}</span>,
+    },
+    {
+      key: "vertical",
+      header: "Vertical",
+      sortable: true,
+      ariaLabel: "Sort by vertical",
+      render: (t) => <span className="text-[14px] capitalize text-sub">{t.vertical}</span>,
+    },
+    {
+      key: "plan",
+      header: "Plan",
+      sortable: true,
+      ariaLabel: "Sort by plan",
+      render: (t) => <span className="text-[14px] capitalize text-sub">{t.plan}</span>,
+    },
+    {
+      key: "mrr",
+      header: "MRR",
+      numeric: true,
+      sortable: true,
+      ariaLabel: "Sort by MRR",
+      render: (t) => <span className="font-bold text-ink">{formatMoney(t.mrr)}</span>,
+    },
+    {
+      key: "locations",
+      header: "Locations",
+      numeric: true,
+      sortable: true,
+      ariaLabel: "Sort by locations",
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (t) => <TenantStatusBadge status={t.status} />,
+    },
+    {
+      key: "region",
+      header: "Region",
+      sortable: true,
+      ariaLabel: "Sort by region",
+      render: (t) => <span className="text-[14px] text-sub">{t.region}</span>,
+    },
+    {
+      key: "impersonate",
+      header: "",
+      align: "right",
+      render: () => (
+        // Impersonation stays gated — it unlocks only with the database + a
+        // support audit trail. The disabled control keeps that promise visible.
+        <span title="Available with database + support audit trail" className="inline-block">
+          <Button variant="secondary" size="sm" icon="lock" disabled>
+            Impersonate
+          </Button>
+        </span>
+      ),
+    },
+  ];
 
   return (
     <div className="space-y-3">
@@ -31,46 +120,19 @@ export function TenantsTable({ tenants }: { tenants: PlatformTenant[] }) {
         />
       </div>
 
-      <div className="overflow-x-auto rounded-card border border-hairline bg-card shadow-sm">
-        <table className="w-full min-w-[820px] border-collapse text-left">
-          <thead>
-            <tr className="border-b border-hairline">
-              {["Tenant", "Vertical", "Plan", "MRR", "Locations", "Status", "Region", ""].map((h, i) => (
-                <th key={h || i} className={`px-3 py-2.5 kicker text-faint ${["MRR", "Locations"].includes(h) ? "text-right" : ""}`}>
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((t) => (
-              <tr key={t.id} className="border-b border-hairline last:border-0 hover:bg-primary-wash/40">
-                <td className="px-3 py-3 text-[14px] font-semibold text-ink">{t.name}</td>
-                <td className="px-3 py-3 text-[14px] capitalize text-sub">{t.vertical}</td>
-                <td className="px-3 py-3 text-[14px] capitalize text-sub">{t.plan}</td>
-                <td className="px-3 py-3 text-right data-chip text-[14px] font-bold text-ink">{formatMoney(t.mrr)}</td>
-                <td className="px-3 py-3 text-right data-chip text-[14px] text-ink">{t.locations}</td>
-                <td className="px-3 py-3"><TenantStatusBadge status={t.status} /></td>
-                <td className="px-3 py-3 text-[14px] text-sub">{t.region}</td>
-                <td className="px-3 py-3 text-right">
-                  <span title="Available with database + support audit trail" className="inline-block">
-                    <Button variant="secondary" size="sm" icon="lock" disabled>
-                      Impersonate
-                    </Button>
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {rows.length === 0 ? (
-          <EmptyState
-            icon="search"
-            title="No tenants found"
-            description={`No tenants match “${query}”. Try a different name, vertical, or region.`}
-          />
-        ) : null}
-      </div>
+      <Table
+        columns={columns}
+        data={rows}
+        rowKey={(t) => t.id}
+        sort={sort}
+        onSortChange={(key, direction) => setSort({ key: key as SortKey, direction })}
+        stickyHeader
+        caption="Platform tenants"
+        emptyIcon="search"
+        emptyTitle="No tenants found"
+        emptyDescription={`No tenants match “${query}”. Try a different name, vertical, or region.`}
+      />
+
       <p className="text-[12px] text-faint">
         {rows.length} of {tenants.length} tenants · impersonation unlocks with the database and a support audit trail.
       </p>

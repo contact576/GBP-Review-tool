@@ -2,24 +2,12 @@ import { getData } from "@/lib/data";
 import { PageHeader } from "@/components/app/PageHeader";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { LinkButton } from "@/components/ds/Button";
-import { EmptyState } from "@/components/ds/misc";
-import { Icon, type IconName } from "@/components/icons";
+import { Badge, EmptyState } from "@/components/ds/misc";
+import { Icon } from "@/components/icons";
+import { StatTile } from "@/components/charts/StatTile";
 import { formatMoney } from "@/lib/utils/format";
 import { currencyFor } from "@/lib/utils/region";
 import { StatusBadge, statusRank } from "../_components/StatusBadge";
-
-function MetricTile({ icon, label, value, sub }: { icon: IconName; label: string; value: string; sub?: string }) {
-  return (
-    <div className="rounded-card border border-hairline bg-card p-4 shadow-sm">
-      <div className="flex items-center gap-2 text-sub">
-        <Icon name={icon} size={16} />
-        <span className="text-[12px] font-medium">{label}</span>
-      </div>
-      <div className="mt-2 text-[28px] font-extrabold leading-none tabular-nums text-ink">{value}</div>
-      {sub ? <div className="mt-1 text-[12px] text-faint">{sub}</div> : null}
-    </div>
-  );
-}
 
 export default async function AgencyRollupPage() {
   const data = await getData();
@@ -30,6 +18,10 @@ export default async function AgencyRollupPage() {
   const avgGrowth = count ? Math.round(clients.reduce((a, c) => a + c.growthScore, 0) / count) : 0;
   const totalNewReviews = clients.reduce((a, c) => a + c.newReviews30d, 0);
   const totalNeedsReply = clients.reduce((a, c) => a + c.needsReply, 0);
+
+  const healthy = clients.filter((c) => c.status === "healthy").length;
+  const attentionCount = clients.filter((c) => c.status === "attention").length;
+  const atRisk = clients.filter((c) => c.status === "at_risk").length;
 
   const attention = [...clients]
     .filter((c) => c.status !== "healthy")
@@ -48,10 +40,18 @@ export default async function AgencyRollupPage() {
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <MetricTile icon="users" label="Clients" value={String(count)} sub="Active locations" />
-        <MetricTile icon="chart" label="Avg growth score" value={`${avgGrowth}`} sub="Across the book" />
-        <MetricTile icon="star" label="New reviews · 30d" value={String(totalNewReviews)} sub="Detected across clients" />
-        <MetricTile icon="chat" label="Needs reply" value={String(totalNeedsReply)} sub="Open across clients" />
+        <StatTile label="Clients" value={count} deltaCaption="Active locations" />
+        <StatTile label="Avg growth score" value={avgGrowth} deltaCaption="Across the book" />
+        <StatTile label="New reviews · 30d" value={totalNewReviews} deltaCaption="Detected across clients" />
+        <StatTile label="Needs reply" value={totalNeedsReply} deltaCaption="Open across clients" />
+      </div>
+
+      {/* Health mix — red/amber/green counts carried by text + icon, never colour alone */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="kicker text-faint">Health mix</span>
+        <Badge tone="primary" icon="check-circle">{healthy} healthy</Badge>
+        <Badge tone="gold" icon="alert">{attentionCount} attention</Badge>
+        <Badge tone="danger" icon="flag">{atRisk} at risk</Badge>
       </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
@@ -68,14 +68,14 @@ export default async function AgencyRollupPage() {
                   <li key={c.locationId}>
                     <a
                       href={`/agency/clients/${c.locationId}`}
-                      className="flex items-center gap-3 py-3 transition-colors hover:bg-primary-wash/50"
+                      className="flex items-center gap-3 rounded-btn py-3 transition-colors hover:bg-primary-wash/50"
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span className="truncate text-[14px] font-semibold text-ink">{c.name}</span>
                           <StatusBadge status={c.status} />
                         </div>
-                        <div className="mt-0.5 text-[12px] text-sub">
+                        <div className="mt-0.5 text-[12px] tabular-nums text-sub">
                           {c.city} · Growth {c.growthScore} · {c.needsReply} awaiting reply · {c.newReviews30d} new reviews
                         </div>
                       </div>

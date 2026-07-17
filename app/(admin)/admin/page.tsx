@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getData } from "@/lib/data";
 import { PageHeader } from "@/components/app/PageHeader";
 import { Icon, type IconName } from "@/components/icons";
+import { StatTile } from "@/components/charts/StatTile";
 import { formatMoney, formatNumber } from "@/lib/utils/format";
 import { SeverityBadge, sevRank, type Sev } from "../_components/Severity";
 
@@ -32,16 +33,6 @@ function AlertCard({
         <Icon name="chevron-right" size={14} />
       </div>
     </Link>
-  );
-}
-
-function KpiTile({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="rounded-card border border-hairline bg-card p-4 shadow-sm">
-      <div className="kicker text-faint">{label}</div>
-      <div className="mt-1.5 text-[26px] font-extrabold leading-none tabular-nums text-ink">{value}</div>
-      {sub ? <div className="mt-1 text-[12px] text-faint">{sub}</div> : null}
-    </div>
   );
 }
 
@@ -86,14 +77,14 @@ export default async function AdminOverviewPage() {
       <section className="space-y-3">
         <div className="kicker">Platform KPIs</div>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <KpiTile label="Total tenants" value={formatNumber(kpis.totalTenants)} sub="Orgs on the platform" />
-          <KpiTile label="Active locations" value={formatNumber(kpis.activeLocations)} sub="Billable GBP profiles" />
-          <KpiTile label="Platform MRR" value={formatMoney(kpis.mrr)} sub="Recurring revenue" />
-          <KpiTile label="Trial conversion" value={`${Math.round(kpis.trialConversion * 100)}%`} sub="Trial → paid" />
-          <KpiTile label="Logo churn" value={`${(kpis.logoChurn * 100).toFixed(1)}%`} sub="Monthly, by account" />
-          <KpiTile label="Net revenue retention" value={`${Math.round(kpis.nrr * 100)}%`} sub="Expansion vs churn" />
-          <KpiTile label="Detected reviews · wk" value={formatNumber(kpis.weeklyDetectedReviews)} sub="Across all tenants" />
-          <KpiTile label="Past-due accounts" value={formatNumber(pastDue.length)} sub="Need dunning" />
+          <StatTile label="Total tenants" value={formatNumber(kpis.totalTenants)} deltaCaption="Orgs on the platform" />
+          <StatTile label="Active locations" value={formatNumber(kpis.activeLocations)} deltaCaption="Billable GBP profiles" />
+          <StatTile label="Platform MRR" value={formatMoney(kpis.mrr)} deltaCaption="Recurring revenue" />
+          <StatTile label="Trial conversion" value={`${Math.round(kpis.trialConversion * 100)}%`} deltaCaption="Trial → paid" />
+          <StatTile label="Logo churn" value={`${(kpis.logoChurn * 100).toFixed(1)}%`} deltaCaption="Monthly, by account" />
+          <StatTile label="Net revenue retention" value={`${Math.round(kpis.nrr * 100)}%`} deltaCaption="Expansion vs churn" />
+          <StatTile label="Detected reviews · wk" value={formatNumber(kpis.weeklyDetectedReviews)} deltaCaption="Across all tenants" />
+          <StatTile label="Past-due accounts" value={formatNumber(pastDue.length)} deltaCaption="Need dunning" />
         </div>
       </section>
     </div>
