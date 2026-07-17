@@ -83,7 +83,7 @@ export function ScoreDial({
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <span
-            className={cn("font-extrabold tabular-nums leading-none", onHero ? "text-white" : "text-ink")}
+            className={cn("font-extrabold tabular-nums tracking-tight leading-none", onHero ? "text-white" : "text-ink")}
             style={{ fontSize: size * 0.28 }}
           >
             {display}
