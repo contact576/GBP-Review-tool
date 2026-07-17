@@ -32,38 +32,59 @@ export function TaskCard({ task }: { task: GbpTask }) {
     });
 
   const done = status === "done";
+  const snoozed = status === "snoozed";
+  const active = !done && !snoozed;
 
   return (
-    <div className={cn("rounded-card border bg-card p-4 transition-all", done ? "border-primary/30 bg-primary-wash/40" : "border-hairline")}>
+    <div
+      className={cn(
+        "rounded-card border p-4 transition-all",
+        done ? "border-primary/30 bg-primary-wash/50" : "border-hairline bg-card hover:shadow-sm",
+      )}
+    >
       <div className="flex items-start gap-3">
-        <div className={cn("grid size-9 shrink-0 place-items-center rounded-btn", done ? "bg-primary text-white" : "bg-primary-tint text-primary-dark")}>
+        <div
+          className={cn(
+            "grid size-10 shrink-0 place-items-center rounded-btn",
+            done ? "bg-primary text-white" : "bg-primary-tint text-primary-dark",
+          )}
+        >
           <Icon name={done ? "check" : KIND_ICON[task.kind]} size={18} />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <h3 className={cn("text-[15px] font-bold text-ink", done && "line-through opacity-60")}>{task.title}</h3>
-            <Badge tone={task.impact === "reviews" ? "gold" : "primary"}>{task.impact}</Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className={cn("text-[15px] font-bold text-ink", done && "text-sub line-through")}>
+              {task.title}
+            </h3>
+            <Badge tone={task.impact === "reviews" ? "primary" : "neutral"}>
+              {task.impact === "reviews" ? "Reviews" : "Profile"}
+            </Badge>
           </div>
-          <p className="mt-1 text-[14px] text-sub">{task.rationale}</p>
-          {!done ? (
-            <div className="mt-2 rounded-btn border border-hairline bg-paper px-3 py-2 text-[14px] text-ink/80">
+          <p className="mt-1 text-[14px] leading-relaxed text-sub">{task.rationale}</p>
+          {active ? (
+            <div className="mt-2.5 rounded-btn border border-hairline bg-paper px-3 py-2 text-[13px] leading-relaxed text-ink/80">
               {task.preview}
             </div>
           ) : null}
         </div>
       </div>
-      {!done && status !== "snoozed" ? (
+
+      {active ? (
         <div className="mt-3 flex items-center gap-2">
           <Button size="sm" onClick={approve} loading={pending} icon="check">Approve &amp; publish</Button>
           <Button size="sm" variant="ghost" onClick={snooze} disabled={pending}>Snooze</Button>
-          <span className="ml-auto text-[12px] text-faint">~{task.effortMins} min</span>
+          <span className="ml-auto inline-flex items-center gap-1 data-chip text-faint">
+            <Icon name="clock" size={13} />~{task.effortMins} min
+          </span>
         </div>
       ) : done ? (
-        <div className="mt-3 flex items-center gap-1.5 text-[14px] font-semibold text-primary">
+        <div className="mt-3 flex items-center gap-1.5 text-[13px] font-semibold text-primary">
           <Icon name="check-circle" size={16} /> Done this week
         </div>
       ) : (
-        <div className="mt-3 text-[14px] text-faint">Snoozed to next week</div>
+        <div className="mt-3 flex items-center gap-1.5 text-[13px] text-faint">
+          <Icon name="clock" size={14} /> Snoozed to next week
+        </div>
       )}
     </div>
   );

@@ -30,7 +30,7 @@ export default async function DashboardPage() {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <PageHeader
         title={`Good to see you, ${data.owner.name.split(" ")[0]}`}
         sub={<>One score, three numbers, three tasks — here&apos;s where things stand.</>}
@@ -44,9 +44,9 @@ export default async function DashboardPage() {
         business={data.location.name}
       />
 
-      {/* Desktop: main column + right rail. Mobile keeps the single-column order. */}
+      {/* Daily cluster — score (hero, above) + stats + tasks kept tight; the
+          needs-reply queue and teasers ride the rail. */}
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
-        {/* Main column */}
         <div className="space-y-5 xl:col-span-2">
           <GoogleDataCard data={data} />
 
@@ -61,16 +61,18 @@ export default async function DashboardPage() {
               {tasks.map((t) => <TaskCard key={t.id} task={t} />)}
             </div>
           </Card>
+        </div>
 
+        <div className="space-y-5">
           <Card>
             <CardHeader
               title="Needs your reply"
               action={<LinkButton href="/app/reviews" variant="ghost" size="sm" iconRight="chevron-right">Inbox</LinkButton>}
             />
             {needs.length ? (
-              <div className="space-y-1">
+              <div className="-mx-2 divide-y divide-hairline">
                 {needs.map((r) => (
-                  <NeedsReplyItem key={r.id} author={r.author} snippet={r.text} rating={r.rating} href={`/app/reviews`} />
+                  <NeedsReplyItem key={r.id} author={r.author} snippet={r.text} rating={r.rating} date={r.publishedAt} href="/app/reviews" />
                 ))}
               </div>
             ) : (
@@ -80,21 +82,6 @@ export default async function DashboardPage() {
                 description="No reviews waiting on a reply right now."
               />
             )}
-          </Card>
-        </div>
-
-        {/* Right rail */}
-        <div className="space-y-5">
-          <BenchmarkStrip competitors={data.competitors} />
-
-          <Card>
-            <CardHeader
-              title="Staff leaderboard"
-              action={<LinkButton href="/app/settings/team" variant="ghost" size="sm" iconRight="chevron-right">Team</LinkButton>}
-            />
-            <div className="divide-y divide-hairline">
-              {leaderboard.map((s, i) => <LeaderboardRow key={s.id} staff={s} rank={i + 1} />)}
-            </div>
           </Card>
 
           <TeaserLink
@@ -114,6 +101,27 @@ export default async function DashboardPage() {
           ) : null}
         </div>
       </div>
+
+      {/* Generous air, then the standing/comparison surfaces. */}
+      <section className="space-y-4 pt-4">
+        <div className="flex items-center gap-3">
+          <h2 className="text-[16px] font-bold text-ink">Where you stand</h2>
+          <div className="h-px flex-1 bg-hairline" />
+        </div>
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+          <BenchmarkStrip competitors={data.competitors} />
+
+          <Card>
+            <CardHeader
+              title="Staff leaderboard"
+              action={<LinkButton href="/app/settings/team" variant="ghost" size="sm" iconRight="chevron-right">Team</LinkButton>}
+            />
+            <div className="divide-y divide-hairline">
+              {leaderboard.map((s, i) => <LeaderboardRow key={s.id} staff={s} rank={i + 1} />)}
+            </div>
+          </Card>
+        </div>
+      </section>
     </div>
   );
 }

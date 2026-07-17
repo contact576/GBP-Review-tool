@@ -1,36 +1,34 @@
-"use client";
+import { StatTile } from "@/components/charts";
 
-import { Sparkline } from "@/components/charts/Sparkline";
-import { Delta } from "@/components/ds/misc";
-import { Icon, type IconName } from "@/components/icons";
-import { formatNumber } from "@/lib/utils/format";
-
-/** Honest action stat — "People who found you", etc. Never "customers gained". */
+/**
+ * Honest action stat — "People who found you", never "customers gained".
+ *
+ * Now a thin adapter over the canonical {@link StatTile} spec-cell (mono
+ * micro-label / huge tabular value / favourable-aware delta arrow / bottom
+ * sparkline). Pass `boxless` for hairline-divided spec rows; omit it for a
+ * self-contained card.
+ */
 export function StatCard({
-  label, icon, value, delta, spark,
+  label, value, delta, spark, favorableWhenUp = true, boxless = false, className,
 }: {
   label: string;
-  icon: IconName;
   value: number;
   delta: number;
   spark: number[];
+  /** Whether an increase is the favourable direction for THIS metric. */
+  favorableWhenUp?: boolean;
+  boxless?: boolean;
+  className?: string;
 }) {
   return (
-    <div className="rounded-card border border-hairline bg-card p-4 shadow-sm">
-      <div className="flex items-center gap-2 text-sub">
-        <Icon name={icon} size={16} />
-        <span className="text-[13px] font-medium">{label}</span>
-      </div>
-      <div className="mt-2 flex items-end justify-between gap-2">
-        <div>
-          <div className="text-[30px] font-extrabold leading-none tabular-nums text-ink">{formatNumber(value)}</div>
-          <div className="mt-1 flex items-center gap-1.5">
-            <Delta value={delta} />
-            <span className="text-[12px] text-faint">vs previous 30 days</span>
-          </div>
-        </div>
-        <Sparkline data={spark} width={72} height={32} />
-      </div>
-    </div>
+    <StatTile
+      label={label}
+      value={value}
+      delta={delta}
+      favorableWhenUp={favorableWhenUp}
+      spark={spark}
+      boxless={boxless}
+      className={className}
+    />
   );
 }
