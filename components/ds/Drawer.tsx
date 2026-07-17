@@ -80,7 +80,7 @@ export function Drawer({
         ref={panelRef}
         tabIndex={-1}
         className={cn(
-          "absolute right-0 top-0 bottom-0 flex w-full flex-col bg-paper shadow-lg animate-slide-in-right",
+          "absolute right-0 top-0 bottom-0 flex w-full flex-col bg-paper shadow-halo animate-slide-in-right",
           wide ? "sm:w-[540px]" : "sm:w-[440px]",
         )}
       >

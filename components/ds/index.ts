@@ -3,5 +3,6 @@ export { Card, CardHeader } from "./Card";
 export { Kicker, DataChip, Badge, Chip, Divider, Skeleton, EmptyState, ProgressRail, Delta } from "./misc";
 export { Field, Input, Textarea, Select, Toggle, Checkbox } from "./form";
 export { Tabs, type TabItem } from "./Tabs";
+export { Table, type Column, type TableProps, type SortDirection } from "./Table";
 export { Drawer } from "./Drawer";
 export { ToastProvider, useToast } from "./Toast";

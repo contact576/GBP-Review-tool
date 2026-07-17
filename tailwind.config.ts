@@ -48,8 +48,12 @@ const config: Config = {
         chip: "999px",
       },
       boxShadow: {
+        // Two-level elevation (see DESIGN.md). `halo` is the Level-2+ layered
+        // shadow reserved for the surfaces that genuinely lift off the page:
+        // drawers, modals, toasts, and the deep-green hero card.
         sm: "0 1px 2px rgba(23,32,29,.05)",
         lg: "0 10px 28px rgba(23,32,29,.07)",
+        halo: "0 24px 48px rgba(23,32,29,.10)",
       },
       transitionDuration: {
         "150": "150ms",

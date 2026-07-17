@@ -16,21 +16,34 @@ export function DataChip({ children, className }: { children: React.ReactNode; c
 }
 
 // ── Badge ───────────────────────────────────────────────────
+// Two-variant semantic system: `soft` (tint bg + deep same-hue text, the
+// default) and `solid` (filled). Both are AA by construction across
+// green/danger/neutral/gold. Existing `tone` values are unchanged.
 type BadgeTone = "neutral" | "primary" | "gold" | "danger" | "sub";
-const badgeTones: Record<BadgeTone, string> = {
+type BadgeVariant = "soft" | "solid";
+
+const badgeSoft: Record<BadgeTone, string> = {
   neutral: "bg-primary-wash text-sub",
   primary: "bg-primary-tint text-primary-dark",
   gold: "bg-gold-tint text-gold-deep",
   danger: "bg-danger-tint text-danger",
   sub: "bg-hairline/60 text-sub",
 };
+const badgeSolid: Record<BadgeTone, string> = {
+  neutral: "bg-ink text-white",
+  primary: "bg-primary text-white",
+  gold: "bg-gold text-ink", // ink-on-gold keeps AA; gold is rationed to earned states
+  danger: "bg-danger text-white",
+  sub: "bg-sub text-white",
+};
 export function Badge({
-  children, tone = "neutral", icon, className,
+  children, tone = "neutral", variant = "soft", icon, className,
 }: {
-  children: React.ReactNode; tone?: BadgeTone; icon?: IconName; className?: string;
+  children: React.ReactNode; tone?: BadgeTone; variant?: BadgeVariant; icon?: IconName; className?: string;
 }) {
+  const tones = variant === "solid" ? badgeSolid : badgeSoft;
   return (
-    <span className={cn("inline-flex items-center gap-1 rounded-chip px-2 py-0.5 text-[11px] font-semibold", badgeTones[tone], className)}>
+    <span className={cn("inline-flex items-center gap-1 rounded-chip px-2 py-0.5 text-[11px] font-semibold", tones[tone], className)}>
       {icon ? <Icon name={icon} size={12} /> : null}
       {children}
     </span>

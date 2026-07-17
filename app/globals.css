@@ -2,6 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Foundly surface ladder & elevation (authoritative note — see DESIGN.md).
+ * Depth comes from the SURFACE LADDER + HAIRLINE first, not shadow.
+ *   1. paper   #F7F6F2  — warm app canvas (never pure white)
+ *   2. card    #FFFFFF  — surface floating on paper (hairline border)
+ *   3. wash    #F0F6F3  — recessed/hover rows, section tints, chart fills
+ *   4. hero    #0C4A3E  — the single dark polarity flip per screen
+ * Elevation is HAIRLINE-FIRST: a 1px `hairline` rule + surface contrast does
+ * most of the lifting. Only two shadow levels exist on top of that —
+ *   Level-1  `shadow-sm`   resting cards / inputs (soft interactive lift)
+ *   Level-2  `shadow-lg`   hover lift, popovers
+ *   Level-2+ `shadow-halo` drawers / modals / toasts / hero (layered halo)
+ * Never reach for a shadow where a surface change + hairline will read.
+ */
+
 @layer base {
   :root {
     color-scheme: light;
@@ -40,7 +55,8 @@
 }
 
 @layer components {
-  /* Mono kicker — Spline Sans Mono, caps, tracked. */
+  /* Mono kicker — Spline Sans Mono, caps, tracked. Tabular so any coords /
+     counts embedded in a kicker (e.g. rank-grid labels) never jitter. */
   .kicker {
     font-family: theme("fontFamily.mono");
     font-weight: 700;
@@ -48,12 +64,15 @@
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: theme("colors.faint");
+    font-variant-numeric: tabular-nums;
   }
 
+  /* Mono data chip — always tabular so figures stay column-aligned. */
   .data-chip {
     font-family: theme("fontFamily.mono");
     font-weight: 500;
     font-size: 12px;
+    font-variant-numeric: tabular-nums;
   }
 
   /* Skip link for keyboard users. */
@@ -74,6 +93,13 @@
 }
 
 @layer utilities {
+  /* Tabular numerals — apply to every data figure (Hanken display numbers,
+     scores, prices, ratings, review counts, table cells) so numbers read as
+     trustworthy financial infrastructure and never reflow while animating. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }

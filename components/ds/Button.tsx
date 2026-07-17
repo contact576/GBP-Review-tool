@@ -6,15 +6,29 @@ import { Icon, type IconName } from "@/components/icons";
 type Variant = "primary" | "secondary" | "ghost" | "danger" | "gold";
 type Size = "sm" | "md" | "lg";
 
+// Single tokenised transition + one green focus ring for the whole ladder.
+// (The global :focus-visible outline is intentionally replaced here with a
+// ring so filled buttons get a crisp, on-brand halo rather than a stray outline.)
 const base =
-  "inline-flex items-center justify-center gap-2 font-semibold rounded-btn transition-all duration-150 focus-visible:outline-none disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap select-none";
+  "inline-flex items-center justify-center gap-2 font-semibold rounded-btn transition-all duration-150 whitespace-nowrap select-none " +
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-paper " +
+  "disabled:opacity-50 disabled:pointer-events-none disabled:shadow-none";
 
+// Clean 3-tier ladder: filled-green primary / hairline secondary / text ghost.
+// Variants change fill + border only — never shape (radius stays 12 / rounded-btn).
 const variants: Record<Variant, string> = {
-  primary: "bg-primary text-white hover:bg-primary-dark active:bg-primary-dark shadow-sm",
-  secondary: "bg-card text-ink border border-hairline hover:bg-primary-wash",
-  ghost: "bg-transparent text-sub hover:bg-primary-wash hover:text-ink",
-  danger: "bg-danger text-white hover:brightness-95",
-  gold: "bg-gold text-ink hover:bg-gold-deep hover:text-white",
+  // Filled green with a subtle Lovable-style inset top highlight for depth.
+  primary:
+    "bg-primary text-white hover:bg-primary-dark active:bg-primary-dark " +
+    "shadow-[0_1px_2px_rgba(23,32,29,0.12),inset_0_1px_0_rgba(255,255,255,0.16)]",
+  // Hairline secondary — reads as a quiet card, greens on hover.
+  secondary:
+    "bg-card text-ink border border-hairline hover:bg-primary-wash hover:border-primary/30 active:bg-primary-wash",
+  // Text ghost — no fill at rest.
+  ghost: "bg-transparent text-sub hover:bg-primary-wash hover:text-ink active:bg-primary-tint/60",
+  danger:
+    "bg-danger text-white hover:brightness-95 active:brightness-90 shadow-sm focus-visible:ring-danger",
+  gold: "bg-gold text-ink hover:bg-gold-deep hover:text-white active:brightness-95 shadow-sm",
 };
 
 const sizes: Record<Size, string> = {

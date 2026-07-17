@@ -49,8 +49,14 @@ export function Field({
   );
 }
 
+// Single green focus ring (border swap + low-alpha ring) + one consistent
+// hover across every field; 44px min target; 12px radius. Invalid swaps both
+// the border and the ring to danger so the two signals never disagree.
 const inputBase =
-  "w-full rounded-input border bg-card px-3.5 text-[15px] text-ink placeholder:text-faint transition-colors focus-visible:outline-none focus-visible:border-primary min-h-[44px] h-11";
+  "w-full rounded-input border bg-card px-3.5 text-[15px] text-ink placeholder:text-faint transition-colors min-h-[44px] h-11 " +
+  "focus-visible:outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
+const inputRest = "border-hairline hover:border-primary/40";
+const inputInvalid = "border-danger focus-visible:border-danger focus-visible:ring-danger/25";
 
 export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean; iconLeft?: IconName }>(
   function Input({ className, invalid, iconLeft, ...props }, ref) {
@@ -58,11 +64,11 @@ export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTML
       return (
         <div className="relative">
           <Icon name={iconLeft} size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint pointer-events-none" aria-hidden />
-          <input ref={ref} aria-invalid={invalid || undefined} className={cn(inputBase, "pl-10", invalid ? "border-danger" : "border-hairline", className)} {...props} />
+          <input ref={ref} aria-invalid={invalid || undefined} className={cn(inputBase, "pl-10", invalid ? inputInvalid : inputRest, className)} {...props} />
         </div>
       );
     }
-    return <input ref={ref} aria-invalid={invalid || undefined} className={cn(inputBase, invalid ? "border-danger" : "border-hairline", className)} {...props} />;
+    return <input ref={ref} aria-invalid={invalid || undefined} className={cn(inputBase, invalid ? inputInvalid : inputRest, className)} {...props} />;
   },
 );
 
@@ -73,8 +79,9 @@ export const Textarea = forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttrib
         ref={ref}
         aria-invalid={invalid || undefined}
         className={cn(
-          "w-full rounded-input border bg-card px-3.5 py-3 text-[15px] text-ink placeholder:text-faint transition-colors focus-visible:outline-none focus-visible:border-primary min-h-[96px] resize-y",
-          invalid ? "border-danger" : "border-hairline",
+          "w-full rounded-input border bg-card px-3.5 py-3 text-[15px] text-ink placeholder:text-faint transition-colors min-h-[96px] resize-y",
+          "focus-visible:outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25",
+          invalid ? inputInvalid : inputRest,
           className,
         )}
         {...props}
@@ -89,7 +96,7 @@ export function Select({
   return (
     <div className="relative">
       <select
-        className={cn(inputBase, "appearance-none pr-10 border-hairline", className)}
+        className={cn(inputBase, "appearance-none pr-10", inputRest, className)}
         {...props}
       >
         {children}
