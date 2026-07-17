@@ -6,10 +6,11 @@ import { cn } from "@/lib/utils/cn";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Button } from "@/components/ds/Button";
 import { Badge } from "@/components/ds/misc";
+import { Table, type Column } from "@/components/ds/Table";
 import { useToast } from "@/components/ds/Toast";
 import { Icon } from "@/components/icons";
 import { Confetti } from "@/components/review/Confetti";
-import { formatMoney } from "@/lib/utils/format";
+import { formatMoney, formatNumber } from "@/lib/utils/format";
 import { PLANS, PLAN_ORDER, type Feature, type PlanId } from "@/lib/billing/plans";
 import {
   startCheckoutAction,
@@ -34,6 +35,20 @@ const FEATURE_LABEL: Record<Feature, string> = {
   gbp_copilot: "GBP Co-Pilot weekly tasks",
 };
 
+// Order the comparison table walks the entitlement codes in — cheapest-tier
+// features first so the rows read as a rising ladder.
+const COMPARE_FEATURES: Feature[] = [
+  "ai_drafts",
+  "campaigns_lite",
+  "gbp_copilot",
+  "remove_badge",
+  "campaigns_pro",
+  "rank_grid",
+  "ai_visibility",
+  "multi_location",
+  "white_label",
+];
+
 // What a workspace keeps when it steps down to Free — the honest, celebratory
 // promise repeated on the confirm and the confirmation.
 const KEEP_ON_FREE = [
@@ -41,6 +56,12 @@ const KEEP_ON_FREE = [
   "Monthly Local Growth Score email",
   "5 AI review drafts every month",
 ];
+
+/** Blurb with any legacy "Most popular" claim stripped — the deep-green tier
+ *  carries that signal structurally now, no hype copy. */
+function planBlurb(id: PlanId): string {
+  return PLANS[id].blurb.replace(/\s*Most popular\.?\s*$/i, "").trim();
+}
 
 /** Bullet lines for a tier card, derived from PLANS (incremental vs the tier below). */
 function planHighlights(id: PlanId): string[] {
@@ -103,6 +124,14 @@ export function BillingPanel({
     interval === "annual" ? PLANS[id].priceAnnualMonthly : PLANS[id].priceMonthly;
   const annualSaving = (id: PlanId) =>
     (PLANS[id].priceMonthly - PLANS[id].priceAnnualMonthly) * 12;
+
+  // Headline annual discount for the toggle badge — the largest honest figure
+  // across paid tiers, phrased "up to" so it never overstates a cheaper plan.
+  const maxSavePct = Math.max(
+    ...PLAN_ORDER.filter((id) => PLANS[id].priceMonthly > 0).map((id) =>
+      Math.round((1 - PLANS[id].priceAnnualMonthly / PLANS[id].priceMonthly) * 100),
+    ),
+  );
 
   // ── Upgrades: honest Stripe checkout, never a faked success ──────────────
   function checkout(id: PlanId) {
@@ -204,9 +233,12 @@ export function BillingPanel({
 
       {/* ── Plan matrix ─────────────────────────────────────────────────── */}
       <div>
-        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-[16px] font-bold text-ink">Plans</div>
-          <IntervalToggle value={interval} onChange={setInterval} />
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="kicker mb-1">Plans</div>
+            <div className="text-[18px] font-bold text-ink">Pick what fits — change anytime</div>
+          </div>
+          <IntervalToggle value={interval} onChange={setInterval} savePct={maxSavePct} />
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -215,7 +247,7 @@ export function BillingPanel({
             const idx = PLAN_ORDER.indexOf(id);
             const isCurrent = id === currentTier;
             const isUpgrade = idx > currentIdx;
-            const anchor = !!plan.anchor;
+            const anchor = !!plan.anchor; // featured tier → deep-green polarity flip
             const price = priceFor(id);
             const saving = annualSaving(id);
 
@@ -223,46 +255,78 @@ export function BillingPanel({
               <div
                 key={id}
                 className={cn(
-                  "relative flex flex-col rounded-card border bg-card p-5 shadow-sm",
-                  anchor ? "border-primary ring-2 ring-primary/20" : "border-hairline",
-                  isCurrent && "ring-2 ring-primary/40",
+                  "relative flex flex-col rounded-card p-5 transition-shadow",
+                  anchor
+                    ? // Deep-green inversion + soft green-wash halo. No ribbon —
+                      // the polarity flip is the signal.
+                      "on-hero bg-hero text-white shadow-[0_18px_40px_-14px_rgba(12,122,99,0.55)]"
+                    : "border border-hairline bg-card shadow-sm",
+                  isCurrent && !anchor && "ring-2 ring-primary/35",
+                  isCurrent && anchor && "ring-1 ring-white/40",
                 )}
               >
-                {anchor ? (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                    <Badge tone="gold" icon="star">Most popular</Badge>
-                  </div>
-                ) : null}
-
-                <div className="mb-1 flex items-center gap-2">
-                  <span className="text-[15px] font-bold text-ink">{plan.name}</span>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className={cn("kicker normal-case", anchor ? "text-white/70" : "text-faint")}>
+                    {plan.name}
+                  </span>
                   {isCurrent ? (
-                    <Badge tone="primary" icon="check-circle">
-                      {trialing ? "Trial" : "Current"}
-                    </Badge>
+                    anchor ? (
+                      <span className="inline-flex items-center gap-1 rounded-chip bg-white/15 px-2 py-0.5 text-[11px] font-semibold text-white">
+                        <Icon name="check-circle" size={12} />
+                        {trialing ? "Trial" : "Current"}
+                      </span>
+                    ) : (
+                      <Badge tone="primary" icon="check-circle">
+                        {trialing ? "Trial" : "Current"}
+                      </Badge>
+                    )
                   ) : null}
                 </div>
 
-                <div className="mb-2 flex items-end gap-1">
-                  <span className="text-[30px] font-extrabold tabular-nums text-ink">
+                <div className="flex items-baseline gap-1">
+                  <span
+                    className={cn(
+                      "font-extrabold tabular-nums tracking-tight leading-none text-[34px]",
+                      anchor ? "text-white" : "text-ink",
+                    )}
+                  >
                     {price === 0 ? "Free" : formatMoney(price, currency)}
                   </span>
                   {price === 0 ? null : (
-                    <span className="mb-1 text-[13px] text-faint">/mo</span>
+                    <span className={cn("text-[13px]", anchor ? "text-white/60" : "text-faint")}>
+                      /mo
+                    </span>
                   )}
                 </div>
-                <div className="mb-3 h-4 text-[12px] font-semibold text-primary">
+                <div
+                  className={cn(
+                    "mb-3 mt-1 h-4 text-[12px] font-semibold",
+                    anchor ? "text-[#8FE3CE]" : "text-primary",
+                  )}
+                >
                   {interval === "annual" && saving > 0
                     ? `Save ${formatMoney(saving, currency)}/yr`
                     : ""}
                 </div>
 
-                <p className="mb-4 text-[13px] text-sub">{plan.blurb}</p>
+                <p className={cn("mb-4 text-[13px]", anchor ? "text-white/70" : "text-sub")}>
+                  {planBlurb(id)}
+                </p>
 
                 <ul className="mb-5 flex-1 space-y-2">
                   {planHighlights(id).map((f) => (
-                    <li key={f} className="flex items-start gap-2 text-[13px] text-ink/90">
-                      <Icon name="check" size={16} className="mt-0.5 shrink-0 text-primary" />
+                    <li
+                      key={f}
+                      className={cn(
+                        "flex items-start gap-2 text-[13px]",
+                        anchor ? "text-white/90" : "text-ink/90",
+                      )}
+                    >
+                      <Icon
+                        name="check"
+                        size={16}
+                        className={cn("mt-0.5 shrink-0", anchor ? "text-[#8FE3CE]" : "text-primary")}
+                      />
                       {f}
                     </li>
                   ))}
@@ -273,6 +337,7 @@ export function BillingPanel({
                   isUpgrade={isUpgrade}
                   isFree={id === "free"}
                   anchor={anchor}
+                  onHero={anchor}
                   name={plan.name}
                   loading={busyId === id}
                   disabled={pending && busyId !== id}
@@ -288,6 +353,9 @@ export function BillingPanel({
           Prices in {currency}. Upgrades open secure Stripe checkout — you&apos;re only charged when you
           confirm there.
         </p>
+
+        {/* Optional side-by-side comparison — premium hairline ledger. */}
+        <PlanComparison interval={interval} currency={currency} />
       </div>
 
       {/* ── Manage & step-back ──────────────────────────────────────────── */}
@@ -439,45 +507,179 @@ export function BillingPanel({
   );
 }
 
-// ── Monthly ⇄ annual toggle ────────────────────────────────────────────────
+// ── Monthly ⇄ annual segmented pill toggle + quiet green save badge ─────────
 function IntervalToggle({
   value,
   onChange,
+  savePct,
 }: {
   value: "monthly" | "annual";
   onChange: (v: "monthly" | "annual") => void;
+  savePct: number;
 }) {
   return (
     <div
-      className="inline-flex items-center rounded-chip border border-hairline bg-card p-0.5 text-[13px] font-semibold"
+      className="inline-flex items-center gap-1 rounded-chip border border-hairline bg-primary-wash p-1 text-[13px] font-semibold"
       role="group"
       aria-label="Billing interval"
     >
-      {(["monthly", "annual"] as const).map((opt) => (
-        <button
-          key={opt}
-          type="button"
-          aria-pressed={value === opt}
-          onClick={() => onChange(opt)}
-          className={cn(
-            "rounded-chip px-3 py-1.5 transition-colors min-h-[36px]",
-            value === opt ? "bg-ink text-white" : "text-sub hover:text-ink",
-          )}
-        >
-          {opt === "monthly" ? "Monthly" : "Annual"}
-          {opt === "annual" ? (
-            <span
-              className={cn(
-                "ml-1 text-[11px] font-bold",
-                value === "annual" ? "text-gold" : "text-gold-deep",
-              )}
-            >
-              save
-            </span>
-          ) : null}
-        </button>
-      ))}
+      {(["monthly", "annual"] as const).map((opt) => {
+        const active = value === opt;
+        return (
+          <button
+            key={opt}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(opt)}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-chip px-3.5 py-1.5 transition-colors min-h-[36px]",
+              active ? "bg-card text-ink shadow-sm" : "text-sub hover:text-ink",
+            )}
+          >
+            {opt === "monthly" ? "Monthly" : "Annual"}
+            {opt === "annual" && savePct > 0 ? (
+              <Badge tone="primary" className="font-bold">
+                Save up to {savePct}%
+              </Badge>
+            ) : null}
+          </button>
+        );
+      })}
     </div>
+  );
+}
+
+// ── Optional plan comparison — premium hairline ledger ──────────────────────
+type CompRow = { key: string; label: string; cell: (id: PlanId) => React.ReactNode };
+
+function IncludedGlyph() {
+  return (
+    <span className="inline-flex items-center justify-center">
+      <Icon name="check" size={16} className="text-primary" aria-hidden />
+      <span className="sr-only">Included</span>
+    </span>
+  );
+}
+
+function ExcludedGlyph() {
+  return (
+    <span className="inline-flex items-center justify-center">
+      <span className="text-faint" aria-hidden>
+        —
+      </span>
+      <span className="sr-only">Not included</span>
+    </span>
+  );
+}
+
+function PlanComparison({
+  interval,
+  currency,
+}: {
+  interval: "monthly" | "annual";
+  currency: "USD" | "CAD";
+}) {
+  const priceFor = (id: PlanId) =>
+    interval === "annual" ? PLANS[id].priceAnnualMonthly : PLANS[id].priceMonthly;
+
+  const rows: CompRow[] = [
+    {
+      key: "ai_drafts_limit",
+      label: "AI drafts / month",
+      cell: (id) => (
+        <span className="tabular-nums">
+          {PLANS[id].limits.aiDraftsPerMonth === -1
+            ? "Unlimited"
+            : formatNumber(PLANS[id].limits.aiDraftsPerMonth)}
+        </span>
+      ),
+    },
+    {
+      key: "sms_limit",
+      label: "SMS credits / month",
+      cell: (id) =>
+        PLANS[id].limits.smsCredits > 0 ? (
+          <span className="tabular-nums">{formatNumber(PLANS[id].limits.smsCredits)}</span>
+        ) : (
+          <ExcludedGlyph />
+        ),
+    },
+    {
+      key: "locations",
+      label: "Locations",
+      cell: (id) => (
+        <span className="tabular-nums">
+          {PLANS[id].limits.locations > 1 ? `Up to ${PLANS[id].limits.locations}` : "1"}
+        </span>
+      ),
+    },
+    {
+      key: "seats",
+      label: "Team seats",
+      cell: (id) => <span className="tabular-nums">{formatNumber(PLANS[id].limits.seats)}</span>,
+    },
+    ...COMPARE_FEATURES.map((f) => ({
+      key: f,
+      label: FEATURE_LABEL[f],
+      cell: (id: PlanId) =>
+        PLANS[id].features.includes(f) ? <IncludedGlyph /> : <ExcludedGlyph />,
+    })),
+  ];
+
+  const columns: Column<CompRow>[] = [
+    {
+      key: "label",
+      header: "Plan",
+      width: "40%",
+      render: (row) => <span className="font-medium text-ink">{row.label}</span>,
+      cellClassName: "whitespace-normal",
+    },
+    ...PLAN_ORDER.map((id) => {
+      const anchor = !!PLANS[id].anchor;
+      const price = priceFor(id);
+      const col: Column<CompRow> = {
+        key: id,
+        align: "center",
+        ariaLabel: PLANS[id].name,
+        header: (
+          <div className="flex flex-col items-center gap-0.5">
+            <span>{PLANS[id].name}</span>
+            <span className="font-sans text-[14px] font-extrabold tabular-nums tracking-tight text-ink">
+              {price === 0 ? "Free" : formatMoney(price, currency)}
+            </span>
+          </div>
+        ),
+        render: (row) => row.cell(id),
+        headerClassName: anchor ? "bg-primary-wash" : undefined,
+        cellClassName: anchor ? "bg-primary-wash" : undefined,
+      };
+      return col;
+    }),
+  ];
+
+  return (
+    <details className="group mt-4">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-btn px-1 py-1 text-[13px] font-semibold text-primary hover:text-primary-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-paper">
+        <Icon
+          name="chevron-down"
+          size={16}
+          className="transition-transform group-open:rotate-180"
+          aria-hidden
+        />
+        Compare every plan
+      </summary>
+      <div className="mt-3">
+        <Table<CompRow>
+          columns={columns}
+          data={rows}
+          rowKey={(r) => r.key}
+          caption="Feature and limit comparison across every Foundly plan."
+        />
+        <p className="mt-2 text-[12px] text-faint">
+          Prices shown per month{interval === "annual" ? ", billed annually" : ""}, in {currency}.
+        </p>
+      </div>
+    </details>
   );
 }
 
@@ -487,6 +689,7 @@ function PlanCta({
   isUpgrade,
   isFree,
   anchor,
+  onHero,
   name,
   loading,
   disabled,
@@ -498,6 +701,7 @@ function PlanCta({
   isUpgrade: boolean;
   isFree: boolean;
   anchor: boolean;
+  onHero: boolean;
   name: string;
   loading: boolean;
   disabled: boolean;
@@ -507,7 +711,12 @@ function PlanCta({
 }) {
   if (isCurrent) {
     return (
-      <Button variant="secondary" fullWidth disabled>
+      <Button
+        variant="secondary"
+        fullWidth
+        disabled
+        className={onHero ? "!border-white/25 !bg-white/15 !text-white" : undefined}
+      >
         Current plan
       </Button>
     );
@@ -520,6 +729,11 @@ function PlanCta({
         loading={loading}
         disabled={disabled}
         onClick={onUpgrade}
+        className={
+          onHero
+            ? "!bg-white !text-primary-dark shadow-sm hover:!bg-white/90 active:!bg-white/90"
+            : undefined
+        }
       >
         {anchor ? `Choose ${name}` : `Upgrade to ${name}`}
       </Button>
@@ -534,7 +748,14 @@ function PlanCta({
     );
   }
   return (
-    <Button variant="ghost" fullWidth loading={loading} disabled={disabled} onClick={onSwitch}>
+    <Button
+      variant="ghost"
+      fullWidth
+      loading={loading}
+      disabled={disabled}
+      onClick={onSwitch}
+      className={onHero ? "!text-white hover:!bg-white/10 active:!bg-white/15" : undefined}
+    >
       Switch to {name}
     </Button>
   );
