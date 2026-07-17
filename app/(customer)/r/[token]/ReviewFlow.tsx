@@ -158,7 +158,7 @@ export function ReviewFlow({
           href={reviewUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-6 inline-flex min-h-[44px] items-center gap-2 rounded-btn border border-hairline bg-card px-5 py-3 text-[14px] font-semibold text-ink transition-colors hover:bg-primary-wash"
+          className="mt-6 inline-flex min-h-[44px] items-center gap-2 rounded-btn border border-hairline bg-card px-5 py-3 text-[14px] font-semibold text-ink transition-all hover:bg-primary-wash active:scale-[0.98]"
         >
           <Icon name="google" size={18} /> View on Google <Icon name="external" size={15} className="text-faint" />
         </a>
@@ -207,7 +207,7 @@ export function ReviewFlow({
           <button
             type="button"
             onClick={() => setStep("rate")}
-            className="inline-flex items-center gap-1 text-[13px] font-semibold text-sub transition-colors hover:text-ink"
+            className="-mx-1 inline-flex min-h-[44px] items-center gap-1 px-1 text-[13px] font-semibold text-sub transition-all hover:text-ink active:scale-[0.98]"
           >
             <Icon name="chevron-left" size={16} /> Back
           </button>
@@ -244,14 +244,14 @@ export function ReviewFlow({
           <button
             type="button"
             onClick={() => { setStep("attributes"); setCopied(false); }}
-            className="inline-flex items-center gap-1 text-[13px] font-semibold text-sub transition-colors hover:text-ink"
+            className="-mx-1 inline-flex min-h-[44px] items-center gap-1 px-1 text-[13px] font-semibold text-sub transition-all hover:text-ink active:scale-[0.98]"
           >
             <Icon name="chevron-left" size={16} /> Back
           </button>
           <ProgressRail current={2} total={3} />
         </div>
         <h1 className="text-[22px] font-extrabold text-ink">Pick your favourite</h1>
-        <p className="mt-1 text-[13px] text-sub">{MICROCOPY.aiDraftDisclaimer}</p>
+        <p className="mt-1 text-[13px] leading-relaxed text-sub">{MICROCOPY.aiDraftDisclaimer}</p>
         <div className="mt-4 space-y-3" role="radiogroup" aria-label="Choose a review draft">
           {drafts.map((d, i) => (
             <DraftCard
@@ -271,7 +271,7 @@ export function ReviewFlow({
             Try different wording
           </Button>
         </div>
-        <p className="mt-2 text-center text-[11px] text-faint">{MICROCOPY.noIncentive}</p>
+        <p className="mt-2 text-center text-[11px] leading-relaxed text-faint">{MICROCOPY.noIncentive}</p>
         {error ? <div className="mt-4"><Notice tone="danger" icon="alert">{error}</Notice></div> : null}
         {copied ? (
           <p className="mt-4 flex items-center justify-center gap-1.5 text-[13px] font-semibold text-primary animate-fade-in">
@@ -309,12 +309,12 @@ export function ReviewFlow({
           <button
             type="button"
             onClick={() => setStep("rate")}
-            className="mb-5 inline-flex items-center gap-1 self-start text-[13px] font-semibold text-sub transition-colors hover:text-ink"
+            className="-mx-1 mb-4 inline-flex min-h-[44px] items-center gap-1 self-start px-1 text-[13px] font-semibold text-sub transition-all hover:text-ink active:scale-[0.98]"
           >
             <Icon name="chevron-left" size={16} /> Back
           </button>
           <h1 className="text-[22px] font-extrabold leading-tight text-ink">{MICROCOPY.privateFeedbackHeader}</h1>
-          <p className="mt-1 text-[13px] text-sub">{MICROCOPY.privateFeedbackReassure}</p>
+          <p className="mt-2 text-[13px] leading-relaxed text-sub">{MICROCOPY.privateFeedbackReassure}</p>
           <div className="mt-4">
             <Textarea
               value={feedback}
@@ -325,21 +325,25 @@ export function ReviewFlow({
             />
           </div>
 
-          <div className="mt-4 flex items-start justify-between gap-3 rounded-card border border-hairline bg-card p-4">
+          {/* Consent gets its own breathing room — one clear opt-in, calmly framed. */}
+          <div className="mt-6 flex items-start justify-between gap-3 rounded-card border border-hairline bg-card p-4">
             <div className="min-w-0">
               <div className="text-[14px] font-semibold text-ink">The owner can contact me</div>
-              <div className="text-[12px] text-faint">Optional — so they can make it right.</div>
+              <div className="mt-0.5 text-[12px] leading-relaxed text-faint">Optional — so they can make it right.</div>
             </div>
             <Toggle checked={canContact} onChange={setCanContact} label="Allow the owner to contact me" />
           </div>
 
           {error ? <div className="mt-4"><Notice tone="danger" icon="alert">{error}</Notice></div> : null}
 
-          <Button className="mt-4" onClick={submitFeedback} loading={loading} disabled={!feedback.trim()} fullWidth size="lg" icon="send">
+          {/* Primary decision: the filled-green CTA. */}
+          <Button className="mt-6 active:scale-[0.98]" onClick={submitFeedback} loading={loading} disabled={!feedback.trim()} fullWidth size="lg" icon="send">
             Send private feedback
           </Button>
 
-          {/* COMPLIANCE: the public Google link is ALWAYS rendered here, never gated. */}
+          {/* COMPLIANCE: the public Google link is ALWAYS rendered here at full
+              parity — never gated, never sub-styled. It reads as a distinct link,
+              the primary above reads as the filled CTA. */}
           <div className="mt-5">
             <PublicGoogleReviewLink reviewUrl={reviewUrl} />
           </div>

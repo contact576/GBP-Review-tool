@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getData } from "@/lib/data";
 import { Card, CardHeader, EmptyState } from "@/components/ds";
 import { Icon, type IconName } from "@/components/icons";
@@ -26,7 +27,7 @@ export default async function StaffLeaderboardPage() {
   const gapToLead = me && leader ? leader.captures - me.captures : 0;
 
   return (
-    <div className="mx-auto w-full max-w-[540px] space-y-5 px-4 pb-28 pt-4">
+    <div className="relative mx-auto w-full max-w-[540px] space-y-5 px-4 pb-28 pt-4">
       <div>
         <h1 className="text-[22px] font-extrabold text-ink">Your stats</h1>
         <p className="text-[14px] text-sub">Every capture is a customer who felt seen.</p>
@@ -83,6 +84,17 @@ export default async function StaffLeaderboardPage() {
           <p className="py-4 text-center text-[13px] text-faint">No captures logged yet.</p>
         )}
       </Card>
+
+      {/* Floating Request/Capture FAB — one-tap back to the capture flow, clear
+          of the bottom tab row and the safe-area inset. Press feedback is CSS
+          only, so the global reduced-motion contract disables it automatically. */}
+      <Link
+        href="/staff"
+        aria-label="New capture"
+        className="fixed bottom-[calc(76px+env(safe-area-inset-bottom))] right-4 z-40 grid size-14 place-items-center rounded-full bg-primary text-white shadow-halo transition-all hover:bg-primary-dark active:scale-[0.95]"
+      >
+        <Icon name="plus" size={26} />
+      </Link>
     </div>
   );
 }

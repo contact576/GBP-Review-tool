@@ -23,18 +23,18 @@ export default async function ThanksPage({ params }: { params: Promise<{ token: 
       <h1 className="mt-6 text-[24px] font-extrabold leading-tight text-ink animate-slide-up">
         You just made {business}&apos;s day
       </h1>
-      <p className="mt-2 max-w-xs text-[14px] text-sub">
+      <p className="mt-2 max-w-xs text-[14px] leading-relaxed text-sub">
         Thanks for sharing your experience. Adding a photo to your review makes it even more helpful.
       </p>
       <a
         href={result?.location.reviewUrl ?? "#"}
         target="_blank"
         rel="noopener noreferrer"
-        className="mt-6 inline-flex min-h-[44px] items-center gap-2 rounded-btn border border-hairline bg-card px-5 py-3 text-[14px] font-semibold text-ink transition-colors hover:bg-primary-wash"
+        className="mt-6 inline-flex min-h-[44px] items-center gap-2 rounded-btn border border-hairline bg-card px-5 py-3 text-[14px] font-semibold text-ink transition-all hover:bg-primary-wash active:scale-[0.98]"
       >
         <Icon name="camera" size={18} /> Add a photo on Google
       </a>
-      <Link href="/" className="mt-4 text-[13px] text-faint underline underline-offset-2">
+      <Link href="/" className="mt-4 inline-flex min-h-[44px] items-center text-[13px] text-faint underline underline-offset-2 transition-all active:scale-[0.98]">
         Done
       </Link>
     </div>

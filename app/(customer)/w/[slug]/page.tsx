@@ -46,7 +46,7 @@ export default async function WidgetPage({ params }: { params: Promise<{ slug: s
               href={data.reviewUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex min-h-[36px] items-center gap-1.5 rounded-btn bg-primary px-3 text-[13px] font-semibold text-white hover:bg-primary-dark"
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-btn bg-primary px-4 text-[13px] font-semibold text-white transition-all hover:bg-primary-dark active:scale-[0.98]"
             >
               Leave a review
             </a>

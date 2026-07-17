@@ -216,7 +216,7 @@ export function CaptureForm({
           </div>
           <Link
             href="/staff/qr"
-            className="grid min-h-[44px] place-items-center rounded-card border border-hairline bg-card px-3 text-primary shadow-sm transition-colors hover:bg-primary-wash"
+            className="grid min-h-[44px] place-items-center rounded-card border border-hairline bg-card px-3 text-primary shadow-sm transition-all hover:bg-primary-wash active:scale-[0.98]"
             aria-label="Show kiosk QR"
           >
             <Icon name="qr" size={20} />
@@ -268,7 +268,7 @@ export function CaptureForm({
                 aria-pressed={channel === opt.key}
                 onClick={() => { setChannel(opt.key); setContactTouched(false); }}
                 className={cn(
-                  "flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-[10px] text-[14px] font-semibold transition-colors",
+                  "flex min-h-[52px] flex-1 items-center justify-center gap-1.5 rounded-[10px] text-[14px] font-semibold transition-all active:scale-[0.98]",
                   channel === opt.key ? "bg-primary text-white shadow-sm" : "text-sub hover:text-ink",
                 )}
               >
@@ -298,6 +298,7 @@ export function CaptureForm({
               autoComplete="off"
               enterKeyHint="done"
               iconLeft={channel === "email" ? "mail" : "phone"}
+              className="h-14 text-[16px]"
             />
           </Field>
         </div>
@@ -332,7 +333,7 @@ export function CaptureForm({
           />
           <Checkbox checked={marketingConsent} onChange={setMarketingConsent} label={labels.marketing} />
           {labels.casl ? (
-            <p className="flex items-start gap-1.5 border-t border-hairline pt-2 text-[12px] text-faint">
+            <p className="flex items-start gap-1.5 border-t border-hairline pt-2 text-[12px] leading-relaxed text-faint">
               <Icon name="flag" size={13} className="mt-0.5 shrink-0" />
               {labels.casl}
             </p>
