@@ -4,7 +4,7 @@ import { Badge, EmptyState } from "@/components/ds/misc";
 import { PageHeader } from "@/components/app/PageHeader";
 import { Icon, type IconName } from "@/components/icons";
 import { SubDial } from "@/components/charts/SubDial";
-import { TaskCard } from "@/components/app/TaskCard";
+import { ApproveCard } from "./ApproveCard";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
 import { formatRelative } from "@/lib/utils/format";
 import type { AuditLog } from "@/lib/data/types";
@@ -31,6 +31,10 @@ export default async function ThisWeekPage() {
 
   // Active tasks for the current week (skip snoozed).
   const tasks = data.tasks.filter((t) => t.status !== "snoozed");
+  const doneCount = tasks.filter((t) => t.status === "done" || t.status === "approved").length;
+
+  // Genuine, earned streak (real staff capture data) — the only gold moment here.
+  const topStreak = data.staff.reduce((best, s) => Math.max(best, s.streakDays), 0);
 
   // What's dragging profile health — pick the most actionable line.
   const missingDesc = Math.max(0, p.servicesTotal - p.servicesWithDescriptions);
@@ -85,11 +89,35 @@ export default async function ThisWeekPage() {
 
       {/* This week's tasks */}
       <Card>
-        <CardHeader title="This week's tasks" />
+        <CardHeader
+          title="This week's tasks"
+          action={
+            tasks.length ? (
+              <span className="inline-flex items-center gap-1.5 rounded-chip bg-primary-wash px-2.5 py-1 data-chip text-primary-dark">
+                <Icon name="check-circle" size={13} />
+                {doneCount} of {tasks.length} done
+              </span>
+            ) : null
+          }
+        />
+
+        {/* Rationed, genuine streak celebration — gold reserved for a real win. */}
+        {topStreak > 0 ? (
+          <div className="mb-3 flex items-center gap-2.5 rounded-btn border border-gold/30 bg-gold-tint/50 px-3 py-2.5">
+            <div className="grid size-8 shrink-0 place-items-center rounded-btn bg-gold text-ink">
+              <Icon name="flame" size={16} />
+            </div>
+            <p className="text-[13px] text-ink">
+              <span className="font-bold tabular-nums">{topStreak}-day</span> capture streak going across your
+              team — approve this week&apos;s moves to keep the momentum lit.
+            </p>
+          </div>
+        ) : null}
+
         {tasks.length ? (
           <div className="space-y-3">
             {tasks.map((t) => (
-              <TaskCard key={t.id} task={t} />
+              <ApproveCard key={t.id} task={t} />
             ))}
           </div>
         ) : (

@@ -105,18 +105,32 @@ export function CampaignComposer({
       </Card>
 
       {/* LAW-CRITICAL audience banner */}
-      <div className="rounded-card border border-primary/30 bg-primary-wash/70 p-4">
-        <div className="flex items-start gap-3">
-          <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-primary text-white">
-            <Icon name="users" size={20} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-[16px] font-bold text-ink">
-              Sending to {formatNumber(consented)} of {formatNumber(total)} who opted in to marketing
+      <div className="rounded-card border border-primary/30 bg-primary-wash/70 p-4 sm:p-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+          {/* Eligible audience as the hero figure — recomputed live. */}
+          <div className="flex shrink-0 items-center gap-4">
+            <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-primary text-white">
+              <Icon name="users" size={20} />
             </div>
-            <p className="text-[14px] text-sub">
+            <div>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-[34px] font-extrabold leading-none tabular-nums tracking-tight text-ink">
+                  {formatNumber(consented)}
+                </span>
+                <span className="text-[15px] font-semibold tabular-nums text-sub">/ {formatNumber(total)}</span>
+              </div>
+              <div className="kicker mt-1 normal-case">Eligible to receive this</div>
+            </div>
+          </div>
+          <div className="hidden h-12 w-px shrink-0 bg-primary/15 sm:block" />
+          <div className="min-w-0 flex-1">
+            <Badge tone="primary" icon="shield">Marketing consent required</Badge>
+            <p className="mt-1.5 text-[14px] text-sub">
               We only include customers with explicit marketing consent. This count updates before every send.
             </p>
+          </div>
+        </div>
+        <div className="mt-3 min-w-0">
             {audience.excluded.length ? (
               <button
                 type="button"
@@ -137,7 +151,6 @@ export function CampaignComposer({
                 ))}
               </ul>
             ) : null}
-          </div>
         </div>
       </div>
 

@@ -1,23 +1,32 @@
 import { getData } from "@/lib/data";
-import { Card, CardHeader } from "@/components/ds/Card";
+import { Card } from "@/components/ds/Card";
 import { EmptyState } from "@/components/ds/misc";
 import { PageHeader } from "@/components/app/PageHeader";
-import { Icon } from "@/components/icons";
+import { Icon, type IconName } from "@/components/icons";
+import { ProgressMeter } from "@/components/charts";
 import { ReferralCard } from "@/components/app/ReferralCard";
 import { ShareMilestone } from "./ShareMilestone";
+import { formatDate } from "@/lib/utils/format";
+import type { Milestone } from "@/lib/data/types";
+
+const KIND_ICON: Record<Milestone["kind"], IconName> = {
+  reviews_25: "star", reviews_50: "star", reviews_100: "trophy",
+  rating_4_8: "star-fill", velocity_2x: "trend", streak_10: "flame",
+};
 
 export default async function MilestonesPage() {
   const data = await getData();
-  const milestones = data.milestones ?? [];
   const location = data.location;
   const reviewCount = location.reviewCount;
+
+  // Timeline runs newest-first — most recent win at the top.
+  const milestones = [...(data.milestones ?? [])].sort(
+    (a, b) => new Date(b.achievedAt).getTime() - new Date(a.achievedAt).getTime(),
+  );
 
   // Next review milestone teaser.
   const tiers = [25, 50, 100];
   const nextTier = tiers.find((t) => reviewCount < t) ?? tiers[tiers.length - 1] ?? 50;
-  const prevTier = tiers.filter((t) => t <= reviewCount).pop() ?? 0;
-  const span = nextTier - prevTier || nextTier;
-  const progress = Math.min(100, Math.max(0, Math.round(((reviewCount - prevTier) / span) * 100)));
   const remaining = Math.max(0, nextTier - reviewCount);
 
   return (
@@ -25,10 +34,10 @@ export default async function MilestonesPage() {
       <PageHeader title="Milestones" sub="Real wins worth celebrating — and sharing." />
 
       {/* Next milestone teaser */}
-      <Card className="border-primary/30 bg-primary-wash/50">
+      <Card>
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
-            <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-gold text-hero">
+            <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-gold-tint text-gold-deep">
               <Icon name="trophy" size={20} />
             </div>
             <div>
@@ -40,28 +49,51 @@ export default async function MilestonesPage() {
               </p>
             </div>
           </div>
-          <span className="shrink-0 text-[13px] font-bold tabular-nums text-primary-dark">
+          <span className="shrink-0 data-chip font-semibold text-ink">
             {reviewCount}/{nextTier}
           </span>
         </div>
-        <div className="mt-3 h-2.5 w-full overflow-hidden rounded-full bg-white/70">
-          <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${progress}%` }} />
-        </div>
+        <ProgressMeter
+          className="mt-3"
+          value={reviewCount}
+          max={nextTier}
+          valueText={`${reviewCount} of ${nextTier} reviews toward the next milestone`}
+          showValue={false}
+        />
       </Card>
 
-      {/* Milestone grid */}
+      {/* Milestone timeline */}
       {milestones.length ? (
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-          {milestones.map((m) => (
-            <ShareMilestone
-              key={m.id}
-              milestone={m}
-              business={location.name}
-              rating={location.rating}
-              reviewCount={location.reviewCount}
-            />
-          ))}
-        </div>
+        <ol className="relative">
+          {milestones.map((m, i) => {
+            const isLast = i === milestones.length - 1;
+            return (
+              <li key={m.id} className="relative flex gap-4 sm:gap-5">
+                {/* Rail: node + connector */}
+                <div className="relative flex w-9 shrink-0 flex-col items-center">
+                  <div className="z-10 grid size-9 shrink-0 place-items-center rounded-full bg-hero text-gold ring-4 ring-paper">
+                    <Icon name={KIND_ICON[m.kind]} size={17} />
+                  </div>
+                  {!isLast ? <div className="w-px flex-1 bg-hairline" /> : null}
+                </div>
+
+                {/* Card + achieved date */}
+                <div className={isLast ? "min-w-0 flex-1" : "min-w-0 flex-1 pb-6"}>
+                  <div className="kicker mb-1.5 flex items-center gap-1.5 normal-case">
+                    <Icon name="check-circle" size={12} className="text-primary" />
+                    Achieved {formatDate(m.achievedAt)}
+                  </div>
+                  <ShareMilestone
+                    milestone={m}
+                    business={location.name}
+                    rating={location.rating}
+                    reviewCount={location.reviewCount}
+                  />
+                </div>
+              </li>
+            );
+          })}
+        </ol>
       ) : (
         <Card>
           <EmptyState

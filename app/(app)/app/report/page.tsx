@@ -1,12 +1,12 @@
 import { getData } from "@/lib/data";
-import { sinceJoined } from "@/lib/data/selectors";
+import { sinceJoined, sparklinePoints } from "@/lib/data/selectors";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge, Delta, EmptyState } from "@/components/ds/misc";
 import { PageHeader } from "@/components/app/PageHeader";
 import { Icon, type IconName } from "@/components/icons";
-import { SubDial } from "@/components/charts/SubDial";
+import { StatTile, LineArea, Donut, type LinePoint } from "@/components/charts";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
-import { formatDate, formatNumber } from "@/lib/utils/format";
+import { formatDate, formatNumber, formatShortDate } from "@/lib/utils/format";
 import { ReportActions } from "./ReportActions";
 
 export default async function ReportPage() {
@@ -28,11 +28,21 @@ export default async function ReportPage() {
   const bestNew = recent.find((r) => r.rating === 5) ?? recent[0];
   const repliesPosted = reviews.filter((r) => r.reply).length;
 
-  const stats: { label: string; icon: IconName; value: number; delta: number }[] = [
-    { label: MICROCOPY.foundYouLabel, icon: "eye", value: last?.foundYou ?? since.foundYou.now, delta: since.foundYou.delta },
-    { label: MICROCOPY.contactedYouLabel, icon: "phone", value: last?.contactedYou ?? since.contactedYou.now, delta: since.contactedYou.delta },
-    { label: MICROCOPY.newReviewsLabel, icon: "star", value: since.newReviews.now, delta: since.newReviews.delta },
+  const stats: { label: string; value: number; delta: number; spark: number[] }[] = [
+    { label: MICROCOPY.foundYouLabel, value: last?.foundYou ?? since.foundYou.now, delta: since.foundYou.delta, spark: sparklinePoints(metrics, "foundYou") },
+    { label: MICROCOPY.contactedYouLabel, value: last?.contactedYou ?? since.contactedYou.now, delta: since.contactedYou.delta, spark: sparklinePoints(metrics, "contactedYou") },
+    { label: MICROCOPY.newReviewsLabel, value: since.newReviews.now, delta: since.newReviews.delta, spark: sparklinePoints(metrics, "newReviews") },
   ];
+
+  // Score-movement trend (last 30 daily snapshots). Real values, gaps stay gaps.
+  const scoreTrend: LinePoint[] = metrics.slice(-30).map((m) => ({ label: m.date, value: m.growthScore }));
+  const scoreDelta = scoreEnd - scoreStart;
+
+  // Review mix by rating — a genuine part-of-whole (3 tiers), never fabricated.
+  const ratingMix = [5, 4, 3].map((star) => ({
+    label: `${star}-star`,
+    value: reviews.filter((r) => r.rating === star).length,
+  }));
 
   const foundleyDid = [
     `Sent ${data.subscription.usage.requestsSent} review requests on your behalf`,
@@ -56,8 +66,8 @@ export default async function ReportPage() {
 
       {/* Headline */}
       <Card raised as="section">
-        <div className="mb-1 text-[13px] font-bold text-sub">Headline</div>
-        <h2 className="text-[24px] font-extrabold leading-tight text-ink">
+        <div className="kicker mb-1.5">Your month in one line</div>
+        <h2 className="text-[24px] font-extrabold leading-tight tracking-tight text-ink">
           {report?.headline ?? "Your month at a glance"}
         </h2>
         <div className="mt-4">
@@ -72,52 +82,76 @@ export default async function ReportPage() {
         </div>
       </Card>
 
-      {/* Action stats */}
-      <section>
-        <div className="mb-2 text-[16px] font-bold text-ink">The three numbers that matter</div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {stats.map((s) => (
-            <div key={s.label} className="rounded-card border border-hairline bg-card p-4 shadow-sm">
-              <div className="flex items-center gap-2 text-sub">
-                <Icon name={s.icon} size={16} />
-                <span className="text-[13px] font-medium">{s.label}</span>
-              </div>
-              <div className="mt-2 text-[30px] font-extrabold leading-none tabular-nums text-ink">
-                {formatNumber(s.value)}
-              </div>
-              <div className="mt-1.5 flex items-center gap-1.5">
-                <Delta value={s.delta} />
-                <span className="text-[12px] text-faint">vs prev. 30 days</span>
-              </div>
-            </div>
+      {/* Action stats — boxless spec-cells with favourable-aware deltas + spark */}
+      <Card>
+        <CardHeader
+          kicker="Last 30 days"
+          title="The three numbers that matter"
+          action={<span className="hidden text-[13px] text-sub sm:inline">vs previous 30 days</span>}
+        />
+        <div className="grid grid-cols-1 divide-y divide-hairline sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+          {stats.map((s, i) => (
+            <StatTile
+              key={s.label}
+              boxless
+              className={
+                i === 0
+                  ? "py-4 first:pt-0 sm:px-5 sm:py-0 sm:first:pl-0"
+                  : i === stats.length - 1
+                    ? "py-4 last:pb-0 sm:px-5 sm:py-0 sm:last:pr-0"
+                    : "py-4 sm:px-5 sm:py-0"
+              }
+              label={s.label}
+              value={s.value}
+              delta={s.delta}
+              spark={s.spark}
+            />
           ))}
         </div>
-        <p className="mt-2 text-[12px] text-faint">{MICROCOPY.actionsNotCustomers}</p>
-      </section>
-
-      {/* Score movement */}
-      <Card>
-        <CardHeader title="Where your score moved" />
-        <div className="flex items-center justify-center gap-6 sm:gap-10">
-          <SubDial value={scoreStart} label="30 days ago" />
-          <Icon name="arrow-right" size={24} className="text-faint" />
-          <SubDial value={scoreEnd} label="Today" />
-          <div className="hidden sm:block">
-            <Delta value={scoreEnd - scoreStart} suffix=" pts" />
-          </div>
-        </div>
-        <div className="mt-3 text-center sm:hidden">
-          <Delta value={scoreEnd - scoreStart} suffix=" pts" />
-        </div>
+        <p className="mt-4 border-t border-hairline pt-3 text-[12px] text-faint">{MICROCOPY.actionsNotCustomers}</p>
       </Card>
 
-      {/* Review highlights */}
+      {/* Score movement — trend line with a value + signed-delta header */}
       <Card>
-        <CardHeader title="Review highlights" />
-        <div className="grid grid-cols-3 gap-3">
-          <Highlight value={since.newReviews.now} label="new reviews" icon="star" />
-          <Highlight value={repliesPosted} label="replies posted" icon="chat" />
-          <Highlight value={data.location.reviewCount} label="total reviews" icon="google" />
+        <CardHeader title="Where your score moved" />
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-[38px] font-extrabold leading-none tabular-nums tracking-tight text-ink">
+                {scoreEnd}
+              </span>
+              <Delta value={scoreDelta} suffix=" pts" />
+            </div>
+            <div className="kicker mt-1 normal-case">Local Growth Score today</div>
+          </div>
+          <span className="data-chip text-faint">
+            {scoreStart} → {scoreEnd} over 30 days
+          </span>
+        </div>
+        <LineArea
+          data={scoreTrend}
+          height={200}
+          title="Local Growth Score, last 30 days"
+          formatLabel={(s) => formatShortDate(s)}
+          formatValue={(n) => String(Math.round(n))}
+        />
+      </Card>
+
+      {/* Review mix — genuine part-of-whole by rating + the standout review */}
+      <Card>
+        <CardHeader title="Reviews this period" />
+        <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-center sm:gap-8">
+          <Donut
+            segments={ratingMix}
+            centerValue={data.location.reviewCount}
+            centerLabel="reviews"
+            title="Review mix by rating"
+          />
+          <div className="grid w-full flex-1 grid-cols-3 gap-3">
+            <Highlight value={since.newReviews.now} label="new reviews" icon="star" />
+            <Highlight value={repliesPosted} label="replies posted" icon="chat" />
+            <Highlight value={data.location.reviewCount} label="total reviews" icon="google" />
+          </div>
         </div>
         {bestNew ? (
           <figure className="mt-4 rounded-card border border-hairline bg-primary-wash/40 p-4">

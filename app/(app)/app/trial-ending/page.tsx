@@ -4,6 +4,7 @@ import { Card } from "@/components/ds/Card";
 import { Badge } from "@/components/ds/misc";
 import { LinkButton } from "@/components/ds/Button";
 import { Icon, type IconName } from "@/components/icons";
+import { StatTile } from "@/components/charts";
 import { Confetti } from "@/components/review/Confetti";
 import { formatMoney } from "@/lib/utils/format";
 
@@ -46,9 +47,9 @@ export default async function TrialEndingPage() {
             Your 14-day Growth trial is wrapping up. Here&apos;s the real progress you made — it&apos;s yours to keep.
           </p>
           <div className="mt-5 grid grid-cols-3 gap-3">
-            <Achieve value={`${reviewsCaptured}`} label="reviews captured" />
-            <Achieve value={score.delta >= 0 ? `+${score.delta}` : `${score.delta}`} label="Growth Score points" />
-            <Achieve value={`${requestsSent}`} label="requests sent" />
+            <StatTile onHero label="Reviews captured" value={reviewsCaptured} />
+            <StatTile onHero label="Growth Score points" value={score.delta >= 0 ? `+${score.delta}` : `${score.delta}`} />
+            <StatTile onHero label="Requests sent" value={requestsSent} />
           </div>
         </div>
       </div>
@@ -110,15 +111,6 @@ export default async function TrialEndingPage() {
       <div className="flex justify-center">
         <Badge tone="neutral" icon="shield">Your data and QR codes stay yours either way</Badge>
       </div>
-    </div>
-  );
-}
-
-function Achieve({ value, label }: { value: string; label: string }) {
-  return (
-    <div className="rounded-card bg-white/10 p-3 text-center backdrop-blur-sm">
-      <div className="text-[24px] font-extrabold leading-none tabular-nums text-white">{value}</div>
-      <div className="mt-1 text-[11px] text-white/70">{label}</div>
     </div>
   );
 }
