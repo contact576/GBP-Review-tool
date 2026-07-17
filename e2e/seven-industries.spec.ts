@@ -91,12 +91,15 @@ for (const s of SCENARIOS) {
     const customerName = `Casey ${s.business.split(" ")[0]}`;
     await captureCustomer(page, customerName, uniqueEmail(`cust-${s.industryKey}`));
 
-    // 3. The request shows up with a real status.
+    // 3. The request shows up in the desktop ledger with a real status + consent
+    //    basis. The requests list is the shared Table primitive at desktop width,
+    //    so each request is a semantic table row (customer · channel · consent ·
+    //    rating · sent · status); the consent basis renders as a "Service" badge.
     await page.goto("/app/requests");
-    const row = page.locator("div.rounded-card").filter({ hasText: customerName });
+    const row = page.getByRole("row").filter({ hasText: customerName });
     await expect(row).toBeVisible();
     await expect(row).toContainText("Sent");
-    await expect(row).toContainText("Service consent");
+    await expect(row).toContainText("Service");
 
     // 4. Studio exposes the location QR + short /q/ URL.
     const slug = await studioSlug(page);
