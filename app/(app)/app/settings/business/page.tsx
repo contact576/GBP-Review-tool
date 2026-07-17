@@ -1,11 +1,11 @@
 import { getData } from "@/lib/data";
-import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge } from "@/components/ds/misc";
-import { PageHeader } from "@/components/app/PageHeader";
 import { LinkButton } from "@/components/ds/Button";
+import { ProgressMeter } from "@/components/charts";
 import { Icon } from "@/components/icons";
 import { formatRelative } from "@/lib/utils/format";
-import { SettingsNav } from "../SettingsNav";
+import { SettingsShell } from "../SettingsShell";
+import { Callout, SettingsSection, SpecList, SpecRow } from "../SettingsUI";
 
 export default async function BusinessSettingsPage() {
   const data = await getData();
@@ -22,21 +22,17 @@ export default async function BusinessSettingsPage() {
   ];
 
   return (
-    <div className="space-y-5">
-      <PageHeader title="Settings" sub="Your business profile and how Foundly connects to Google." />
-
-      <SettingsNav />
-
-      {/* GBP connection status */}
-      <Card>
+    <SettingsShell title="Business" sub="Your business profile and how Foundly connects to Google.">
+      {/* GBP connection status — status row */}
+      <SettingsSection title="Google Business Profile">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
             <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-primary-tint text-primary-dark">
               <Icon name="google" size={20} />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[16px] font-bold text-ink">Google Business Profile</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[15px] font-bold text-ink">Business Profile sync</span>
                 {loc.gbpConnected ? (
                   <Badge tone="primary" icon="check-circle">Connected</Badge>
                 ) : (
@@ -61,46 +57,41 @@ export default async function BusinessSettingsPage() {
             View on Google
           </LinkButton>
         </div>
-      </Card>
+      </SettingsSection>
 
-      {/* Profile details */}
-      <Card>
-        <CardHeader
-          title="Business details"
-          action={<Badge tone="neutral">Synced from Google</Badge>}
-        />
-        <dl className="divide-y divide-hairline">
+      {/* Profile details — key/value spec rows */}
+      <SettingsSection
+        title="Business details"
+        action={<Badge tone="neutral">Synced from Google</Badge>}
+      >
+        <SpecList>
           {rows.map((row) => (
-            <div key={row.label} className="flex flex-col gap-1 py-3 sm:flex-row sm:items-baseline sm:gap-4">
-              <dt className="w-40 shrink-0 text-[12px] font-semibold uppercase tracking-wide text-faint">
-                {row.label}
-              </dt>
-              <dd className="text-[15px] text-ink">{row.value}</dd>
-            </div>
+            <SpecRow key={row.label} label={row.label}>
+              {row.value}
+            </SpecRow>
           ))}
-        </dl>
-        <p className="mt-3 flex items-center gap-1.5 text-[13px] text-faint">
-          <Icon name="lock" size={13} /> We never edit your business name — that would violate Google policy.
-        </p>
-      </Card>
+        </SpecList>
+        <Callout tone="info" icon="lock" className="mt-4">
+          We never edit your business name — that would violate Google policy.
+        </Callout>
+      </SettingsSection>
 
       {/* Profile completeness */}
-      <Card>
-        <CardHeader kicker="Profile health" title="Completeness" />
-        <div className="mb-4 flex items-center gap-3">
-          <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-primary-wash">
-            <div className="h-full rounded-full bg-primary" style={{ width: `${profile.completeness}%` }} />
-          </div>
-          <span className="text-[16px] font-bold tabular-nums text-ink">{profile.completeness}%</span>
-        </div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <SettingsSection kicker="Profile health" title="Completeness">
+        <ProgressMeter
+          value={profile.completeness}
+          max={100}
+          label="Profile completeness"
+          valueText={`${profile.completeness}%`}
+        />
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Stat label="Photos" value={profile.photoCount} />
           <Stat label="Posts" value={profile.postCount} />
           <Stat label="Q&A" value={profile.qnaCount} />
           <Stat label="Response rate" value={`${Math.round(profile.responseRate * 100)}%`} />
         </div>
-      </Card>
-    </div>
+      </SettingsSection>
+    </SettingsShell>
   );
 }
 

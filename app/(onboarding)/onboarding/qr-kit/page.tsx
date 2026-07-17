@@ -15,7 +15,6 @@ export default async function QrKitPage() {
   return (
     <Step
       current={5}
-      eyebrow="Step 5 of 7"
       title="Your QR kit is ready"
       subtitle="Print it for the front desk. Each scan starts a fresh review session — no app, no typing."
       continueHref="/onboarding/test-invite"

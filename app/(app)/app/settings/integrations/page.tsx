@@ -1,11 +1,10 @@
 import { getData } from "@/lib/data";
-import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge } from "@/components/ds/misc";
-import { PageHeader } from "@/components/app/PageHeader";
 import { Icon, type IconName } from "@/components/icons";
 import { formatRelative } from "@/lib/utils/format";
 import type { Integration } from "@/lib/data/types";
-import { SettingsNav } from "../SettingsNav";
+import { SettingsShell } from "../SettingsShell";
+import { Callout, SettingsSection } from "../SettingsUI";
 import { ReconnectButton } from "./ReconnectButton";
 import { SyncGoogleButton } from "@/components/app/SyncGoogleButton";
 
@@ -32,6 +31,12 @@ function tone(status: Integration["status"]): "primary" | "gold" | "danger" {
   return "danger";
 }
 
+function statusIcon(status: Integration["status"]): IconName {
+  if (status === "connected") return "check-circle";
+  if (status === "pending") return "clock";
+  return "alert";
+}
+
 function statusLabel(status: Integration["status"]): string {
   if (status === "connected") return "Connected";
   if (status === "pending") return "Pending";
@@ -44,30 +49,27 @@ export default async function IntegrationsSettingsPage() {
   const integrations = data.integrations ?? [];
 
   return (
-    <div className="space-y-5">
-      <PageHeader
-        title="Integrations"
-        sub={<>What&apos;s connected — and exactly what stops working if something drops.</>}
-      />
-
-      <SettingsNav />
-
-      <Card>
-        <CardHeader title="Sync your Google data" />
+    <SettingsShell
+      title="Integrations"
+      sub="What's connected — and exactly what stops working if something drops."
+    >
+      <SettingsSection title="Sync your Google data">
         <p className="mb-3 text-[14px] text-sub">
           Pulls your real rating, review count and recent reviews now. Your full history and
           performance import once your Business Profile connection is approved.
         </p>
         <SyncGoogleButton label="Sync from Google" />
-      </Card>
+      </SettingsSection>
 
-      <Card>
-        <CardHeader title="Providers" />
+      <SettingsSection title="Providers">
         <div className="divide-y divide-hairline">
           {integrations.map((int) => {
             const connected = int.status === "connected";
             return (
-              <div key={int.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div
+                key={int.id}
+                className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between"
+              >
                 <div className="flex items-start gap-3">
                   <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-primary-wash text-primary">
                     <Icon name={PROVIDER_ICON[int.provider]} size={20} />
@@ -75,7 +77,7 @@ export default async function IntegrationsSettingsPage() {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-[15px] font-bold text-ink">{int.label}</span>
-                      <Badge tone={tone(int.status)} icon={connected ? "check-circle" : int.status === "pending" ? "clock" : "alert"}>
+                      <Badge tone={tone(int.status)} icon={statusIcon(int.status)}>
                         {statusLabel(int.status)}
                       </Badge>
                     </div>
@@ -91,21 +93,19 @@ export default async function IntegrationsSettingsPage() {
                     ) : null}
                   </div>
                 </div>
-                <div className="shrink-0 sm:pl-3">
+                <div className="shrink-0 pl-[52px] sm:pl-3">
                   <ReconnectButton provider={int.provider} label={int.label} connected={connected} />
                 </div>
               </div>
             );
           })}
         </div>
-      </Card>
+      </SettingsSection>
 
-      <div className="flex items-start gap-2 rounded-card border border-hairline bg-primary-wash/40 p-3">
-        <Icon name="shield" size={16} className="mt-0.5 shrink-0 text-primary" />
-        <p className="text-[13px] text-sub">
-          Minimal access, no silent failures — you always see the exact consequence when a connection lapses.
-        </p>
-      </div>
-    </div>
+      <Callout tone="tip" icon="shield">
+        Minimal access, no silent failures — you always see the exact consequence when a connection
+        lapses.
+      </Callout>
+    </SettingsShell>
   );
 }

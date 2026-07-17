@@ -9,7 +9,7 @@ import { Wordmark } from "@/components/app/AppShell";
 export default function OnboardingLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-dvh bg-paper">
-      <header className="sticky top-0 z-20 flex items-center justify-between border-b border-hairline bg-paper/90 px-4 py-3 backdrop-blur">
+      <header className="sticky top-0 z-20 flex items-center justify-between border-b border-hairline bg-paper px-4 py-3">
         <Wordmark small />
         <Link
           href="/app"

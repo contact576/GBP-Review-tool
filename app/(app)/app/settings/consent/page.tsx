@@ -1,10 +1,9 @@
 import { getData } from "@/lib/data";
-import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge } from "@/components/ds/misc";
-import { PageHeader } from "@/components/app/PageHeader";
 import { Icon } from "@/components/icons";
 import { consentLabels } from "@/lib/compliance/consent";
-import { SettingsNav } from "../SettingsNav";
+import { SettingsShell } from "../SettingsShell";
+import { Callout, SettingsSection } from "../SettingsUI";
 import { ConsentConfig } from "./ConsentConfig";
 
 export default async function ConsentSettingsPage() {
@@ -20,55 +19,44 @@ export default async function ConsentSettingsPage() {
   };
 
   return (
-    <div className="space-y-5">
-      <PageHeader
-        title="Consent"
-        sub="Two separate permissions — service and marketing — captured honestly, never bundled."
-      />
-
-      <SettingsNav />
-
+    <SettingsShell
+      title="Consent"
+      sub="Two separate permissions — service and marketing — captured honestly, never bundled."
+    >
       {/* Configuration */}
-      <Card>
-        <CardHeader title="Consent rules" />
+      <SettingsSection title="Consent rules">
         <ConsentConfig settings={settings} isCanada={isCanada} />
-      </Card>
+      </SettingsSection>
 
       {/* Exact capture wording */}
-      <Card>
-        <CardHeader
-          kicker="What customers see"
-          title="Exact capture wording"
-          action={<Badge tone="neutral" icon="lock">Platform-controlled</Badge>}
-        />
+      <SettingsSection
+        kicker="What customers see"
+        title="Exact capture wording"
+        action={<Badge tone="neutral" icon="lock">Platform-controlled</Badge>}
+      >
         <div className="space-y-3">
           <WordingRow tag="Service" text={labels.service} />
           <WordingRow tag="Marketing" text={labels.marketing} optional />
           {labels.casl ? (
-            <div className="flex items-start gap-2 rounded-btn border border-primary/30 bg-primary-wash/50 p-3">
-              <Icon name="shield" size={16} className="mt-0.5 shrink-0 text-primary" />
-              <div>
-                <div className="text-[12px] font-semibold uppercase tracking-wide text-primary-dark">
-                  Canada · CASL
-                </div>
-                <p className="text-[14px] text-sub">{labels.casl}</p>
-              </div>
-            </div>
+            <Callout tone="tip" icon="shield" title="Canada · CASL">
+              {labels.casl}
+            </Callout>
           ) : null}
         </div>
         <p className="mt-3 text-[13px] text-faint">
-          This wording is fixed so the honesty and dual-consent stance survives every theme and white-label.
+          This wording is fixed so the honesty and dual-consent stance survives every theme and
+          white-label.
         </p>
-      </Card>
-    </div>
+      </SettingsSection>
+    </SettingsShell>
   );
 }
 
 function WordingRow({ tag, text, optional }: { tag: string; text: string; optional?: boolean }) {
   return (
-    <div className="rounded-btn border border-hairline p-3">
-      <div className="mb-1 flex items-center gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-faint">{tag} consent</span>
+    <div className="rounded-card border border-hairline p-3.5">
+      <div className="mb-1.5 flex items-center gap-2">
+        <span className="kicker normal-case">{tag} consent</span>
         {optional ? <Badge tone="sub">Optional</Badge> : <Badge tone="primary">Required</Badge>}
       </div>
       <div className="flex items-start gap-2">

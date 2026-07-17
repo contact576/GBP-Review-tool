@@ -6,9 +6,11 @@ import { PageHeader } from "@/components/app/PageHeader";
 import { Icon } from "@/components/icons";
 import { QrFrame } from "@/components/app/QrFrame";
 import { QrDownload } from "@/components/app/QrDownload";
+import { ProgressMeter, StatTile } from "@/components/charts";
 import { formatNumber } from "@/lib/utils/format";
 import { EmbedSnippet } from "./EmbedSnippet";
 import { PrintKitButton } from "./PrintKitButton";
+import { QrConfigurator } from "./QrConfigurator";
 
 export default async function StudioPage() {
   const data = await getData();
@@ -23,6 +25,10 @@ export default async function StudioPage() {
   const scanUrl = (slug: string) => `${base}/q/${slug}`;
   const shortUrl = (slug: string) => `${shortBase}/q/${slug}`;
 
+  const totalScans = qrAssets.reduce((sum, q) => sum + q.scans, 0);
+  const totalOpens = qrAssets.reduce((sum, q) => sum + q.pageOpens, 0);
+  const avgOpenRate = totalScans > 0 ? Math.round((totalOpens / totalScans) * 100) : 0;
+
   return (
     <>
       {/* Print: hide the app chrome so the kit sheet is the only printed output. */}
@@ -34,45 +40,26 @@ export default async function StudioPage() {
           sub="The tools that turn a happy visit into a review — printed, worn, and embedded."
         />
 
-        {/* Location QR hero */}
+        {/* Location QR — split configurator with a pinned live preview */}
         <Card raised>
-          <div className="grid grid-cols-1 items-center gap-5 sm:grid-cols-2">
-            <div>
-              <div className="mb-1 text-[13px] font-bold text-sub">Your clinic QR</div>
-              <h2 className="text-[18px] font-bold text-ink">One code, every counter</h2>
-              <p className="mt-1 text-[14px] text-sub">
-                Print it, stick it at reception, and let customers scan straight into your review
-                flow. Every scan opens a fresh session and counts below.
-              </p>
-              {locationQr ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Badge tone="primary" icon="qr">{formatNumber(locationQr.scans)} scans</Badge>
-                  <Badge tone="neutral" icon="eye">{formatNumber(locationQr.pageOpens)} page opens</Badge>
-                </div>
-              ) : null}
-            </div>
-            {locationQr ? (
-              <div className="space-y-3">
-                <QrFrame
-                  id="qr-svg-location"
-                  url={scanUrl(locationQr.slug)}
-                  title={locationQr.label}
-                  subtitle="Scan to leave us a quick review"
-                  shortUrl={shortUrl(locationQr.slug)}
-                />
-                <QrDownload
-                  svgContainerId="qr-svg-location"
-                  filename={`foundly-qr-${locationQr.slug}`}
-                />
-              </div>
-            ) : (
-              <EmptyState
-                icon="qr"
-                title="No location QR yet"
-                description="It'll appear here once your location QR is configured."
-              />
-            )}
-          </div>
+          {locationQr ? (
+            <QrConfigurator
+              scanUrl={scanUrl(locationQr.slug)}
+              shortUrl={shortUrl(locationQr.slug)}
+              title={locationQr.label}
+              subtitle="Scan to leave us a quick review"
+              svgId="qr-svg-location"
+              filename={`foundly-qr-${locationQr.slug}`}
+              scans={locationQr.scans}
+              pageOpens={locationQr.pageOpens}
+            />
+          ) : (
+            <EmptyState
+              icon="qr"
+              title="No location QR yet"
+              description="It'll appear here once your location QR is configured."
+            />
+          )}
         </Card>
 
         {/* Per-staff QR cards */}
@@ -151,13 +138,13 @@ export default async function StudioPage() {
           )}
         </Card>
 
-        {/* Website widget */}
+        {/* Website widget — light code well with format tabs */}
         <Card>
           <CardHeader
             title="Review widget embed"
             action={
               widget ? (
-                <span className="text-[13px] text-sub">
+                <span className="data-chip text-sub">
                   {formatNumber(widget.impressions)} views · {formatNumber(widget.clicks)} clicks
                 </span>
               ) : undefined
@@ -170,49 +157,55 @@ export default async function StudioPage() {
           />
         </Card>
 
-        {/* Degrade notice — trust signal */}
-        <Card className="border-primary/30 bg-primary-wash/50">
-          <div className="flex items-start gap-3">
-            <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-primary text-white">
-              <Icon name="shield" size={20} />
-            </div>
-            <div>
-              <div className="text-[16px] font-bold text-ink">Your codes never go dead</div>
-              <p className="mt-0.5 text-[14px] text-sub">
-                If your plan lapses, codes redirect to your public Google review page for 90 days.
-                No reprinting, no lock-in.
-              </p>
-            </div>
+        {/* Degrade notice — trust signal (semantic callout, line icon) */}
+        <div className="flex items-start gap-3 rounded-card border border-primary/25 bg-primary-wash/50 p-4">
+          <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-primary text-white">
+            <Icon name="shield" size={20} />
           </div>
-        </Card>
+          <div>
+            <div className="text-[16px] font-bold text-ink">Your codes never go dead</div>
+            <p className="mt-0.5 text-[14px] text-sub">
+              If your plan lapses, codes redirect to your public Google review page for 90 days.
+              No reprinting, no lock-in.
+            </p>
+          </div>
+        </div>
 
-        {/* Scan analytics */}
+        {/* Scan analytics — StatTiles + per-asset open-rate meters */}
         <Card>
           <CardHeader title="Scan analytics" />
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[420px] text-left text-[14px]">
-              <thead>
-                <tr className="border-b border-hairline text-faint">
-                  <th className="py-2 pr-4 font-medium">Asset</th>
-                  <th className="py-2 pr-4 font-medium">Scans</th>
-                  <th className="py-2 pr-4 font-medium">Page opens</th>
-                  <th className="py-2 font-medium">Open rate</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-hairline">
-                {qrAssets.map((qr) => (
-                  <tr key={qr.id}>
-                    <td className="py-2.5 pr-4 font-semibold text-ink">{qr.label}</td>
-                    <td className="py-2.5 pr-4 tabular-nums text-sub">{formatNumber(qr.scans)}</td>
-                    <td className="py-2.5 pr-4 tabular-nums text-sub">{formatNumber(qr.pageOpens)}</td>
-                    <td className="py-2.5 tabular-nums text-sub">
-                      {qr.scans > 0 ? Math.round((qr.pageOpens / qr.scans) * 100) : 0}%
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {qrAssets.length ? (
+            <>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <StatTile label="Total scans" value={totalScans} />
+                <StatTile label="Page opens" value={totalOpens} />
+                <StatTile label="Avg open rate" value={`${avgOpenRate}%`} />
+              </div>
+
+              <div className="mt-5 space-y-4">
+                <div className="kicker">Open rate by asset</div>
+                {qrAssets.map((qr) => {
+                  const rate = qr.scans > 0 ? Math.round((qr.pageOpens / qr.scans) * 100) : 0;
+                  return (
+                    <div key={qr.id}>
+                      <ProgressMeter
+                        value={rate}
+                        max={100}
+                        label={qr.label}
+                        valueText={`${formatNumber(qr.pageOpens)} of ${formatNumber(qr.scans)} · ${rate}%`}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <EmptyState
+              icon="chart"
+              title="No scans yet"
+              description="Scan counts appear here once your codes are in the wild."
+            />
+          )}
         </Card>
       </div>
 

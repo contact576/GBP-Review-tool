@@ -24,7 +24,6 @@ export default function TestInvitePage() {
   return (
     <Step
       current={6}
-      eyebrow="Step 6 of 7"
       title="Try your review page"
       subtitle="See exactly what your customers get before you send a real invite."
       continueHref="/onboarding/team"

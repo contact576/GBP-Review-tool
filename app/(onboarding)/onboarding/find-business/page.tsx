@@ -10,7 +10,6 @@ export default async function FindBusinessPage() {
   return (
     <Step
       current={1}
-      eyebrow="Step 1 of 7"
       title="Find your business on Google"
       subtitle={
         enabled
