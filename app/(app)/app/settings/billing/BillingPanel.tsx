@@ -137,7 +137,7 @@ export function BillingPanel({
   function checkout(id: PlanId) {
     setBusyId(id);
     startTransition(async () => {
-      const res = await startCheckoutAction("STRIPE_PRICE_" + id.toUpperCase());
+      const res = await startCheckoutAction(id, interval);
       setBusyId(null);
       if (res.ok) {
         window.location.href = res.url;
@@ -151,20 +151,36 @@ export function BillingPanel({
   function switchPlan(id: PlanId) {
     setBusyId(id);
     startTransition(async () => {
-      await changePlanAction(id);
+      const result = await changePlanAction(id);
       setBusyId(null);
-      toast(`Switched to ${PLANS[id].name}`, "success", "check-circle");
-      router.refresh();
+      if (result.ok) {
+        if ("url" in result) {
+          window.location.href = result.url;
+          return;
+        }
+        toast(`Switched to ${PLANS[id].name}`, "success", "check-circle");
+        router.refresh();
+      } else {
+        toast(result.message, "warning", "credit-card");
+      }
     });
   }
 
   function pausePlan() {
     setBusyId("pause");
     startTransition(async () => {
-      await pauseSubscriptionAction();
+      const result = await pauseSubscriptionAction();
       setBusyId(null);
-      toast("Plan paused — nothing is deleted", "info", "clock");
-      router.refresh();
+      if (result.ok) {
+        if ("url" in result) {
+          window.location.href = result.url;
+          return;
+        }
+        toast("Plan paused — nothing is deleted", "info", "clock");
+        router.refresh();
+      } else {
+        toast(result.message, "warning", "credit-card");
+      }
     });
   }
 
@@ -185,11 +201,19 @@ export function BillingPanel({
   function confirmDowngrade() {
     setBusyId("downgrade");
     startTransition(async () => {
-      await downgradeToFreeAction();
+      const result = await downgradeToFreeAction();
       setBusyId(null);
-      setConfirmOpen(false);
-      setDowngraded(true); // optimistic — the refresh reconciles the server view
-      router.refresh();
+      if (result.ok) {
+        if ("url" in result) {
+          window.location.href = result.url;
+          return;
+        }
+        setConfirmOpen(false);
+        setDowngraded(true);
+        router.refresh();
+      } else {
+        toast(result.message, "warning", "credit-card");
+      }
     });
   }
 

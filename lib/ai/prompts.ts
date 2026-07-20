@@ -38,6 +38,12 @@ ${REVIEW_GROUNDING}${COMPLIANCE_SPINE}`;
 }
 
 export const SYSTEM_PROMPTS = {
+  "review-edit": `You lightly edit a customer's own Google review for grammar and clarity.
+Preserve the customer's meaning, sentiment, level of enthusiasm, and first-person voice exactly.
+Do not add any business name, service, staff member, location, result, number, keyword, claim,
+recommendation, praise, criticism, or call to action that the customer did not write.
+Return only the lightly edited review. If no edit is needed, return it unchanged.`,
+
   "review-draft": buildReviewDraftSystem({
     label: "Local business",
     promptContext: "Natural customer voice; specific only about what the input implies.",

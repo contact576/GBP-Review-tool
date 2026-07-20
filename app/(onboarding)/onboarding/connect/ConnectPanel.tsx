@@ -19,8 +19,8 @@ const SCOPES: { icon: IconName; title: string; body: string }[] = [
   },
   {
     icon: "pencil",
-    title: "Publish approved edits",
-    body: "Update photos, services, and posts — only after you tap Approve.",
+    title: "Prepare profile improvements",
+    body: "Review suggested photos, services, posts, and replies before applying them in Google.",
   },
 ];
 
@@ -119,7 +119,7 @@ export function ConnectPanel({
 
       <div className="flex items-start gap-2 rounded-btn border border-hairline bg-card px-3 py-2.5 text-[12px] text-sub">
         <Icon name="shield" size={15} className="mt-0.5 shrink-0 text-primary" />
-        <span>{MICROCOPY.nameStuffBlocked}</span>
+        <span>{MICROCOPY.nameStuffBlocked} Profile suggestions are not published automatically yet.</span>
       </div>
     </div>
   );

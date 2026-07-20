@@ -23,7 +23,7 @@ const STEPS = [
   "Counting your reviews…",
   "Checking your rating trend…",
   "Comparing 3 nearby businesses…",
-  "Drafting a sample review…",
+  "Checking your review-request experience…",
 ];
 
 type Phase = "idle" | "scanning" | "done";
@@ -112,11 +112,7 @@ export function ScoreTool() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [completed, setCompleted] = useState(0);
   const [results, setResults] = useState<Results | null>(null);
-  const [sample, setSample] = useState<{ text: string; source: string; stars: number } | null>(null);
-  const [sampleLoading, setSampleLoading] = useState(false);
   const runRef = useRef(0);
-  // Latest computed growth score (state is stale inside timeout closures).
-  const scoreRef = useRef(0);
 
   // ── Compare-a-competitor state ──────────────────────────────
   const [compName, setCompName] = useState("");
@@ -124,34 +120,6 @@ export function ScoreTool() {
   const [comparing, setComparing] = useState(false);
   const [competitor, setCompetitor] = useState<Results | null>(null);
   const compRunRef = useRef(0);
-
-  async function loadSample(business: string, cat: string, myRun: number) {
-    setSampleLoading(true);
-    try {
-      // The sample's register must match the diagnosed profile band — a weak
-      // profile gets a measured 4-star sample, never glowing 5-star copy.
-      const band = scoreBand(scoreRef.current);
-      const standing = band === "high" ? "strong" : band === "mid" ? "average" : "weak";
-      const stars = standing === "strong" ? 5 : 4;
-      const res = await fetch("/api/ai/score-sample", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ business, category: cat, standing, rating: stars }),
-      });
-      const data: unknown = await res.json();
-      if (runRef.current !== myRun) return;
-      if (data && typeof data === "object" && "text" in data && typeof (data as { text: unknown }).text === "string") {
-        const d = data as { text: string; source?: string };
-        setSample({ text: d.text, source: d.source ?? "ai", stars });
-      } else {
-        setSample(null);
-      }
-    } catch {
-      if (runRef.current === myRun) setSample(null);
-    } finally {
-      if (runRef.current === myRun) setSampleLoading(false);
-    }
-  }
 
   // Real-data path: when a Places key is configured server-side, the lookup
   // returns the business's actual public rating/review count and the score is
@@ -176,7 +144,6 @@ export function ScoreTool() {
         const place = (data as { place: { rating?: unknown; reviewCount?: unknown } }).place;
         if (place && typeof place.rating === "number" && typeof place.reviewCount === "number") {
           const next = compute(business, cat, { rating: place.rating, reviewCount: place.reviewCount });
-          scoreRef.current = next.score.growth;
           setResults(next);
         }
       }
@@ -258,9 +225,7 @@ export function ScoreTool() {
     }
     setErr("");
     const res = compute(business, category);
-    scoreRef.current = res.score.growth;
     setResults(res);
-    setSample(null);
     // A fresh primary scan invalidates any prior head-to-head.
     setCompetitor(null);
     setCompErr("");
@@ -276,7 +241,6 @@ export function ScoreTool() {
     if (reduce) {
       setCompleted(STEPS.length);
       setPhase("done");
-      void loadSample(business, category, myRun);
       return;
     }
 
@@ -286,7 +250,6 @@ export function ScoreTool() {
       if (runRef.current !== myRun) return;
       if (n >= STEPS.length) {
         setPhase("done");
-        void loadSample(business, category, myRun);
         return;
       }
       setCompleted(n + 1);
@@ -469,53 +432,32 @@ export function ScoreTool() {
             ) : null}
           </Card>
 
-          {/* Magic block — AI sample review */}
+          {/* Policy-safe review request explanation */}
           <Card className="border-primary/30 bg-primary-wash/50">
             <div className="flex items-center gap-2">
               <div className="grid size-8 place-items-center rounded-btn bg-primary text-white">
-                <Icon name="sparkles" size={16} />
+                <Icon name="shield" size={16} />
               </div>
-              <Kicker>A review Foundly would draft for you</Kicker>
+              <Kicker>Authentic reviews, safely requested</Kicker>
             </div>
-            <figure className="mt-4 rounded-card border border-hairline bg-card p-5">
-              {(() => {
-                const stars = sample?.stars ?? (scoreBand(results.score.growth) === "high" ? 5 : 4);
-                return (
-                  <div className="flex gap-1 text-star" aria-label={`${stars === 5 ? "Five" : "Four"} stars`}>
-                    {Array.from({ length: stars }).map((_, i) => (
-                      <Icon key={i} name="star-fill" size={16} />
-                    ))}
-                  </div>
-                );
-              })()}
-              {sampleLoading ? (
-                <div className="mt-3 space-y-2" aria-live="polite">
-                  <div className="shimmer h-3.5 w-full rounded" />
-                  <div className="shimmer h-3.5 w-[92%] rounded" />
-                  <div className="shimmer h-3.5 w-[70%] rounded" />
-                </div>
-              ) : sample ? (
-                <blockquote className="mt-3 text-[15px] leading-relaxed text-ink">&ldquo;{sample.text}&rdquo;</blockquote>
-              ) : (
-                <p className="mt-3 text-[14px] text-sub">
-                  A happy customer would write about your {results.category.toLowerCase()} here — Foundly drafts
-                  the first version so it&apos;s ready to send.
-                </p>
-              )}
-              <figcaption className="mt-3 text-[12px] text-faint">
-                {MICROCOPY.aiDraftDisclaimer}
-              </figcaption>
-            </figure>
+            <div className="mt-4 rounded-card border border-hairline bg-card p-5">
+              <ul className="space-y-3 text-[13px] leading-relaxed text-sub">
+                <li className="flex items-start gap-2"><Icon name="check-circle" size={16} className="mt-0.5 shrink-0 text-primary" />The same Google review option appears for every rating.</li>
+                <li className="flex items-start gap-2"><Icon name="check-circle" size={16} className="mt-0.5 shrink-0 text-primary" />Customers write about their genuine experience in their own words.</li>
+                <li className="flex items-start gap-2"><Icon name="check-circle" size={16} className="mt-0.5 shrink-0 text-primary" />Optional editing only improves clarity and cannot add services, names, keywords, or claims.</li>
+              </ul>
+              <p className="mt-4 text-[12px] text-faint">{MICROCOPY.noIncentive}</p>
+            </div>
           </Card>
 
           {/* CTA */}
           <div className="on-hero rounded-card bg-hero px-6 py-8 text-center text-white shadow-lg">
             <h3 className="text-[22px] font-extrabold tracking-tight sm:text-[26px]">
-              Get reviews like this every week
+              Build a trustworthy review habit
             </h3>
             <p className="mx-auto mt-2 max-w-md text-[14px] text-white/75">
-              Start free and Foundly runs the whole loop — asks, drafts, and keeps your profile
-              climbing. No card for 14 days.
+              Start free and Foundly handles consent-aware requests, reminders, review monitoring,
+              and owner-reply suggestions. No card for 14 days.
             </p>
             <div className="mt-5">
               <LinkButton
@@ -525,7 +467,7 @@ export function ScoreTool() {
                 icon="sparkles"
                 className="border-transparent bg-white text-hero hover:bg-white/90"
               >
-                Start free — get reviews like this every week
+                Start free — improve your review process
               </LinkButton>
             </div>
           </div>

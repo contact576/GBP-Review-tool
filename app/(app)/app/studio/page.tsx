@@ -3,7 +3,7 @@ import { appUrl } from "@/lib/utils/app-url";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge, EmptyState } from "@/components/ds/misc";
 import { PageHeader } from "@/components/app/PageHeader";
-import { Icon } from "@/components/icons";
+import { Icon, type IconName } from "@/components/icons";
 import { QrFrame } from "@/components/app/QrFrame";
 import { QrDownload } from "@/components/app/QrDownload";
 import { ProgressMeter, StatTile } from "@/components/charts";
@@ -11,6 +11,12 @@ import { formatNumber } from "@/lib/utils/format";
 import { EmbedSnippet } from "./EmbedSnippet";
 import { PrintKitButton } from "./PrintKitButton";
 import { QrConfigurator } from "./QrConfigurator";
+import Image from "next/image";
+import Link from "next/link";
+import type { ProfileSuggestion } from "@/lib/data/types";
+import { isContentSuggestionPreview, suggestionToGenerationKind } from "@/lib/ai/content-studio";
+import { suggestionStatusLabel } from "@/lib/suggestions/inbox";
+import { ContentPreviewGenerator } from "./ContentPreviewGenerator";
 
 export default async function StudioPage() {
   const data = await getData();
@@ -21,6 +27,10 @@ export default async function StudioPage() {
   const staffQrs = qrAssets.filter((a) => a.scope === "staff");
   const widget = (data.widgets ?? [])[0];
   const staffById = new Map(data.staff.map((s) => [s.id, s]));
+  const contentSuggestions = (data.location.suggestionInbox ?? []).filter(
+    (suggestion) => suggestionToGenerationKind(suggestion) !== null && suggestion.status !== "dismissed" && suggestion.status !== "applied",
+  );
+  const openAiConnected = Boolean(process.env.OPENAI_API_KEY);
 
   const scanUrl = (slug: string) => `${base}/q/${slug}`;
   const shortUrl = (slug: string) => `${shortBase}/q/${slug}`;
@@ -35,6 +45,57 @@ export default async function StudioPage() {
       <style>{`@media print { aside, header, nav { display: none !important; } main { padding: 0 !important; } }`}</style>
 
       <div className="space-y-5 print:hidden">
+        <PageHeader
+          title="AI Content Studio"
+          sub="Turn verified business evidence into exact, approval-ready Google posts, owner replies, and profile copy."
+        />
+
+        <Card raised>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="grid size-11 shrink-0 place-items-center rounded-btn bg-primary text-white">
+                <Icon name="sparkles" size={21} />
+              </div>
+              <div>
+                <div className="kicker text-primary-dark">Evidence-grounded generation</div>
+                <h2 className="mt-1 text-[19px] font-extrabold tracking-[-0.02em] text-ink">Create the next local growth asset</h2>
+                <p className="mt-1 max-w-[68ch] text-[13px] leading-relaxed text-sub">
+                  Foundly uses confirmed Google profile facts and linked audit evidence. Website or social conflicts are excluded until the owner confirms them.
+                </p>
+              </div>
+            </div>
+            <Badge tone={openAiConnected ? "primary" : "gold"} icon={openAiConnected ? "check-circle" : "alert"}>
+              {openAiConnected ? "OpenAI connected" : "OpenAI setup required"}
+            </Badge>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <StudioGuardrail icon="shield" title="Verified facts only" text="Untrusted website and social text is treated as evidence, never as instructions." />
+            <StudioGuardrail icon="eye" title="Exact preview first" text="The final text and generated image are shown before approval." />
+            <StudioGuardrail icon="google" title="No automatic write" text="Generation prepares a draft; publishing remains a separate owner-approved action." />
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Content queue"
+            action={<Badge tone="neutral">{contentSuggestions.length} suggestions</Badge>}
+          />
+          {contentSuggestions.length ? (
+            <div className="space-y-4">
+              {contentSuggestions.map((suggestion) => (
+                <ContentSuggestionCard key={suggestion.id} suggestion={suggestion} openAiConnected={openAiConnected} />
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              icon="sparkles"
+              title="No content drafts are waiting"
+              description="Sync your Google Business Profile to refresh the audit and prepare the next evidence-backed idea."
+            />
+          )}
+        </Card>
+
+        <div className="border-t border-hairline pt-5" />
         <PageHeader
           title="QR & Widgets"
           sub="The tools that turn a happy visit into a review — printed, worn, and embedded."
@@ -251,5 +312,101 @@ export default async function StudioPage() {
         </section>
       ) : null}
     </>
+  );
+}
+
+function StudioGuardrail({ icon, title, text }: { icon: IconName; title: string; text: string }) {
+  return (
+    <div className="rounded-card border border-hairline bg-paper p-3">
+      <Icon name={icon} size={17} className="text-primary" />
+      <div className="mt-2 text-[13px] font-bold text-ink">{title}</div>
+      <p className="mt-0.5 text-[11px] leading-relaxed text-faint">{text}</p>
+    </div>
+  );
+}
+
+function ContentSuggestionCard({ suggestion, openAiConnected }: { suggestion: ProfileSuggestion; openAiConnected: boolean }) {
+  const preview = isContentSuggestionPreview(suggestion.proposedValue) ? suggestion.proposedValue : null;
+  const isPost = suggestion.kind === "local_post";
+  return (
+    <article id={suggestion.id} className="scroll-mt-24 overflow-hidden rounded-card border border-hairline bg-card">
+      <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.8fr)]">
+        <div className="p-4 sm:p-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="grid size-9 place-items-center rounded-btn bg-primary-tint text-primary-dark">
+              <Icon name={isPost ? "megaphone" : suggestion.kind === "owner_reply" ? "send" : "pencil"} size={17} />
+            </span>
+            <Badge tone="neutral">{suggestionStatusLabel(suggestion.status)}</Badge>
+            <Badge tone={suggestion.risk === "high" ? "gold" : "primary"}>{suggestion.risk} risk</Badge>
+          </div>
+          <h3 className="mt-3 text-[17px] font-extrabold tracking-[-0.015em] text-ink">{suggestion.title}</h3>
+          <p className="mt-1 text-[13px] leading-relaxed text-sub">{suggestion.rationale}</p>
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-faint">
+            <span className="data-chip rounded-chip bg-paper px-2 py-1">{suggestion.evidenceIds.length} linked evidence {suggestion.evidenceIds.length === 1 ? "fact" : "facts"}</span>
+            <span className="data-chip rounded-chip bg-paper px-2 py-1">Priority {suggestion.priorityScore}</span>
+          </div>
+
+          {preview ? (
+            <div className="mt-4 rounded-card border border-primary/20 bg-primary-wash/45 p-4">
+              {preview.headline ? <div className="text-[15px] font-bold text-ink">{preview.headline}</div> : null}
+              <p className="mt-1 whitespace-pre-wrap text-[13px] leading-relaxed text-sub">{preview.body}</p>
+              {preview.evidenceSummary.length ? (
+                <ul className="mt-3 space-y-1 border-t border-primary/15 pt-3">
+                  {preview.evidenceSummary.map((item) => (
+                    <li key={item} className="flex gap-2 text-[11px] text-faint">
+                      <Icon name="check" size={13} className="mt-0.5 shrink-0 text-primary" /> {item}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : (
+            <div className="mt-4 rounded-btn border border-dashed border-hairline bg-paper p-3 text-[12px] leading-relaxed text-sub">
+              {suggestion.blockers[0] ?? "Generate the exact draft before it can be approved."}
+            </div>
+          )}
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <ContentPreviewGenerator
+              suggestionId={suggestion.id}
+              regenerate={Boolean(preview)}
+              disabled={!openAiConnected}
+              includeImage={isPost}
+            />
+            {preview ? (
+              <Link href={`/app/this-week#${suggestion.id}`} className="inline-flex h-9 items-center gap-1.5 rounded-btn bg-primary-dark px-3 text-[12px] font-bold text-white">
+                Review approval <Icon name="arrow-right" size={14} />
+              </Link>
+            ) : null}
+            {!openAiConnected ? <span className="text-[11px] font-medium text-danger">Connect OpenAI to generate this preview.</span> : null}
+          </div>
+        </div>
+
+        <div className="relative min-h-[250px] border-t border-hairline bg-hero lg:border-l lg:border-t-0">
+          {preview?.image ? (
+            <Image
+              src={preview.image.src}
+              alt={preview.image.altText}
+              fill
+              unoptimized
+              sizes="(min-width: 1024px) 35vw, 100vw"
+              className="object-cover"
+            />
+          ) : (
+            <div className="absolute inset-0 grid place-items-center p-8 text-center text-white">
+              <div>
+                <span className="mx-auto grid size-12 place-items-center rounded-full bg-white/10 text-gold">
+                  <Icon name={isPost ? "camera" : "file"} size={22} />
+                </span>
+                <div className="mt-3 text-[14px] font-bold">{isPost ? "Original post image preview" : "Exact text preview"}</div>
+                <p className="mt-1 max-w-[28ch] text-[11px] leading-relaxed text-white/60">
+                  {isPost ? "The generated image is private until this draft is approved." : "This content type is text-only and uses no generated image."}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </article>
   );
 }

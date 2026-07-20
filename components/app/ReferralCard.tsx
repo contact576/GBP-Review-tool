@@ -1,110 +1,60 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card } from "@/components/ds/Card";
 import { Button } from "@/components/ds/Button";
+import { Badge } from "@/components/ds/misc";
 import { Icon } from "@/components/icons";
-import { useToast } from "@/components/ds/Toast";
+import type { ReferralSummary } from "@/lib/data/provider";
 
-/**
- * "Give a month, get a month" referral card. Self-contained: the referral code
- * lives in localStorage (stable per browser, generated on first view) so no
- * server action or data prop is needed. Copy writes the link to the clipboard;
- * where the Web Share API exists we also expose a native share affordance.
- */
-const REF_KEY = "foundly:referral-code";
-
-function readOrCreateRefCode(): string {
-  try {
-    const existing = window.localStorage.getItem(REF_KEY);
-    if (existing) return existing;
-    const code =
-      Math.random().toString(36).slice(2, 8) + Math.random().toString(36).slice(2, 4);
-    window.localStorage.setItem(REF_KEY, code);
-    return code;
-  } catch {
-    // Storage blocked (private mode) — fall back to an ephemeral code.
-    return Math.random().toString(36).slice(2, 10);
-  }
-}
-
-export function ReferralCard() {
-  const { toast } = useToast();
-  const [link, setLink] = useState("");
-  const [canShare, setCanShare] = useState(false);
-
-  // Build the link client-side (needs window.location.origin) after mount to
-  // keep server/client markup identical during hydration.
-  useEffect(() => {
-    const code = readOrCreateRefCode();
-    setLink(`${window.location.origin}/sign-up?ref=${code}`);
-    setCanShare(typeof navigator !== "undefined" && typeof navigator.share === "function");
-  }, []);
-
-  async function copy() {
-    if (!link) return;
-    try {
-      await navigator.clipboard.writeText(link);
-      toast("Copied", "success", "copy");
-    } catch {
-      toast("Couldn't copy — select and copy the link", "warning", "alert");
-    }
-  }
-
+export function ReferralCard({ link, summary }: { link: string; summary: ReferralSummary }) {
+  const [copied, setCopied] = useState(false);
   async function share() {
-    if (!link) return;
-    if (typeof navigator.share === "function") {
-      try {
-        await navigator.share({
-          title: "Foundly",
-          text: "Give a month, get a month — try Foundly with my link.",
-          url: link,
-        });
-      } catch {
-        // Share sheet dismissed — nothing to report.
-      }
+    const text = "Try Foundly for local reviews and Google Business Profile growth.";
+    if (navigator.share) {
+      await navigator.share({ title: "Foundly", text, url: link }).catch(() => undefined);
       return;
     }
-    // No native share available — fall back to the clipboard.
-    void copy();
+    await navigator.clipboard.writeText(link);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1_500);
   }
-
   return (
     <Card className="border-gold/30 bg-gold-tint/40">
-      <div className="flex items-start gap-3">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
         <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-gold text-ink">
           <Icon name="gift" size={20} />
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="text-[16px] font-bold text-ink">Give a month, get a month</h2>
-          <p className="mt-0.5 text-[14px] text-sub">
-            Share Foundly with another local business. When they subscribe, you each get a free
-            month.
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-[16px] font-bold text-ink">Referral rewards</h2>
+            <Badge tone="gold">$50 invoice credit</Badge>
+          </div>
+          <p className="mt-1 max-w-[68ch] text-[14px] text-sub">
+            Share your private link. When a referred business starts a paid plan, Stripe applies a $50 credit to your next invoice automatically.
           </p>
-
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="min-w-0 flex-1 truncate rounded-btn border border-hairline bg-card px-3 py-2 font-mono text-[13px] text-sub">
-              {link || "Generating your link…"}
-            </div>
-            <div className="flex shrink-0 gap-2">
-              <Button variant="gold" size="sm" icon="copy" onClick={copy} disabled={!link}>
-                Copy
-              </Button>
-              {canShare ? (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  icon="external"
-                  onClick={share}
-                  disabled={!link}
-                >
-                  Share
-                </Button>
-              ) : null}
-            </div>
+          <div className="mt-3 grid max-w-lg grid-cols-3 gap-2">
+            <Stat label="Signed up" value={summary.signedUp} />
+            <Stat label="Qualified" value={summary.qualified} />
+            <Stat label="Applied" value={`$${summary.creditsApplied}`} />
+          </div>
+          {summary.pendingCredits > 0 ? (
+            <p className="mt-2 text-[12px] font-semibold text-gold-deep">
+              ${summary.pendingCredits} is waiting for Stripe customer billing details.
+            </p>
+          ) : null}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button variant="secondary" size="sm" icon={copied ? "check" : "send"} onClick={share}>
+              {copied ? "Link copied" : "Share referral link"}
+            </Button>
+            <code className="max-w-full truncate rounded-btn border border-hairline bg-card px-2.5 py-2 text-[11px] text-sub">{link}</code>
           </div>
         </div>
       </div>
     </Card>
   );
+}
+
+function Stat({ label, value }: { label: string; value: string | number }) {
+  return <div className="rounded-btn border border-gold/20 bg-card/70 px-3 py-2"><div className="text-[18px] font-extrabold tabular-nums text-ink">{value}</div><div className="text-[10px] font-semibold uppercase tracking-wide text-faint">{label}</div></div>;
 }

@@ -8,7 +8,7 @@ import { resetDemoAction } from "@/lib/actions";
 import type { Customer } from "@/lib/data/types";
 
 /** Data-portability + demo-control actions for billing. */
-export function BillingActions({ customers }: { customers: Customer[] }) {
+export function BillingActions({ customers, isDemo }: { customers: Customer[]; isDemo: boolean }) {
   const { toast } = useToast();
   const [pending, startTransition] = useTransition();
   const [resetting, setResetting] = useState(false);
@@ -33,9 +33,11 @@ export function BillingActions({ customers }: { customers: Customer[] }) {
       <Button variant="secondary" icon="download" onClick={exportCsv}>
         Export customer CSV
       </Button>
-      <Button variant="ghost" icon="refresh" onClick={resetDemo} loading={resetting || pending}>
-        Reset demo data
-      </Button>
+      {isDemo ? (
+        <Button variant="ghost" icon="refresh" onClick={resetDemo} loading={resetting || pending}>
+          Reset demo data
+        </Button>
+      ) : null}
     </div>
   );
 }

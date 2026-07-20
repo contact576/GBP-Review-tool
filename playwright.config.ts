@@ -1,3 +1,4 @@
+import path from "node:path";
 import { defineConfig } from "@playwright/test";
 
 /**
@@ -9,17 +10,16 @@ import { defineConfig } from "@playwright/test";
  *   review flow (the phone-first surface).
  * - workers=2 with fullyParallel=false: files run in parallel, tests within a
  *   file run serially — avoids demo-workspace write races.
- * - Chromium is preinstalled; the pinned Playwright revision (1228) is not on
- *   disk, so we point at the provided binary explicitly.
+ * - Uses Playwright's installed Chromium by default. Developers can set
+ *   PLAYWRIGHT_CHROMIUM_PATH when they intentionally use a system browser.
  */
 
-const CHROMIUM =
-  process.env.PLAYWRIGHT_CHROMIUM_PATH || "/opt/pw-browsers/chromium";
+const browserPath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+const startCommand = "npm run start -- --port 3200";
 
 export default defineConfig({
   testDir: "e2e",
-  outputDir:
-    "/tmp/claude-0/-home-user-GBP-Review-tool/52646828-c49a-5e91-af0f-951c89cb31ad/scratchpad/test-results",
+  outputDir: path.resolve("test-results"),
   fullyParallel: false,
   workers: 2,
   retries: 1,
@@ -28,7 +28,7 @@ export default defineConfig({
   reporter: [["list"], ["line"]],
   use: {
     baseURL: "http://localhost:3200",
-    launchOptions: { executablePath: CHROMIUM },
+    launchOptions: browserPath ? { executablePath: browserPath } : undefined,
     screenshot: "only-on-failure",
   },
   projects: [
@@ -47,9 +47,14 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "PORT=3200 npm run start",
+    command: startCommand,
     port: 3200,
     reuseExistingServer: true,
     timeout: 120_000,
+    env: {
+      AUTH_SECRET: process.env.AUTH_SECRET || "foundly-e2e-auth-secret-not-for-production",
+      ENCRYPTION_SECRET:
+        process.env.ENCRYPTION_SECRET || "foundly-e2e-encryption-secret-not-for-production",
+    },
   },
 });

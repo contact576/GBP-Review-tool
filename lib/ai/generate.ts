@@ -18,6 +18,10 @@ import {
   type ScoreSampleInput,
 } from "./fallbacks";
 import { runLints, type LintContext } from "@/lib/compliance/lints";
+import {
+  checkFaithfulReviewEdit,
+  normalizeCustomerReviewText,
+} from "@/lib/compliance/review-assistance";
 import type { DraftVariant } from "@/lib/data/types";
 
 export type AiSource = "ai" | "template";
@@ -33,6 +37,38 @@ function splitVariants(raw: string): string[] {
     .split(/\n?---+\n?/)
     .map((s) => s.replace(/^\d+[.)]\s*/, "").trim())
     .filter(Boolean);
+}
+
+/**
+ * Customer review assistance is editing, never authorship. The original text
+ * is the only fact source and materially expanded output is discarded.
+ */
+export async function improveCustomerReviewText(input: {
+  text: string;
+}): Promise<{ suggestion: string; source: "ai" | "customer"; changed: boolean }> {
+  const original = normalizeCustomerReviewText(input.text).slice(0, 2_000);
+  if (!original || !hasAiKey()) {
+    return { suggestion: original, source: "customer", changed: false };
+  }
+
+  const raw = await completeText({
+    model: getModel(),
+    system: SYSTEM_PROMPTS["review-edit"],
+    user: `Customer's own review:\n${original}`,
+    maxTokens: 450,
+  });
+  const candidate = normalizeCustomerReviewText(
+    (raw ?? "").replace(/^(["“])|(["”])$/g, ""),
+  ).slice(0, 2_000);
+  const faithful = checkFaithfulReviewEdit(original, candidate);
+  if (!candidate || !faithful.ok) {
+    return { suggestion: original, source: "customer", changed: false };
+  }
+  return {
+    suggestion: candidate,
+    source: "ai",
+    changed: candidate !== original,
+  };
 }
 
 // ── Review drafts (3 variants) ──────────────────────────────

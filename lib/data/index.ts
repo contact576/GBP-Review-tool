@@ -83,6 +83,14 @@ export async function getSessionAndData(): Promise<{ session: Session; data: Fou
   return { session, data };
 }
 
+/** Live agency rollup, refreshed from each isolated client workspace. */
+export async function getAgencyClients(): Promise<FoundlyData["agency"]["clients"]> {
+  const session = await getSession();
+  if (!session) redirect("/sign-in");
+  const provider = await getProviderFor(session);
+  return provider.listAgencyClients(session.workspaceId);
+}
+
 /** Public token lookup across stores (customer review flow — no session). */
 export async function findRequestByToken(token: string): Promise<
   | {
@@ -91,6 +99,7 @@ export async function findRequestByToken(token: string): Promise<
       staffName?: string;
       /** First service captured on the customer (staff-captured requests). */
       serviceHint?: string;
+      industryKey?: string;
     }
   | null
 > {
@@ -104,6 +113,7 @@ export async function findRequestByToken(token: string): Promise<
         ...result,
         staffName: staff?.displayName.split(/\s+/)[0],
         serviceHint: customer?.services[0],
+        industryKey: data?.workspace.vertical,
       };
     }
   }

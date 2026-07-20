@@ -6,7 +6,6 @@ import { PageHeader } from "@/components/app/PageHeader";
 import { Icon, type IconName } from "@/components/icons";
 import { Funnel } from "@/components/charts";
 import { formatNumber } from "@/lib/utils/format";
-import { CampaignToggle } from "./CampaignToggle";
 import type { Campaign, Channel } from "@/lib/data/types";
 
 const CHANNEL_ICON: Record<Channel, IconName> = {
@@ -25,7 +24,7 @@ export default async function CampaignsPage() {
     <div className="space-y-5">
       <PageHeader
         title="Campaigns"
-        sub="Consent-safe automations that keep customers coming back."
+        sub="Prepare consent-safe campaign drafts. Delivery is not connected yet."
         actions={<LinkButton href="/app/campaigns/new" icon="plus">New campaign</LinkButton>}
       />
 
@@ -35,7 +34,7 @@ export default async function CampaignsPage() {
           <SectionHeader
             icon="refresh"
             title="Automations"
-            sub="Always-on rules that send on their own. Toggle any rule off and it stops immediately."
+            sub="Saved automation concepts. They do not send until delivery is connected."
           />
           <div className="space-y-4">
             {automations.map((c) => (
@@ -51,7 +50,7 @@ export default async function CampaignsPage() {
           <SectionHeader
             icon="send"
             title="One-off campaigns"
-            sub="Individual sends to a consented audience."
+            sub="Drafts for a consented audience."
           />
           <div className="space-y-4">
             {oneOff.map((c) => (
@@ -138,7 +137,7 @@ function CampaignCard({ c }: { c: Campaign }) {
           <p className="mt-1 text-[14px] text-sub">{c.body}</p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
-          <CampaignToggle id={c.id} name={c.name} initialActive={c.status === "active"} />
+          <Badge tone="neutral" icon="clock">Delivery offline</Badge>
           <div className="flex items-center gap-1 text-[12px] text-faint">
             <Icon name={CHANNEL_ICON[c.channel]} size={14} />
             <span className="capitalize">{c.channel}</span>
@@ -151,7 +150,7 @@ function CampaignCard({ c }: { c: Campaign }) {
         <div className="mt-3 flex items-start gap-2 rounded-btn border border-hairline bg-paper px-3 py-2">
           <Icon name="shield" size={14} className="mt-0.5 shrink-0 text-primary" />
           <p className="text-[13px] text-sub">
-            Sending to <span className="font-semibold tabular-nums text-ink">{formatNumber(c.audienceConsented)}</span> of{" "}
+            Audience includes <span className="font-semibold tabular-nums text-ink">{formatNumber(c.audienceConsented)}</span> of{" "}
             <span className="font-semibold tabular-nums text-ink">{formatNumber(c.audienceTotal)}</span> eligible (opted in to{" "}
             {basisLabel})
           </p>

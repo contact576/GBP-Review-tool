@@ -16,9 +16,20 @@ export interface SessionClaims {
 }
 
 const FALLBACK_SECRET = "foundly-dev-secret-set-AUTH_SECRET-in-production";
+const SESSION_ROLES = new Set<SessionClaims["role"]>([
+  "owner",
+  "manager",
+  "staff",
+  "agency_admin",
+  "platform_admin",
+]);
 
 function secretKey(): Uint8Array {
-  return new TextEncoder().encode(process.env.AUTH_SECRET || FALLBACK_SECRET);
+  const configured = process.env.AUTH_SECRET;
+  if (process.env.NODE_ENV === "production" && !configured) {
+    throw new Error("AUTH_SECRET is required in production");
+  }
+  return new TextEncoder().encode(configured || FALLBACK_SECRET);
 }
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
@@ -37,7 +48,8 @@ export async function verifySession(token: string): Promise<SessionClaims | null
     if (
       typeof payload.userId !== "string" ||
       typeof payload.workspaceId !== "string" ||
-      typeof payload.role !== "string"
+      typeof payload.role !== "string" ||
+      !SESSION_ROLES.has(payload.role as SessionClaims["role"])
     ) {
       return null;
     }

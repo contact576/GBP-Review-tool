@@ -1,7 +1,8 @@
-import { getData } from "@/lib/data";
+import { getAgencyClients, getSessionAndData } from "@/lib/data";
 import type { PlanTier } from "@/lib/data/types";
 import { PageHeader } from "@/components/app/PageHeader";
 import { ClientBook } from "./ClientBook";
+import { AddAgencyClient } from "./AddAgencyClient";
 
 const PLAN_LABELS: Record<PlanTier, string> = {
   free: "Free",
@@ -13,7 +14,7 @@ const PLAN_LABELS: Record<PlanTier, string> = {
 };
 
 export default async function ClientBookPage() {
-  const data = await getData();
+  const [{ data, session }, clients] = await Promise.all([getSessionAndData(), getAgencyClients()]);
 
   return (
     <div className="space-y-5">
@@ -21,8 +22,8 @@ export default async function ClientBookPage() {
         title="Client book"
         sub={`Sort, search, and open any location you manage under ${data.agency.whiteLabel.brandName}.`}
       />
-
-      <ClientBook clients={data.agency.clients} plans={PLAN_LABELS} />
+      <AddAgencyClient enabled={!session.isDemo} />
+      <ClientBook clients={clients} plans={PLAN_LABELS} />
     </div>
   );
 }

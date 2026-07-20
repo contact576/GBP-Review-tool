@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getData } from "@/lib/data";
+import { getAgencyClients, getData } from "@/lib/data";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { LinkButton } from "@/components/ds/Button";
 import { Badge } from "@/components/ds/misc";
@@ -13,9 +13,9 @@ import { ClientActions } from "./ClientActions";
 
 export default async function AgencyClientPage({ params }: { params: Promise<{ clientId: string }> }) {
   const { clientId } = await params;
-  const data = await getData();
+  const [data, clients] = await Promise.all([getData(), getAgencyClients()]);
   const wl = data.agency.whiteLabel;
-  const client = data.agency.clients.find((c) => c.locationId === clientId);
+  const client = clients.find((c) => c.locationId === clientId);
   if (!client) notFound();
 
   return (
@@ -64,7 +64,11 @@ export default async function AgencyClientPage({ params }: { params: Promise<{ c
 
           <Card className="mt-4">
             <CardHeader kicker="Deliverables" title="Manage this client" />
-            <ClientActions brandName={wl.brandName} />
+            <ClientActions
+              brandName={wl.brandName}
+              clientId={client.locationId}
+              contactEmail={client.contactEmail}
+            />
             <div className="mt-4 flex items-center gap-2 rounded-btn bg-primary-wash p-3 text-[12px] text-sub">
               <Icon name="clock" size={16} className="shrink-0 text-primary" />
               <span>

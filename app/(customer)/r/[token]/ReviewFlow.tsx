@@ -3,21 +3,23 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
-import { Chip, ProgressRail } from "@/components/ds/misc";
+import { ProgressRail } from "@/components/ds/misc";
 import { Textarea, Toggle } from "@/components/ds/form";
 import { Button } from "@/components/ds/Button";
 import { StarSelector } from "@/components/review/StarSelector";
-import { DraftCard } from "@/components/review/DraftCard";
-import { MegaCTA } from "@/components/review/MegaCTA";
 import { PublicGoogleReviewLink } from "@/components/review/PublicGoogleReviewLink";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
 import { advanceRequestAction, submitPrivateFeedbackAction } from "@/lib/actions";
-import type { DraftVariant, RequestStatus } from "@/lib/data/types";
+import type { RequestStatus } from "@/lib/data/types";
 
-type Step = "rate" | "attributes" | "drafts" | "feedback";
+type Step = "rate" | "write" | "feedback";
+type Rating = 1 | 2 | 3 | 4 | 5;
 
-/** Slim status bar for offline / error states — keeps the flow honest, no dead ends. */
-function Notice({ tone, icon, children }: { tone: "warning" | "danger"; icon: "clock" | "alert"; children: React.ReactNode }) {
+function Notice({ tone, icon, children }: {
+  tone: "warning" | "danger";
+  icon: "clock" | "alert";
+  children: React.ReactNode;
+}) {
   return (
     <div
       role="status"
@@ -33,31 +35,52 @@ function Notice({ tone, icon, children }: { tone: "warning" | "danger"; icon: "c
   );
 }
 
+interface ReviewFlowProps {
+  token: string;
+  business: string;
+  category: string;
+  industryKey?: string;
+  service?: string;
+  reviewUrl: string;
+  staffName?: string;
+  attributeSeeds: string[];
+  initialStatus?: RequestStatus;
+  initialRating?: Rating;
+}
+
+/**
+ * Policy-critical customer experience:
+ * - every rating follows the same public-review path;
+ * - the customer supplies all review content;
+ * - AI can only perform a guarded clarity edit of those existing words;
+ * - private feedback is optional and never hides the Google link.
+ */
 export function ReviewFlow({
-  token, business, category, industryKey, service, reviewUrl, staffName, attributeSeeds,
-  initialStatus, initialRating,
-}: {
-  token: string; business: string; category: string; industryKey?: string; service?: string;
-  reviewUrl: string; staffName?: string; attributeSeeds: string[];
-  initialStatus?: RequestStatus; initialRating?: 1 | 2 | 3 | 4 | 5;
-}) {
+  token,
+  business,
+  reviewUrl,
+  initialStatus,
+  initialRating,
+}: ReviewFlowProps) {
   const router = useRouter();
   const [step, setStep] = useState<Step>("rate");
-  const [rating, setRating] = useState(0);
-  const [selectedAttrs, setSelectedAttrs] = useState<string[]>([]);
-  const [drafts, setDrafts] = useState<DraftVariant[]>([]);
-  const [chosen, setChosen] = useState(0);
+  const [rating, setRating] = useState<number>(initialRating ?? 0);
+  const [reviewText, setReviewText] = useState("");
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [canContact, setCanContact] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [editMessage, setEditMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
 
-  // Terminal state when this review link has already been used.
   const terminal =
-    initialStatus === "posted_google" ? "posted" : initialStatus === "private_feedback" ? "private" : null;
+    initialStatus === "posted_google"
+      ? "posted"
+      : initialStatus === "private_feedback"
+        ? "private"
+        : null;
 
   useEffect(() => {
     const sync = () => setOffline(!navigator.onLine);
@@ -70,61 +93,62 @@ export function ReviewFlow({
     };
   }, []);
 
-  async function onRate(v: 1 | 2 | 3 | 4 | 5) {
-    setRating(v);
-    // Advancing is analytics only — never let a flaky network block the flow.
-    try { await advanceRequestAction(token, "opened", { rating: v }); } catch { /* non-blocking */ }
-    if (v >= 4) setStep("attributes");
-    else setStep("feedback");
+  async function onRate(value: Rating) {
+    setRating(value);
+    try {
+      await advanceRequestAction(token, "opened", { rating: value });
+    } catch {
+      // Progress analytics never blocks the customer.
+    }
+    setStep("write");
   }
 
-  function toggleAttr(a: string) {
-    setSelectedAttrs((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]));
-  }
-
-  async function generate() {
+  async function improveClarity() {
     setError(null);
+    setEditMessage(null);
+    if (reviewText.trim().length < 10) {
+      setError("Write a little more in your own words before asking for a clarity edit.");
+      return;
+    }
     if (typeof navigator !== "undefined" && !navigator.onLine) {
-      setError("You're offline. Reconnect to draft your review.");
+      setError("You're offline. Reconnect to use the optional clarity edit.");
       return;
     }
     setLoading(true);
     try {
-      const res = await fetch("/api/ai/review-draft", {
+      const response = await fetch("/api/ai/review-edit", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ business, category, industryKey, service, rating, attributes: selectedAttrs, staffName }),
+        body: JSON.stringify({ token, text: reviewText }),
       });
-      if (!res.ok) throw new Error("bad response");
-      const data = await res.json();
-      const variants: DraftVariant[] = data.variants ?? [];
-      if (variants.length === 0) throw new Error("no variants");
-      setDrafts(variants);
-      setChosen(0);
-      setStep("drafts");
+      if (!response.ok) throw new Error("bad_response");
+      const data = await response.json() as { suggestion?: string; changed?: boolean };
+      if (!data.suggestion) throw new Error("missing_suggestion");
+      setReviewText(data.suggestion);
+      setEditMessage(
+        data.changed
+          ? "Clarity improved without adding new content. Please read it before posting."
+          : "Your wording is already clear, so nothing was added or changed.",
+      );
     } catch {
-      setError("We couldn't draft a review just now. Please try again.");
+      setError("We couldn't check the wording just now. Your original text is unchanged.");
     } finally {
       setLoading(false);
     }
   }
 
-  async function copyAndOpen() {
-    if (copied) return;
-    const text = drafts[chosen]?.text ?? "";
-    try { await navigator.clipboard.writeText(text); } catch { /* clipboard may be blocked */ }
-    setCopied(true);
-    if (typeof navigator !== "undefined" && !navigator.onLine) {
-      setError("You're offline. Your review is copied — reconnect to post it on Google.");
-      setCopied(false);
-      return;
+  function onPublicReviewOpen() {
+    const text = reviewText.trim();
+    if (text) {
+      void navigator.clipboard.writeText(text).then(
+        () => setCopied(true),
+        () => setCopied(false),
+      );
     }
-    try {
-      await advanceRequestAction(token, "posted_google", { rating: rating as 4 | 5, attributes: selectedAttrs });
-    } catch { /* non-blocking */ }
-    window.open(reviewUrl, "_blank", "noopener");
-    // Let the "Copied" confirmation land before handing off to the thank-you screen.
-    setTimeout(() => router.push(`/r/${token}/thanks`), 650);
+    if (rating >= 1 && rating <= 5) {
+      void advanceRequestAction(token, "clicked", { rating: rating as Rating }).catch(() => undefined);
+    }
+    window.setTimeout(() => router.push(`/r/${token}/thanks`), 650);
   }
 
   async function submitFeedback() {
@@ -133,10 +157,16 @@ export function ReviewFlow({
       setError("You're offline. Reconnect to send your feedback.");
       return;
     }
+    if (rating < 1 || rating > 5) {
+      setError("Choose a rating first.");
+      return;
+    }
     setLoading(true);
     try {
-      const note = canContact ? `${feedback.trim()}\n\n(I'm happy to be contacted about this.)` : feedback.trim();
-      await submitPrivateFeedbackAction({ token, rating: rating as 1 | 2 | 3, text: note });
+      const note = canContact
+        ? `${feedback.trim()}\n\n(I'm happy to be contacted about this.)`
+        : feedback.trim();
+      await submitPrivateFeedbackAction({ token, rating: rating as Rating, text: note });
       setSubmitted(true);
     } catch {
       setError("We couldn't send that just now. Please try again.");
@@ -145,7 +175,6 @@ export function ReviewFlow({
     }
   }
 
-  // ── Already used (link opened again after completing) ──────
   if (terminal === "posted" && step === "rate") {
     return (
       <div className="flex flex-1 flex-col items-center justify-center py-16 text-center animate-fade-in">
@@ -153,15 +182,10 @@ export function ReviewFlow({
           <Icon name="star-fill" size={32} />
         </div>
         <h1 className="mt-5 text-[22px] font-extrabold text-ink">You&apos;ve already shared a review</h1>
-        <p className="mt-2 max-w-xs text-[14px] text-sub">Thanks for supporting {business} — nothing more is needed.</p>
-        <a
-          href={reviewUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-6 inline-flex min-h-[44px] items-center gap-2 rounded-btn border border-hairline bg-card px-5 py-3 text-[14px] font-semibold text-ink transition-all hover:bg-primary-wash active:scale-[0.98]"
-        >
-          <Icon name="google" size={18} /> View on Google <Icon name="external" size={15} className="text-faint" />
-        </a>
+        <p className="mt-2 max-w-xs text-[14px] text-sub">Thanks for supporting {business}.</p>
+        <div className="mt-6 w-full">
+          <PublicGoogleReviewLink reviewUrl={reviewUrl} prominent />
+        </div>
       </div>
     );
   }
@@ -172,8 +196,8 @@ export function ReviewFlow({
         <div className="grid size-16 place-items-center rounded-card bg-primary-tint text-primary">
           <Icon name="check-circle" size={32} />
         </div>
-        <h1 className="mt-5 text-[22px] font-extrabold text-ink">Your feedback is already in</h1>
-        <p className="mt-2 max-w-xs text-[14px] text-sub">The owner has your note. You can still post publicly if you&apos;d like.</p>
+        <h1 className="mt-5 text-[22px] font-extrabold text-ink">Your private feedback is already in</h1>
+        <p className="mt-2 max-w-xs text-[14px] text-sub">The owner has your note. The public option remains available.</p>
         <div className="mt-6 w-full">
           <PublicGoogleReviewLink reviewUrl={reviewUrl} prominent />
         </div>
@@ -181,26 +205,27 @@ export function ReviewFlow({
     );
   }
 
-  // ── Rate ──────────────────────────────────────────────────
   if (step === "rate") {
     return (
       <div className="flex flex-1 flex-col justify-center py-10 animate-fade-in">
-        {offline ? <Notice tone="warning" icon="clock">You&apos;re offline. You can still rate — posting needs a connection.</Notice> : null}
+        {offline ? <Notice tone="warning" icon="clock">You&apos;re offline. You can still rate; sharing needs a connection.</Notice> : null}
         <h1 className="text-center text-[24px] font-extrabold leading-tight text-ink">
-          How was your visit to {business}?
+          How was your experience with {business}?
         </h1>
         <p className="mt-2 text-center text-[14px] text-sub">
-          {staffName ? `${staffName} would love your feedback. ` : ""}It takes about 30 seconds.
+          Your honest feedback is welcome at every rating.
         </p>
         <div className="mt-10">
           <StarSelector value={rating} onChange={onRate} showLabel size={52} />
         </div>
+        <p className="mt-8 text-center text-[12px] leading-relaxed text-faint">
+          {MICROCOPY.samePathEveryRating} {MICROCOPY.noIncentive}
+        </p>
       </div>
     );
   }
 
-  // ── Attributes (4–5★) ─────────────────────────────────────
-  if (step === "attributes") {
+  if (step === "write") {
     return (
       <div className="flex flex-1 flex-col py-6">
         <div className="mb-5 flex items-center justify-between">
@@ -211,86 +236,68 @@ export function ReviewFlow({
           >
             <Icon name="chevron-left" size={16} /> Back
           </button>
-          <ProgressRail current={1} total={3} />
+          <ProgressRail current={1} total={2} />
         </div>
-        <h1 className="text-[22px] font-extrabold text-ink">What did you love?</h1>
-        <p className="mt-1 text-[14px] text-sub">Pick a couple — we&apos;ll turn them into a review you can edit.</p>
-        <div className="mt-5 grid grid-cols-2 gap-2">
-          {attributeSeeds.map((a) => (
-            <Chip key={a} selected={selectedAttrs.includes(a)} onClick={() => toggleAttr(a)} className="justify-center">
-              {a}
-            </Chip>
-          ))}
-        </div>
-        {error ? <div className="mt-5"><Notice tone="danger" icon="alert">{error}</Notice></div> : null}
-        <div className="mt-auto pt-6">
-          <MegaCTA
-            label={selectedAttrs.length === 0 ? "Pick at least one" : "Write my review"}
-            icon="sparkles"
-            onClick={generate}
-            loading={loading}
-            disabled={selectedAttrs.length === 0}
-          />
-        </div>
-      </div>
-    );
-  }
 
-  // ── Drafts (4–5★) ─────────────────────────────────────────
-  if (step === "drafts") {
-    return (
-      <div className="flex flex-1 flex-col py-6">
-        <div className="mb-5 flex items-center justify-between">
-          <button
-            type="button"
-            onClick={() => { setStep("attributes"); setCopied(false); }}
-            className="-mx-1 inline-flex min-h-[44px] items-center gap-1 px-1 text-[13px] font-semibold text-sub transition-all hover:text-ink active:scale-[0.98]"
-          >
-            <Icon name="chevron-left" size={16} /> Back
-          </button>
-          <ProgressRail current={2} total={3} />
+        <h1 className="text-[22px] font-extrabold text-ink">Share your experience in your own words</h1>
+        <p className="mt-1 text-[14px] leading-relaxed text-sub">{MICROCOPY.customerWordsOnly}</p>
+        <p className="mt-2 text-[12px] leading-relaxed text-faint">{MICROCOPY.samePathEveryRating}</p>
+
+        <div className="mt-5">
+          <Textarea
+            value={reviewText}
+            onChange={(event) => {
+              setReviewText(event.target.value.slice(0, 2_000));
+              setEditMessage(null);
+            }}
+            placeholder="What happened during your experience, and what would be useful for another customer to know?"
+            rows={7}
+            aria-label="Your Google review in your own words"
+          />
+          <div className="mt-2 flex items-start justify-between gap-4">
+            <p className="text-[11px] leading-relaxed text-faint">{MICROCOPY.aiReviewEditDisclaimer}</p>
+            <span className="shrink-0 text-[11px] tabular-nums text-faint">{reviewText.length}/2000</span>
+          </div>
         </div>
-        <h1 className="text-[22px] font-extrabold text-ink">Pick your favourite</h1>
-        <p className="mt-1 text-[13px] leading-relaxed text-sub">{MICROCOPY.aiDraftDisclaimer}</p>
-        <div className="mt-4 space-y-3" role="radiogroup" aria-label="Choose a review draft">
-          {drafts.map((d, i) => (
-            <DraftCard
-              key={i}
-              text={d.text}
-              tone={d.tone}
-              selected={chosen === i}
-              onSelect={() => setChosen(i)}
-              onEdit={(v) => setDrafts((prev) => prev.map((x, xi) => (xi === i ? { ...x, text: v } : x)))}
-              onRegenerate={generate}
-              regenerating={loading}
-            />
-          ))}
-        </div>
-        <div className="mt-3 flex justify-center">
-          <Button variant="ghost" size="sm" icon="refresh" onClick={generate} loading={loading}>
-            Try different wording
-          </Button>
-        </div>
-        <p className="mt-2 text-center text-[11px] leading-relaxed text-faint">{MICROCOPY.noIncentive}</p>
-        {error ? <div className="mt-4"><Notice tone="danger" icon="alert">{error}</Notice></div> : null}
-        {copied ? (
-          <p className="mt-4 flex items-center justify-center gap-1.5 text-[13px] font-semibold text-primary animate-fade-in">
-            <Icon name="check-circle" size={16} /> Copied — opening Google…
+
+        <Button
+          className="mt-4 self-start"
+          variant="secondary"
+          size="sm"
+          icon="sparkles"
+          onClick={improveClarity}
+          loading={loading}
+          disabled={reviewText.trim().length < 10}
+        >
+          Improve clarity only
+        </Button>
+
+        {editMessage ? (
+          <p role="status" className="mt-3 flex items-start gap-2 text-[12px] leading-relaxed text-primary-dark">
+            <Icon name="check-circle" size={15} className="mt-px shrink-0" /> {editMessage}
           </p>
         ) : null}
-        <div className="mt-auto pt-4">
-          <MegaCTA
-            label={copied ? "Copied — opening Google" : "Copy & open Google"}
-            icon={copied ? "check" : "google"}
-            onClick={copyAndOpen}
-            disabled={copied}
+        {error ? <div className="mt-4"><Notice tone="danger" icon="alert">{error}</Notice></div> : null}
+        {copied ? (
+          <p role="status" className="mt-4 flex items-center justify-center gap-1.5 text-[13px] font-semibold text-primary">
+            <Icon name="check-circle" size={16} /> Your words were copied before Google opened.
+          </p>
+        ) : null}
+
+        <div className="mt-auto space-y-3 pt-6">
+          <PublicGoogleReviewLink
+            reviewUrl={reviewUrl}
+            prominent
+            label={reviewText.trim() ? "Copy my words & open Google" : "Open Google to write my review"}
+            onBeforeOpen={onPublicReviewOpen}
           />
+          <Button variant="ghost" fullWidth onClick={() => setStep("feedback")}>Send private feedback instead</Button>
+          <p className="text-center text-[11px] leading-relaxed text-faint">{MICROCOPY.noIncentive}</p>
         </div>
       </div>
     );
   }
 
-  // ── Private feedback (1–3★) — public link ALWAYS visible ───
   return (
     <div className="flex flex-1 flex-col py-6">
       {submitted ? (
@@ -298,8 +305,8 @@ export function ReviewFlow({
           <div className="grid size-16 place-items-center rounded-card bg-primary-tint text-primary">
             <Icon name="check-circle" size={32} />
           </div>
-          <h1 className="mt-4 text-[22px] font-extrabold text-ink">Thank you — the owner will see this</h1>
-          <p className="mt-1 text-[14px] text-sub">We appreciate you helping {business} improve.</p>
+          <h1 className="mt-4 text-[22px] font-extrabold text-ink">Thank you - the owner will see this</h1>
+          <p className="mt-1 text-[14px] text-sub">Your private note does not prevent you from reviewing publicly.</p>
           <div className="mt-6 w-full">
             <PublicGoogleReviewLink reviewUrl={reviewUrl} prominent />
           </div>
@@ -308,42 +315,37 @@ export function ReviewFlow({
         <>
           <button
             type="button"
-            onClick={() => setStep("rate")}
+            onClick={() => setStep("write")}
             className="-mx-1 mb-4 inline-flex min-h-[44px] items-center gap-1 self-start px-1 text-[13px] font-semibold text-sub transition-all hover:text-ink active:scale-[0.98]"
           >
             <Icon name="chevron-left" size={16} /> Back
           </button>
-          <h1 className="text-[22px] font-extrabold leading-tight text-ink">{MICROCOPY.privateFeedbackHeader}</h1>
-          <p className="mt-2 text-[13px] leading-relaxed text-sub">{MICROCOPY.privateFeedbackReassure}</p>
+          <h1 className="text-[22px] font-extrabold leading-tight text-ink">Send a private note to the owner</h1>
+          <p className="mt-2 text-[13px] leading-relaxed text-sub">
+            This is optional and does not replace or hide the public Google review option.
+          </p>
           <div className="mt-4">
             <Textarea
               value={feedback}
-              onChange={(e) => setFeedback(e.target.value)}
-              placeholder="What happened? The more detail, the better we can fix it."
+              onChange={(event) => setFeedback(event.target.value.slice(0, 4_000))}
+              placeholder="What would you like the owner to know?"
               rows={5}
               aria-label="Your private feedback"
             />
           </div>
 
-          {/* Consent gets its own breathing room — one clear opt-in, calmly framed. */}
           <div className="mt-6 flex items-start justify-between gap-3 rounded-card border border-hairline bg-card p-4">
             <div className="min-w-0">
               <div className="text-[14px] font-semibold text-ink">The owner can contact me</div>
-              <div className="mt-0.5 text-[12px] leading-relaxed text-faint">Optional — so they can make it right.</div>
+              <div className="mt-0.5 text-[12px] leading-relaxed text-faint">Optional - so they can follow up.</div>
             </div>
             <Toggle checked={canContact} onChange={setCanContact} label="Allow the owner to contact me" />
           </div>
 
           {error ? <div className="mt-4"><Notice tone="danger" icon="alert">{error}</Notice></div> : null}
-
-          {/* Primary decision: the filled-green CTA. */}
-          <Button className="mt-6 active:scale-[0.98]" onClick={submitFeedback} loading={loading} disabled={!feedback.trim()} fullWidth size="lg" icon="send">
+          <Button className="mt-6" onClick={submitFeedback} loading={loading} disabled={!feedback.trim()} fullWidth size="lg" icon="send">
             Send private feedback
           </Button>
-
-          {/* COMPLIANCE: the public Google link is ALWAYS rendered here at full
-              parity — never gated, never sub-styled. It reads as a distinct link,
-              the primary above reads as the filled CTA. */}
           <div className="mt-5">
             <PublicGoogleReviewLink reviewUrl={reviewUrl} />
           </div>

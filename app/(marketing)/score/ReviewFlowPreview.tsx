@@ -8,8 +8,8 @@ import { MICROCOPY } from "@/lib/compliance/microcopy";
  * "This is what your customer sees" — a faithful phone-framed preview of the
  * real review flow, built from the live design-system primitives (never a
  * fabricated screenshot). It carries a persistent "Example" label and shows
- * the honesty-law surfaces at full parity: the public Google review link, the
- * AI-draft disclaimer, and the dual-consent line.
+ * the authenticity surfaces at full parity: customer-owned words, an ungated
+ * public Google link, and the service-consent line.
  */
 export function ReviewFlowPreview() {
   return (
@@ -45,14 +45,13 @@ export function ReviewFlowPreview() {
               ))}
             </div>
 
-            {/* AI-drafted starting point */}
+            {/* Customer-authored review text */}
             <div className="mt-4 rounded-card border border-hairline bg-card p-3">
-              <div className="kicker mb-1.5 text-primary-dark">Draft to personalize</div>
-              <p className="text-[12.5px] leading-relaxed text-ink">
-                &ldquo;Genuinely gentle cleaning and the team explained everything. Booking was easy
-                and I left feeling looked after.&rdquo;
-              </p>
-              <p className="mt-2 text-[11px] leading-snug text-faint">{MICROCOPY.aiDraftDisclaimer}</p>
+              <div className="kicker mb-1.5 text-primary-dark">Your experience, in your words</div>
+              <div className="min-h-20 rounded-btn border border-hairline bg-paper px-3 py-2 text-[12px] leading-relaxed text-sub">
+                What happened during your experience, and what would be useful for another customer to know?
+              </div>
+              <p className="mt-2 text-[11px] leading-snug text-faint">{MICROCOPY.aiReviewEditDisclaimer}</p>
             </div>
 
             {/* Public Google link at full parity (honesty law) */}
@@ -63,7 +62,7 @@ export function ReviewFlowPreview() {
               className="mt-4 inline-flex h-11 w-full select-none items-center justify-center gap-2 rounded-btn bg-primary px-4 text-[14px] font-semibold text-white shadow-[0_1px_2px_rgba(23,32,29,0.12),inset_0_1px_0_rgba(255,255,255,0.16)]"
             >
               <Icon name="google" size={16} />
-              Post on Google
+              Open Google to write my review
             </a>
 
             {/* Dual-consent line */}

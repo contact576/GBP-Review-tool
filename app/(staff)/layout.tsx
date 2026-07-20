@@ -4,6 +4,7 @@ import { ToastProvider } from "@/components/ds";
 import { Icon } from "@/components/icons";
 import { DemoBanner } from "@/components/app/DemoBanner";
 import { StaffTabs } from "./StaffTabs";
+import { ServiceWorkerRegistration } from "@/components/pwa/ServiceWorkerRegistration";
 
 export const metadata: Metadata = {
   title: "Front desk",
@@ -29,6 +30,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
   return (
     <>
       {session.isDemo ? <DemoBanner /> : null}
+      <ServiceWorkerRegistration />
       <ToastProvider>
         <div className="flex min-h-dvh flex-col bg-paper">
           {/* Slim top bar */}

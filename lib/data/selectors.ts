@@ -70,28 +70,35 @@ export interface SinceJoined {
   newReviews: { now: number; delta: number };
 }
 
-/** Compare the latest 30d window to the prior 30d window. */
+/** Compare the latest rolling-30d observation to the observation 30 days prior. */
 export function sinceJoined(metrics: MetricSnapshot[]): SinceJoined {
-  const last30 = metrics.slice(-30);
-  const prev30 = metrics.slice(-60, -30);
-  const sum = (arr: MetricSnapshot[], k: keyof MetricSnapshot) =>
-    arr.reduce((a, m) => a + (m[k] as number), 0);
-  const avg = (arr: MetricSnapshot[], k: keyof MetricSnapshot) =>
-    arr.length ? Math.round(sum(arr, k) / arr.length) : 0;
+  const ordered = [...metrics].sort((a, b) => a.date.localeCompare(b.date));
+  const latest = ordered[ordered.length - 1];
+  if (!latest) {
+    return {
+      foundYou: { now: 0, delta: 0 },
+      contactedYou: { now: 0, delta: 0 },
+      newReviews: { now: 0, delta: 0 },
+    };
+  }
+  const latestAt = new Date(`${latest.date}T00:00:00Z`).getTime();
+  const priorCutoff = latestAt - 30 * 86_400_000;
+  const prior = [...ordered]
+    .reverse()
+    .find((point) => new Date(`${point.date}T00:00:00Z`).getTime() <= priorCutoff) ?? ordered[0] ?? latest;
   const pct = (nowV: number, prevV: number) =>
     prevV === 0 ? 0 : Math.round(((nowV - prevV) / prevV) * 100);
 
-  const foundNow = avg(last30, "foundYou");
-  const foundPrev = avg(prev30, "foundYou");
-  const contactNow = avg(last30, "contactedYou");
-  const contactPrev = avg(prev30, "contactedYou");
-  const revNow = sum(last30, "newReviews");
-  const revPrev = sum(prev30, "newReviews");
-
   return {
-    foundYou: { now: foundNow, delta: pct(foundNow, foundPrev) },
-    contactedYou: { now: contactNow, delta: pct(contactNow, contactPrev) },
-    newReviews: { now: revNow, delta: pct(revNow, revPrev) },
+    foundYou: { now: latest.foundYou, delta: pct(latest.foundYou, prior.foundYou) },
+    contactedYou: {
+      now: latest.contactedYou,
+      delta: pct(latest.contactedYou, prior.contactedYou),
+    },
+    newReviews: {
+      now: latest.newReviews,
+      delta: pct(latest.newReviews, prior.newReviews),
+    },
   };
 }
 

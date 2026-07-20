@@ -11,6 +11,9 @@ import { SyncGoogleButton } from "@/components/app/SyncGoogleButton";
 const PROVIDER_ICON: Record<Integration["provider"], IconName> = {
   google: "google",
   google_places: "map-pin",
+  website: "external",
+  search_console: "search",
+  instagram: "camera",
   twilio: "message",
   resend: "mail",
   stripe: "credit-card",
@@ -20,6 +23,9 @@ const PROVIDER_ICON: Record<Integration["provider"], IconName> = {
 const CONSEQUENCE: Record<Integration["provider"], string> = {
   google: "we can't publish posts or read your Google performance",
   google_places: "your Local Growth Score can't refresh from public data",
+  website: "we can't cross-check your services, contact facts, or on-site messaging",
+  search_console: "we can't use your real website queries and landing-page performance",
+  instagram: "we can't compare recent social offerings with your Google profile",
   resend: "we can't send email review requests",
   twilio: "SMS review requests can't send — we fall back to email",
   stripe: "we can't process your subscription or issue invoices",

@@ -11,7 +11,7 @@ export default async function ConnectPage() {
     <Step
       current={3}
       title="Connect Google Business Profile"
-      subtitle="Foundly reads what's public and publishes only edits you approve."
+      subtitle="Foundly reads your profile and prepares improvements for you to review and apply."
       continueHref="/onboarding/channels"
       skipHref="/onboarding/channels"
     >

@@ -88,14 +88,14 @@ export function ReviewsInbox({
   const [aiSource, setAiSource] = useState<string>("");
 
   // Merge optimistic replies onto a review for display.
-  const withReply = (r: Review): Review => {
-    const text = repliedText[r.id];
-    if (!text) return r;
+  const merged = useMemo(() => reviews.map((review): Review => {
+    const text = repliedText[review.id];
+    if (!text) return review;
     return {
-      ...r,
+      ...review,
       needsReply: false,
       reply: {
-        id: `rpl_local_${r.id}`,
+        id: `rpl_local_${review.id}`,
         text,
         tone: "warm",
         source: "human",
@@ -103,9 +103,7 @@ export function ReviewsInbox({
         approvedBy: "You",
       },
     };
-  };
-
-  const merged = useMemo(() => reviews.map(withReply), [reviews, repliedText]);
+  }), [reviews, repliedText]);
 
   const isReplied = (r: Review) => Boolean(r.reply) || Boolean(repliedText[r.id]);
   const needsReplyNow = (r: Review) => r.needsReply && !repliedText[r.id];
@@ -213,7 +211,7 @@ export function ReviewsInbox({
     start(async () => {
       await postReplyAction({ reviewId: review.id, text: draft.trim(), tone });
       setRepliedText((prev) => ({ ...prev, [review.id]: draft.trim() }));
-      toast("Reply published", "success", "check-circle");
+      toast("Reply saved in Foundly — it was not posted to Google", "success", "check-circle");
       setActive(null);
     });
   }
@@ -442,7 +440,7 @@ export function ReviewsInbox({
 
         <div className="mt-4 flex items-center gap-2">
           <Button onClick={post} loading={pending} disabled={!draft.trim() || loadingDraft} icon="send" fullWidth>
-            Post reply to Google
+            Save reply in Foundly
           </Button>
         </div>
         {aiSource === "template" ? (
@@ -477,7 +475,7 @@ function ReviewStatusPills({
         <Badge tone="gold" icon="flag">At risk</Badge>
       ) : null}
       {replied ? (
-        <Badge tone="primary" icon="check-circle">Replied</Badge>
+          <Badge tone="primary" icon="check-circle">Reply saved</Badge>
       ) : needsReply ? (
         <Badge tone="danger" icon="chat">Needs reply</Badge>
       ) : null}

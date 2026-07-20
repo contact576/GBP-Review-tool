@@ -7,7 +7,12 @@ export const metadata: Metadata = {
   description: "Start a 14-day Foundly Growth trial — no credit card. Keep a free plan forever when it ends.",
 };
 
-export default function SignUpPage() {
+export default async function SignUpPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ ref?: string }>;
+}) {
   const googleEnabled = Boolean(process.env.GOOGLE_CLIENT_ID);
-  return <SignUpForm googleEnabled={googleEnabled} dbBacked={isDbBacked()} />;
+  const referralCode = (await searchParams).ref?.slice(0, 220);
+  return <SignUpForm googleEnabled={googleEnabled} dbBacked={isDbBacked()} referralCode={referralCode} />;
 }

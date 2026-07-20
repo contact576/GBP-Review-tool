@@ -27,12 +27,13 @@ test("register → skip onboarding → truthful empty dashboard → sign out/in 
   await page.waitForURL("**/app");
 
   // The dashboard belongs to the registered business…
-  await expect(page.getByText("Good to see you, Taylor")).toBeVisible();
-  const hero = page.locator(".on-hero");
-  await expect(hero).toContainText(business);
-  // …with truthful zero states (score 0, nothing to reply to)…
-  await expect(hero.getByRole("img", { name: /0 of 100/ }).first()).toBeVisible();
-  await expect(page.getByText(/All caught up/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Good morning, Taylor" })).toBeVisible();
+  await expect(page.getByText(business, { exact: true }).first()).toBeVisible();
+  const growthCard = page.locator('section[aria-labelledby="growth-title"]');
+  // …with a truthful unavailable score and nothing waiting for a reply…
+  await expect(growthCard.getByText("Not available", { exact: true })).toBeVisible();
+  await expect(growthCard.getByRole("img", { name: /0 of 100/ })).toHaveCount(0);
+  await expect(page.getByText("You are clear for the week", { exact: true })).toBeVisible();
   // …and ZERO demo leakage: no Harbourview data, no demo banner.
   await expect(page.getByText(/Harbourview/)).toHaveCount(0);
   await expect(page.getByTestId("demo-banner")).toHaveCount(0);
@@ -53,6 +54,6 @@ test("register → skip onboarding → truthful empty dashboard → sign out/in 
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.waitForURL("**/app");
-  await expect(page.locator(".on-hero")).toContainText(business);
+  await expect(page.getByText(business, { exact: true }).first()).toBeVisible();
   await expect(page.getByTestId("demo-banner")).toHaveCount(0);
 });

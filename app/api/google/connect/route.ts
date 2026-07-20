@@ -34,7 +34,10 @@ export async function GET() {
 
   const state = makeStateCookie();
   const authUrl = buildAuthUrl({
-    scopes: ["https://www.googleapis.com/auth/business.manage"],
+    scopes: [
+      "https://www.googleapis.com/auth/business.manage",
+      "https://www.googleapis.com/auth/webmasters.readonly",
+    ],
     redirectUri: `${origin}/api/google/connect/callback`,
     state,
     accessType: "offline",

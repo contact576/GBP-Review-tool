@@ -34,3 +34,15 @@ export function googleSignInEnabled(): boolean {
 export function placesEnabled(): boolean {
   return Boolean(process.env.GOOGLE_MAPS_API_KEY);
 }
+
+export function instagramAppId(): string {
+  return process.env.META_INSTAGRAM_APP_ID ?? "";
+}
+
+export function instagramAppSecret(): string {
+  return process.env.META_INSTAGRAM_APP_SECRET ?? "";
+}
+
+export function instagramOAuthEnabled(): boolean {
+  return Boolean(process.env.META_INSTAGRAM_APP_ID && process.env.META_INSTAGRAM_APP_SECRET);
+}

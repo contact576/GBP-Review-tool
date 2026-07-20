@@ -12,9 +12,13 @@ import { MICROCOPY } from "@/lib/compliance/microcopy";
 export function PublicGoogleReviewLink({
   reviewUrl,
   prominent = false,
+  label = "Leave a Google review",
+  onBeforeOpen,
 }: {
   reviewUrl: string;
   prominent?: boolean;
+  label?: string;
+  onBeforeOpen?: () => void;
 }) {
   return (
     <div
@@ -30,10 +34,11 @@ export function PublicGoogleReviewLink({
         href={reviewUrl}
         target="_blank"
         rel="noopener noreferrer"
+        onClick={() => onBeforeOpen?.()}
         className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-btn border border-hairline bg-card px-4 py-3 text-[14px] font-semibold text-ink transition-colors hover:bg-primary-wash"
       >
         <Icon name="google" size={18} />
-        Leave a Google review
+        {label}
         <Icon name="external" size={16} className="text-faint" />
       </a>
     </div>

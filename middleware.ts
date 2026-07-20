@@ -5,8 +5,6 @@ import { verifySession } from "@/lib/auth/jwt";
  * Gates the authenticated surfaces with real JWT verification.
  * Marketing, customer (/r, /q), and staff surfaces bypass this.
  */
-const LEGACY_ROLES = new Set(["owner", "agency_admin", "platform_admin"]);
-
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const raw = req.cookies.get("foundly_session")?.value;
@@ -20,16 +18,9 @@ export async function middleware(req: NextRequest) {
 
   if (!raw) return redirect();
 
-  // Resolve the role: legacy plain-role cookies (pre-JWT builds) are accepted
-  // as demo sessions, but still go through the SAME role gates below.
-  let role: string | null = null;
-  if (LEGACY_ROLES.has(raw)) {
-    role = raw;
-  } else {
-    const claims = await verifySession(raw);
-    if (!claims) return redirect();
-    role = claims.role;
-  }
+  const claims = await verifySession(raw);
+  if (!claims) return redirect();
+  const role = claims.role;
 
   // Role-scope the consoles.
   if (pathname.startsWith("/admin") && role !== "platform_admin") {
@@ -37,13 +28,34 @@ export async function middleware(req: NextRequest) {
     url.pathname = "/app";
     return NextResponse.redirect(url);
   }
-  if (pathname.startsWith("/agency") && role !== "agency_admin") {
+  if (pathname.startsWith("/agency") && role !== "agency_admin" && role !== "owner") {
     const url = req.nextUrl.clone();
     url.pathname = "/app";
     return NextResponse.redirect(url);
   }
 
-  return NextResponse.next();
+  const response = NextResponse.next();
+  const scriptDev = process.env.NODE_ENV === "production" ? "" : " 'unsafe-eval'";
+  const connectDev = process.env.NODE_ENV === "production" ? "" : " ws: http:";
+  const upgrade = process.env.NODE_ENV === "production" ? "; upgrade-insecure-requests" : "";
+  response.headers.set(
+    "Content-Security-Policy",
+    [
+      "default-src 'self'",
+      `script-src 'self' 'unsafe-inline'${scriptDev}`,
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob: https:",
+      "font-src 'self' data:",
+      `connect-src 'self' https:${connectDev}`,
+      "worker-src 'self' blob:",
+      "manifest-src 'self'",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+    ].join("; ") + upgrade,
+  );
+  return response;
 }
 
 export const config = {
