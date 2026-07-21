@@ -28,6 +28,7 @@ const DETAILS_FIELD_MASK = [
   "userRatingCount",
   "primaryTypeDisplayName",
   "googleMapsUri",
+  "location",
   "reviews.rating",
   "reviews.text",
   "reviews.originalText",
@@ -165,6 +166,7 @@ export interface PlaceDetails {
   reviewCount: number;
   category: string;
   mapsUri?: string;
+  location?: { latitude: number; longitude: number };
   /**
    * A SAMPLE of recent public reviews (Google's Places API returns at most
    * five). Never the full history — callers must label it as a sample and use
@@ -193,6 +195,7 @@ interface RawDetails {
   userRatingCount?: number;
   primaryTypeDisplayName?: { text?: string };
   googleMapsUri?: string;
+  location?: { latitude?: number; longitude?: number };
   reviews?: RawReview[];
 }
 
@@ -232,6 +235,11 @@ export async function getPlaceDetails(placeId: string): Promise<PlaceDetailsResu
         reviewCount: typeof raw.userRatingCount === "number" ? raw.userRatingCount : 0,
         category: raw.primaryTypeDisplayName?.text ?? "",
         mapsUri: raw.googleMapsUri,
+        location:
+          typeof raw.location?.latitude === "number" &&
+          typeof raw.location.longitude === "number"
+            ? { latitude: raw.location.latitude, longitude: raw.location.longitude }
+            : undefined,
         reviews: (raw.reviews ?? []).slice(0, 5).map(toPublicReview),
       },
     };

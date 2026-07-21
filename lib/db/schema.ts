@@ -29,6 +29,11 @@ import type {
   GrowthReport,
   Agency,
   FoundlyData,
+  GbpProfileSnapshot,
+  LocalGrowthAudit,
+  ProfileSuggestion,
+  ProfileMutationJob,
+  AiContentAsset,
 } from "../data/types";
 
 /**
@@ -73,6 +78,9 @@ export const workspace = pgTable("workspace", {
   industryConfig: jsonb("industry_config").$type<IndustryConfig | null>(),
   settings: jsonb("settings").$type<WorkspaceSettings | null>(),
   isDemo: boolean("is_demo").notNull().default(false),
+  referredByWorkspaceId: text("referred_by_workspace_id"),
+  referralRewardStatus: text("referral_reward_status"),
+  referralRewardAppliedAt: text("referral_reward_applied_at"),
 });
 
 export const location = pgTable("location", {
@@ -108,6 +116,9 @@ export const location = pgTable("location", {
   profileServicesTotal: integer("profile_services_total").notNull(),
   profileResponseRate: doublePrecision("profile_response_rate").notNull(),
   profileCompleteness: doublePrecision("profile_completeness").notNull(),
+  gbpSnapshot: jsonb("gbp_snapshot").$type<GbpProfileSnapshot>(),
+  gbpAudit: jsonb("gbp_audit").$type<LocalGrowthAudit>(),
+  suggestionInbox: jsonb("suggestion_inbox").$type<ProfileSuggestion[]>(),
 });
 
 export const appUser = pgTable("app_user", {
@@ -122,6 +133,15 @@ export const appUser = pgTable("app_user", {
   emailVerified: boolean("email_verified").notNull().default(false),
   googleSub: text("google_sub"),
   createdAt: text("created_at"),
+});
+
+export const passwordResetToken = pgTable("password_reset_token", {
+  /** SHA-256 digest of the token sent by email; the raw token is never stored. */
+  tokenHash: text("token_hash").primaryKey(),
+  userId: text("user_id").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  usedAt: text("used_at"),
+  createdAt: text("created_at").notNull(),
 });
 
 export const staffInvite = pgTable("staff_invite", {
@@ -301,6 +321,11 @@ export const subscription = pgTable("subscription", {
   status: text("status").notNull(),
   trialEndsAt: text("trial_ends_at"),
   currency: text("currency").notNull(),
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
+  stripePriceId: text("stripe_price_id"),
+  currentPeriodEnd: text("current_period_end"),
+  cancelAtPeriodEnd: boolean("cancel_at_period_end"),
   usage: jsonb("usage").$type<Subscription["usage"]>().notNull(),
 });
 
@@ -400,3 +425,112 @@ export const googleCredential = pgTable("google_credential", {
   connectedAt: text("connected_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
+
+export const instagramCredential = pgTable("instagram_credential", {
+  workspaceId: text("workspace_id").primaryKey(),
+  encryptedAccessToken: text("encrypted_access_token").notNull(),
+  accountId: text("account_id").notNull(),
+  username: text("username"),
+  scopes: text("scopes").notNull(),
+  expiresAt: text("expires_at"),
+  connectedAt: text("connected_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+/** Append-preserving Google mutation ledger with one row per idempotent change. */
+export const profileMutationJob = pgTable(
+  "profile_mutation_job",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    locationId: text("location_id").notNull(),
+    suggestionId: text("suggestion_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    target: text("target").notNull(),
+    status: text("status").notNull(),
+    updateMask: jsonb("update_mask").$type<string[]>().notNull(),
+    beforeValue: jsonb("before_value"),
+    proposedValue: jsonb("proposed_value").$type<ProfileMutationJob["proposedValue"]>().notNull(),
+    providerResponse: jsonb("provider_response"),
+    verifiedValue: jsonb("verified_value"),
+    rollbackValue: jsonb("rollback_value"),
+    attempts: integer("attempts").notNull().default(0),
+    approvedAt: text("approved_at").notNull(),
+    approvedBy: text("approved_by").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    startedAt: text("started_at"),
+    appliedAt: text("applied_at"),
+    failedAt: text("failed_at"),
+    lastError: text("last_error"),
+  },
+  (table) => [uniqueIndex("profile_mutation_job_idempotency_uq").on(table.idempotencyKey)],
+);
+
+/** Append-preserving Google content publication ledger. */
+export const contentPublishingJob = pgTable(
+  "content_publishing_job",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    locationId: text("location_id").notNull(),
+    suggestionId: text("suggestion_id").notNull(),
+    assetId: text("asset_id"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    kind: text("kind").notNull(),
+    status: text("status").notNull(),
+    exactPayload: jsonb("exact_payload").notNull(),
+    providerResponse: jsonb("provider_response"),
+    providerResourceName: text("provider_resource_name"),
+    verifiedValue: jsonb("verified_value"),
+    attempts: integer("attempts").notNull().default(0),
+    approvedAt: text("approved_at").notNull(),
+    approvedBy: text("approved_by").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    startedAt: text("started_at"),
+    publishedAt: text("published_at"),
+    failedAt: text("failed_at"),
+    lastError: text("last_error"),
+  },
+  (table) => [uniqueIndex("content_publishing_job_idempotency_uq").on(table.idempotencyKey)],
+);
+
+/** Daily/hourly read-only monitoring ledger. */
+export const monitoringRun = pgTable(
+  "monitoring_run",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    windowKey: text("window_key").notNull(),
+    trigger: text("trigger").notNull(),
+    status: text("status").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    summary: jsonb("summary"),
+    startedAt: text("started_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    completedAt: text("completed_at"),
+    lastError: text("last_error"),
+  },
+  (table) => [uniqueIndex("monitoring_run_workspace_window_uq").on(table.workspaceId, table.windowKey)],
+);
+
+/** Generated content assets remain private and are served only after tenant authentication. */
+export const aiContentAsset = pgTable(
+  "ai_content_asset",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    locationId: text("location_id").notNull(),
+    suggestionId: text("suggestion_id").notNull(),
+    kind: text("kind").$type<AiContentAsset["kind"]>().notNull(),
+    mimeType: text("mime_type").$type<AiContentAsset["mimeType"]>().notNull(),
+    base64Data: text("base64_data").notNull(),
+    prompt: text("prompt").notNull(),
+    altText: text("alt_text").notNull(),
+    model: text("model").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("ai_content_asset_suggestion_uq").on(table.workspaceId, table.suggestionId)],
+);

@@ -24,12 +24,12 @@ const BEFORE_LABEL: Record<TaskKind, string> = {
 };
 
 const AFTER_LABEL: Record<TaskKind, string> = {
-  post: "Publishes as a Google post",
-  photo: "Adds the photo to your profile",
-  qna: "Posts as a seeded Q&A answer",
-  service: "Updates your service description",
-  hours: "Sets your hours on Google",
-  reply: "Posts your public reply",
+  post: "Suggested copy for a Google post",
+  photo: "Suggested profile photo update",
+  qna: "Suggested Q&A response",
+  service: "Suggested service description",
+  hours: "Suggested hours update",
+  reply: "Suggested public reply",
 };
 
 /**
@@ -49,7 +49,7 @@ export function ApproveCard({ task }: { task: GbpTask }) {
     start(async () => {
       await approveTaskAction(task.id);
       setStatus("done");
-      toast("Approved — will publish when your Google profile connection is live", "success", "check-circle");
+      toast("Marked complete — no Google changes were published", "success", "check-circle");
     });
   const snooze = () =>
     start(async () => {
@@ -109,7 +109,7 @@ export function ApproveCard({ task }: { task: GbpTask }) {
             <div className="flex flex-col rounded-btn border border-primary/25 bg-primary-wash px-3 py-2.5">
               <span className="kicker mb-1 flex items-center gap-1 text-primary-dark">
                 <Icon name="check-circle" size={12} />
-                After you approve
+                Recommendation
               </span>
               <span className="text-[13px] leading-relaxed text-ink/90">{task.preview}</span>
               <span className="mt-1.5 text-[11px] font-medium text-primary-dark/70">{AFTER_LABEL[task.kind]}</span>
@@ -117,7 +117,7 @@ export function ApproveCard({ task }: { task: GbpTask }) {
           </div>
 
           <div className="mt-3 flex items-center gap-2">
-            <Button size="sm" onClick={approve} loading={pending} icon="check">Approve &amp; publish</Button>
+            <Button size="sm" onClick={approve} loading={pending} icon="check">Mark complete</Button>
             <Button size="sm" variant="ghost" onClick={snooze} disabled={pending}>Snooze</Button>
             <span className="ml-auto inline-flex items-center gap-1 data-chip text-faint">
               <Icon name="clock" size={13} />~{task.effortMins} min

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { placesEnabled } from "@/lib/google/config";
 import { searchBusinesses } from "@/lib/google/places";
+import { boundedString, guardPublicApi, readJsonObject } from "@/lib/security/api";
 
 export const runtime = "nodejs";
 
@@ -11,12 +12,14 @@ export const runtime = "nodejs";
  * and the tool stays on its clearly-labelled synthetic preview.
  */
 export async function POST(req: Request) {
+  const limited = guardPublicApi(req, "score-lookup", 20, 60_000);
+  if (limited) return limited;
   let business = "";
   let category = "";
   try {
-    const body = (await req.json()) as { business?: unknown; category?: unknown };
-    business = typeof body.business === "string" ? body.business.trim() : "";
-    category = typeof body.category === "string" ? body.category.trim() : "";
+    const body = await readJsonObject(req, 8_192);
+    business = boundedString(body.business, 160);
+    category = boundedString(body.category, 120);
   } catch {
     return NextResponse.json({ ok: true, real: false });
   }

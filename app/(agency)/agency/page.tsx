@@ -1,4 +1,4 @@
-import { getData } from "@/lib/data";
+import { getAgencyClients, getData } from "@/lib/data";
 import { PageHeader } from "@/components/app/PageHeader";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { LinkButton } from "@/components/ds/Button";
@@ -10,8 +10,8 @@ import { currencyFor } from "@/lib/utils/region";
 import { StatusBadge, statusRank } from "../_components/StatusBadge";
 
 export default async function AgencyRollupPage() {
-  const data = await getData();
-  const { clients, wholesaleRate, retailAverage, whiteLabel } = data.agency;
+  const [data, clients] = await Promise.all([getData(), getAgencyClients()]);
+  const { wholesaleRate, retailAverage, whiteLabel } = data.agency;
   const currency = currencyFor(data.workspace.region);
 
   const count = clients.length;

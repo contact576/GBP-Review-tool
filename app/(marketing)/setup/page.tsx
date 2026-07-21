@@ -16,13 +16,29 @@ export const dynamic = "force-dynamic";
 export default async function SetupPage() {
   const db = await checkDatabase();
   const ai = hasAiKey();
+  const openAi = Boolean(process.env.OPENAI_API_KEY);
   const googleOAuth = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
   const places = Boolean(process.env.GOOGLE_MAPS_API_KEY);
   const authSecret = Boolean(process.env.AUTH_SECRET);
   const encSecret = Boolean(process.env.ENCRYPTION_SECRET);
+  const assetSigningSecret = Boolean(process.env.CONTENT_ASSET_SIGNING_SECRET || process.env.AUTH_SECRET);
+  const cronSecret = Boolean(process.env.CRON_SECRET && process.env.CRON_SECRET.length >= 24);
   const appUrlSet = Boolean(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL);
   const resend = Boolean(process.env.RESEND_API_KEY);
   const stripe = Boolean(process.env.STRIPE_SECRET_KEY);
+  const stripeWebhook = Boolean(process.env.STRIPE_WEBHOOK_SECRET);
+  const stripePrice = Boolean(
+    process.env.STRIPE_PRICE_STARTER_MONTHLY ||
+      process.env.STRIPE_PRICE_GROWTH_MONTHLY ||
+      process.env.STRIPE_PRICE_PRO_MONTHLY ||
+      process.env.STRIPE_PRICE_MULTI_MONTHLY ||
+      process.env.STRIPE_PRICE_AGENCY_MONTHLY,
+  );
+  const twilio = Boolean(
+    process.env.TWILIO_ACCOUNT_SID &&
+      process.env.TWILIO_AUTH_TOKEN &&
+      (process.env.TWILIO_MESSAGING_SERVICE_SID || process.env.TWILIO_FROM_NUMBER),
+  );
   const base = await appUrl();
 
   return (
@@ -40,6 +56,13 @@ export default async function SetupPage() {
           okText="Key detected — reviews, replies and reports are AI-written."
           missingText="Not set — the app uses built-in smart templates. Add the key for genuinely AI-written drafts."
           action={ai ? <TestAiButton /> : undefined}
+        />
+
+        <Item
+          ok={openAi}
+          title="AI Content Studio (OPENAI_API_KEY)"
+          okText="Key detected — exact Google post, reply, and Q&A previews can use OpenAI generation."
+          missingText="Not set — the governed Content Studio cannot generate new post images or exact drafts."
         />
 
         <Item
@@ -89,6 +112,20 @@ export default async function SetupPage() {
           missingText="Not set — falls back to AUTH_SECRET. Add the value Claude generated for you."
         />
         <Item
+          ok={assetSigningSecret}
+          title="Approved image delivery signing"
+          okText="Set — Google can fetch an approved post image through a short-lived signed URL."
+          missingText="Not set — production local-post publishing fails closed. Set CONTENT_ASSET_SIGNING_SECRET."
+        />
+        <Item
+          ok={cronSecret && db.configured}
+          warn={cronSecret !== db.configured}
+          title="Continuous monitoring (CRON_SECRET + database)"
+          okText="Ready — scheduled read-only profile audits can persist and safely resume in batches."
+          warnText="Partially configured. Continuous monitoring requires both CRON_SECRET and DATABASE_URL."
+          missingText="Not set — automatic evidence refresh remains disabled; owner-triggered sync still works."
+        />
+        <Item
           ok={appUrlSet}
           title="Site address (NEXT_PUBLIC_APP_URL)"
           okText={`Set — QR codes permanently point at ${base}.`}
@@ -96,15 +133,23 @@ export default async function SetupPage() {
         />
         <Item
           ok={resend}
-          title="Email sending (RESEND_API_KEY) — optional, later"
-          okText="Key detected — email delivery is configured."
-          missingText="Not set — review-request emails, invites and password resets are queued behind this. Fine to add later."
+          title="Email sending (Resend)"
+          okText="Key detected — review requests, invites, password resets, and agency reports can send."
+          missingText="Not set — email delivery remains disabled and actions report the missing configuration."
         />
         <Item
-          ok={stripe}
-          title="Billing (STRIPE_SECRET_KEY) — optional, later"
-          okText="Key detected — plans, checkout and the billing portal are live."
-          missingText="Not set — the app runs on the free/trial tier; plan upgrades show an honest 'connect billing' state. Fine to add later."
+          ok={stripe && stripeWebhook && stripePrice}
+          warn={stripe && (!stripeWebhook || !stripePrice)}
+          title="Billing lifecycle (Stripe)"
+          okText="Secret, webhook, and a paid price are detected — checkout, portal, and entitlement reconciliation are active."
+          warnText="Stripe is partially configured. Add STRIPE_WEBHOOK_SECRET and paid price IDs before selling plans."
+          missingText="Not set — plan upgrades show an honest connect-billing state."
+        />
+        <Item
+          ok={twilio}
+          title="SMS delivery (Twilio)"
+          okText="Credentials and a sender are detected — consent-led SMS, delivery callbacks, and STOP/HELP handling are active."
+          missingText="Not set — SMS delivery remains disabled. Email requests continue to work when Resend is connected."
         />
       </div>
 

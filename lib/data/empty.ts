@@ -102,6 +102,7 @@ export function emptyFoundlyData(input: NewWorkspaceInput): FoundlyData {
     reviews: [],
     drafts: [],
     tasks: [],
+    mutationJobs: [],
     campaigns: [],
     subscription: {
       id: `sub_${input.workspaceId}`,
@@ -149,6 +150,9 @@ export function emptyFoundlyData(input: NewWorkspaceInput): FoundlyData {
     integrations: [
       { id: `int_google_${locationId}`, locationId, provider: "google", label: "Google Business Profile", status: "disconnected", detail: "Connect to import your reviews and profile data" },
       { id: `int_places_${locationId}`, locationId, provider: "google_places", label: "Google business lookup", status: input.googlePlaceId ? "connected" : "disconnected", detail: input.googlePlaceId ? "Business matched on Google" : "Find your business to link your Google review page" },
+      { id: `int_website_${locationId}`, locationId, provider: "website", label: "Business website", status: "disconnected", detail: "A verified website URL is required for fact cross-checking" },
+      { id: `int_search_console_${locationId}`, locationId, provider: "search_console", label: "Google Search Console", status: "disconnected", detail: "Reconnect Google with read-only Search Console access" },
+      { id: `int_instagram_${locationId}`, locationId, provider: "instagram", label: "Instagram professional account", status: "disconnected", detail: "Connect an authorized Business or Creator account" },
       { id: `int_resend_${locationId}`, locationId, provider: "resend", label: "Email delivery", status: "pending", detail: "Email sending activates once the platform email service is configured" },
       { id: `int_twilio_${locationId}`, locationId, provider: "twilio", label: "SMS (A2P 10DLC)", status: "disconnected", detail: "SMS requires carrier registration (1–5 days)" },
       { id: `int_stripe_${locationId}`, locationId, provider: "stripe", label: "Billing", status: "pending", detail: "Trial active — payment method not required yet" },
@@ -217,6 +221,13 @@ export function makeSlug(businessName: string, salt: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 32);
-  const suffix = salt.replace(/^ws_/, "").slice(0, 6);
+  // IDs are generated with Nano ID and may contain uppercase, `_`, or `-`.
+  // Normalize the public slug to a URL-safe lowercase alphabet and retain
+  // enough entropy to avoid collisions between similarly named tenants.
+  const suffix = salt
+    .replace(/^ws[_-]?/i, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .slice(0, 12);
   return base ? `${base}-${suffix}` : suffix;
 }

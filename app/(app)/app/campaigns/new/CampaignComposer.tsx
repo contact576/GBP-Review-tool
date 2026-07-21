@@ -85,7 +85,7 @@ export function CampaignComposer({
         subject: channel === "email" ? subject.trim() || undefined : undefined,
         body: body.trim(),
       });
-      toast(`Scheduled to ${formatNumber(result.consented)} opted-in customers`, "success", "check-circle");
+      toast(`Draft saved for ${formatNumber(result.consented)} opted-in customers — nothing was sent`, "success", "check-circle");
       router.push("/app/campaigns");
     });
   }
@@ -231,21 +231,21 @@ export function CampaignComposer({
       <div className="flex items-start gap-2 rounded-btn border border-hairline bg-paper px-3 py-2.5">
         <Icon name="shield" size={16} className="mt-0.5 shrink-0 text-primary" />
         <p className="text-[13px] text-sub">
-          {MICROCOPY.noIncentive} Campaigns can&apos;t offer rewards in exchange for a review — every send includes a working unsubscribe.
+          {MICROCOPY.noIncentive} Campaign delivery stays disabled until provider delivery and a working unsubscribe are connected.
         </p>
       </div>
 
       {/* Send */}
       <div className="space-y-2">
-        <Button onClick={send} loading={pending} disabled={!canSend} icon="send" size="lg" fullWidth>
-          Review &amp; send to {formatNumber(consented)} customers
+        <Button onClick={send} loading={pending} disabled={!canSend} icon="check" size="lg" fullWidth>
+          Save draft for {formatNumber(consented)} customers
         </Button>
         {consented === 0 ? (
           <p className="text-center text-[13px] text-danger">
-            No customers have opted in to marketing — nothing can be sent.
+            No customers have opted in to marketing — this audience is empty.
           </p>
         ) : body.trim().length === 0 ? (
-          <p className="text-center text-[13px] text-faint">Add a message to enable sending.</p>
+          <p className="text-center text-[13px] text-faint">Add a message to save the draft.</p>
         ) : null}
       </div>
     </div>

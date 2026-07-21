@@ -21,10 +21,10 @@ export default async function ThanksPage({ params }: { params: Promise<{ token: 
         </div>
       </div>
       <h1 className="mt-6 text-[24px] font-extrabold leading-tight text-ink animate-slide-up">
-        You just made {business}&apos;s day
+        Your review is ready to share
       </h1>
       <p className="mt-2 max-w-xs text-[14px] leading-relaxed text-sub">
-        Thanks for sharing your experience. Adding a photo to your review makes it even more helpful.
+        Finish posting it in the Google tab. If you already did, thank you for supporting {business}.
       </p>
       <a
         href={result?.location.reviewUrl ?? "#"}
@@ -32,7 +32,7 @@ export default async function ThanksPage({ params }: { params: Promise<{ token: 
         rel="noopener noreferrer"
         className="mt-6 inline-flex min-h-[44px] items-center gap-2 rounded-btn border border-hairline bg-card px-5 py-3 text-[14px] font-semibold text-ink transition-all hover:bg-primary-wash active:scale-[0.98]"
       >
-        <Icon name="camera" size={18} /> Add a photo on Google
+        <Icon name="google" size={18} /> Return to Google
       </a>
       <Link href="/" className="mt-4 inline-flex min-h-[44px] items-center text-[13px] text-faint underline underline-offset-2 transition-all active:scale-[0.98]">
         Done

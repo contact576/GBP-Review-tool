@@ -96,3 +96,55 @@ export function genericCampaignEmail(input: {
     html: wrap(p(input.body.replace(/\n/g, "<br/>")) + unsub, { brand: input.brand }),
   };
 }
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    const entities: Record<string, string> = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#039;",
+    };
+    return entities[character] ?? character;
+  });
+}
+
+export function agencyGrowthReportEmail(input: {
+  brandName: string;
+  primary: string;
+  clientName: string;
+  city: string;
+  growthScore: number;
+  rating: number;
+  newReviews30d: number;
+  needsReply: number;
+}): { subject: string; html: string; text: string } {
+  const brand = escapeHtml(input.brandName);
+  const client = escapeHtml(input.clientName);
+  const city = escapeHtml(input.city);
+  const primary = /^#[0-9A-Fa-f]{6}$/.test(input.primary) ? input.primary : PRIMARY;
+  const metric = (label: string, value: string) =>
+    `<td style="width:25%;padding:8px"><div style="border:1px solid ${HAIRLINE};border-radius:12px;padding:14px 10px;text-align:center"><div style="font-size:22px;font-weight:800;color:${INK}">${value}</div><div style="margin-top:4px;font-size:11px;color:${SUB}">${label}</div></div></td>`;
+  const followUp = input.needsReply
+    ? `${input.needsReply} review${input.needsReply === 1 ? "" : "s"} still need a reply.`
+    : "Every detected review has a reply.";
+  const body = `
+    <div style="font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:${primary}">Monthly growth report</div>
+    <div style="font-size:24px;font-weight:800;margin:8px 0 4px">${client}</div>
+    <div style="font-size:13px;color:${SUB};margin-bottom:20px">${city} · Prepared by ${brand}</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>
+      ${metric("Growth score", String(input.growthScore))}
+      ${metric("Rating", input.rating.toFixed(1))}
+      ${metric("New reviews", String(input.newReviews30d))}
+      ${metric("Needs reply", String(input.needsReply))}
+    </tr></table>
+    <div style="margin-top:20px;border-left:4px solid ${primary};background:${PAPER};padding:14px 16px;border-radius:0 10px 10px 0;font-size:14px;line-height:1.5;color:${INK}">
+      You earned ${input.newReviews30d} new review${input.newReviews30d === 1 ? "" : "s"} in the last 30 days. ${followUp}
+    </div>`;
+  return {
+    subject: `${client}: your monthly local growth report`,
+    html: wrap(body, { brand }),
+    text: `${client} monthly growth report\nGrowth score: ${input.growthScore}\nRating: ${input.rating.toFixed(1)}\nNew reviews (30d): ${input.newReviews30d}\nNeeds reply: ${input.needsReply}\nPrepared by ${brand}.`,
+  };
+}

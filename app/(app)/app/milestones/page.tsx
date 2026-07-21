@@ -1,4 +1,4 @@
-import { getData } from "@/lib/data";
+import { getProviderFor, getSessionAndData } from "@/lib/data";
 import { Card } from "@/components/ds/Card";
 import { EmptyState } from "@/components/ds/misc";
 import { PageHeader } from "@/components/app/PageHeader";
@@ -8,6 +8,8 @@ import { ReferralCard } from "@/components/app/ReferralCard";
 import { ShareMilestone } from "./ShareMilestone";
 import { formatDate } from "@/lib/utils/format";
 import type { Milestone } from "@/lib/data/types";
+import { createReferralCode } from "@/lib/referrals/code";
+import { appUrl } from "@/lib/utils/app-url";
 
 const KIND_ICON: Record<Milestone["kind"], IconName> = {
   reviews_25: "star", reviews_50: "star", reviews_100: "trophy",
@@ -15,7 +17,10 @@ const KIND_ICON: Record<Milestone["kind"], IconName> = {
 };
 
 export default async function MilestonesPage() {
-  const data = await getData();
+  const { data, session } = await getSessionAndData();
+  const provider = await getProviderFor(session);
+  const referralSummary = await provider.getReferralSummary(session.workspaceId);
+  const referralLink = `${await appUrl()}/sign-up?ref=${encodeURIComponent(createReferralCode(session.workspaceId))}`;
   const location = data.location;
   const reviewCount = location.reviewCount;
 
@@ -113,7 +118,7 @@ export default async function MilestonesPage() {
         <p className="text-[13px] text-faint">Milestones fire on genuine achievements — never fabricated.</p>
       </div>
 
-      <ReferralCard />
+      <ReferralCard link={referralLink} summary={referralSummary} />
     </div>
   );
 }

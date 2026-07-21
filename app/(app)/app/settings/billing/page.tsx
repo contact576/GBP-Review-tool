@@ -1,4 +1,4 @@
-import { getData } from "@/lib/data";
+import { getSessionAndData } from "@/lib/data";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge, EmptyState } from "@/components/ds/misc";
 import { ProgressMeter } from "@/components/charts";
@@ -26,7 +26,7 @@ const STATUS_BADGE: Record<
 };
 
 export default async function BillingSettingsPage() {
-  const data = await getData();
+  const { data, session } = await getSessionAndData();
   const sub = data.subscription;
   const currency = sub.currency;
   const invoices = data.invoices ?? [];
@@ -98,6 +98,12 @@ export default async function BillingSettingsPage() {
                 anytime — no lock-in.
               </p>
             )}
+
+            {sub.currentPeriodEnd && !trialing && effectiveTier !== "free" ? (
+              <p className="mt-2 text-[12px] font-semibold text-faint">
+                {sub.cancelAtPeriodEnd ? "Access continues until" : "Next renewal"}: {formatDate(sub.currentPeriodEnd)}
+              </p>
+            ) : null}
 
             {trialing ? (
               <details className="mt-1.5">
@@ -233,7 +239,7 @@ export default async function BillingSettingsPage() {
       {/* ── Data portability + demo control ──────────────────────────── */}
       <Card>
         <CardHeader title="Export & controls" />
-        <BillingActions customers={data.customers ?? []} />
+        <BillingActions customers={data.customers ?? []} isDemo={session.isDemo} />
         <p className="mt-3 text-[13px] text-faint">
           Your customer graph is always yours — export the full CSV anytime, no lock-in.
         </p>

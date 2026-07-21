@@ -45,10 +45,10 @@ export default async function ReportPage() {
   }));
 
   const foundleyDid = [
-    `Sent ${data.subscription.usage.requestsSent} review requests on your behalf`,
+    `Created ${data.subscription.usage.requestsSent} review requests in your workspace`,
     `Drafted ${data.subscription.usage.aiDraftsUsed} AI review & reply starting points`,
     `Detected ${data.subscription.usage.reviewsCaptured} new reviews and matched them to visits`,
-    `Kept ${repliesPosted} public replies posted for you`,
+    `Prepared ${repliesPosted} review replies in Foundly`,
   ];
 
   const nextTasks = (data.tasks ?? []).slice(0, 3);
@@ -149,7 +149,7 @@ export default async function ReportPage() {
           />
           <div className="grid w-full flex-1 grid-cols-3 gap-3">
             <Highlight value={since.newReviews.now} label="new reviews" icon="star" />
-            <Highlight value={repliesPosted} label="replies posted" icon="chat" />
+            <Highlight value={repliesPosted} label="replies prepared" icon="chat" />
             <Highlight value={data.location.reviewCount} label="total reviews" icon="google" />
           </div>
         </div>

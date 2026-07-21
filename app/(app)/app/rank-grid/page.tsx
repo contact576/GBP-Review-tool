@@ -9,6 +9,7 @@ import { StatTile } from "@/components/charts/StatTile";
 import { hasFeature } from "@/lib/billing/plans";
 import { formatDate } from "@/lib/utils/format";
 import { RankGridView } from "./RankGridView";
+import { RankGridRunner } from "./RankGridRunner";
 
 export default async function RankGridPage() {
   const data = await getData();
@@ -18,32 +19,66 @@ export default async function RankGridPage() {
     data.subscription.status === "trialing",
   );
   const scan = (data.rankScans ?? [])[0];
+  const month = new Date().toISOString().slice(0, 7);
+  const scansUsed = data.rankScans.filter((item) => item.ranAt.startsWith(month)).length;
+  const scanLimit = ["multi", "agency"].includes(data.subscription.tier) ? 20 : 4;
+  const runner = (
+    <RankGridRunner
+      scansUsed={scansUsed}
+      scanLimit={scanLimit}
+      connected={Boolean(data.location.googlePlaceId)}
+    />
+  );
 
   if (!scan) {
     return (
       <div className="space-y-5">
-        <PageHeader title="Rank Grid" sub="Where you rank on the map, point by point." />
+        <PageHeader
+          title={
+            <span className="inline-flex items-center gap-2">
+              Rank Grid <Badge tone="gold" icon="sparkles">Pro</Badge>
+            </span>
+          }
+          sub="Measure relevance-ranked Google Places visibility across nearby coordinates."
+        />
+        {entitled ? (
+          runner
+        ) : (
+          <Paywall feature="rank_grid" title="Run local visibility scans">
+            <Card>
+              <EmptyState
+                icon="grid"
+                title="Google Places visibility scanning"
+                description="Scan 9 or 25 nearby coordinates for one search keyword on Pro."
+              />
+            </Card>
+          </Paywall>
+        )}
         <Card>
-          <EmptyState icon="grid" title="No scan yet" description="Run a rank-grid scan to see your local map coverage." />
+          <EmptyState
+            icon="grid"
+            title="No scan yet"
+            description="Run a visibility scan to establish your local search baseline."
+          />
         </Card>
       </div>
     );
   }
 
   const points = scan.points ?? [];
-  const green = points.filter((p) => p.rank !== null && p.rank <= 3).length;
-  const amber = points.filter((p) => p.rank !== null && p.rank > 3 && p.rank <= 10).length;
-  const red = points.filter((p) => p.rank === null || p.rank > 10).length;
+  const green = points.filter((point) => point.rank !== null && point.rank <= 3).length;
+  const amber = points.filter(
+    (point) => point.rank !== null && point.rank > 3 && point.rank <= 10,
+  ).length;
+  const red = points.filter((point) => point.rank === null || point.rank > 10).length;
   const total = points.length;
-
   const kpis = [
     { label: "Average rank", value: scan.avgRank.toFixed(1) },
-    { label: "Share of local pack", value: `${Math.round(scan.shareOfLocalPack * 100)}%` },
+    { label: "Top-3 coverage", value: `${Math.round(scan.shareOfLocalPack * 100)}%` },
     { label: "Top-3 points", value: `${green}/${total}` },
     { label: "Not found", value: red },
   ];
 
-  // Free teaser — the keyword + coverage headline stays visible on every plan.
   const overview = (
     <Card raised>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -53,38 +88,31 @@ export default async function RankGridPage() {
             <Icon name="search" size={14} /> {scan.keyword}
           </span>
           <p className="mt-2 data-chip text-faint">
-            {scan.gridSize}×{scan.gridSize} grid · scanned {formatDate(scan.ranAt)}
+            {scan.gridSize}×{scan.gridSize} grid · {scan.radiusKm ?? 3} km radius · scanned {formatDate(scan.ranAt)}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Badge tone="primary">{amber} on page</Badge>
-        </div>
+        <Badge tone="primary">{amber} rank 4–10</Badge>
       </div>
-
       <div className="mt-5 grid grid-cols-2 gap-y-6 border-t border-hairline pt-5 sm:grid-cols-4 sm:gap-y-0 sm:divide-x sm:divide-hairline">
-        {kpis.map((k, i) => (
+        {kpis.map((kpi, index) => (
           <StatTile
-            key={k.label}
+            key={kpi.label}
             boxless
-            label={k.label}
-            value={k.value}
-            className={cn("sm:px-5", i === 0 && "sm:pl-0")}
+            label={kpi.label}
+            value={kpi.value}
+            className={cn("sm:px-5", index === 0 && "sm:pl-0")}
           />
         ))}
       </div>
     </Card>
   );
 
-  // The valuable detail — coverage grid, takeaway, and scan meta. Pro-gated.
   const details = (
     <div className="space-y-5">
-      {/* Geo-grid */}
       <Card>
-        <CardHeader kicker="Coverage" title="Local map coverage" />
+        <CardHeader kicker="Coverage" title="Local visibility grid" />
         <RankGridView scan={scan} />
       </Card>
-
-      {/* Takeaway */}
       <Card className="border-primary/30 bg-primary-wash/50">
         <div className="flex items-start gap-3">
           <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-primary text-white">
@@ -93,17 +121,20 @@ export default async function RankGridPage() {
           <div>
             <div className="text-[16px] font-bold text-ink">What this means</div>
             <p className="mt-0.5 text-[14px] text-sub">
-              You&apos;re in the top 3 at {green} of {total} search points and invisible (below the top 20)
-              at {red}. Coverage is strongest near the clinic and fades at the edges — more reviews and
-              fresh posts widen that circle.
+              You appear in the top three at {green} of {total} search points and below the first 20
+              at {red}. Compare future scans to see whether profile work and new reviews improve your
+              relevance-ranked Google Places visibility.
             </p>
           </div>
         </div>
       </Card>
-
       <div className="flex flex-wrap items-center gap-2 px-1">
-        <Badge tone="neutral" icon="credit-card">Scan cost: {total} checks · 1 of 4 monthly scans used</Badge>
-        <p className="text-[13px] text-faint">Grid scans query Google from each point — detected {formatDate(scan.ranAt)}.</p>
+        <Badge tone="neutral" icon="credit-card">
+          Scan cost: {total} checks · {scansUsed} of {scanLimit} monthly scans used
+        </Badge>
+        <p className="text-[13px] text-faint">
+          Source: Google Places Text Search (relevance ranked) · scanned {formatDate(scan.ranAt)}.
+        </p>
       </div>
     </div>
   );
@@ -113,15 +144,13 @@ export default async function RankGridPage() {
       <PageHeader
         title={
           <span className="inline-flex items-center gap-2">
-            Rank Grid
-            <Badge tone="gold" icon="sparkles">Pro</Badge>
+            Rank Grid <Badge tone="gold" icon="sparkles">Pro</Badge>
           </span>
         }
-        sub="Your Google ranking sampled across a grid of nearby search points."
+        sub="Measure relevance-ranked Google Places visibility across nearby coordinates."
       />
-
+      {entitled ? runner : null}
       {overview}
-
       {entitled ? (
         details
       ) : (

@@ -1,6 +1,10 @@
 import { buildSeed } from "./seed";
+import { nanoid } from "nanoid";
 import { emptyFoundlyData, makeSlug } from "./empty";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import { canonicalPhone } from "@/lib/sms/phone";
+import { PLANS } from "@/lib/billing/plans";
+import { mergeSuggestionInbox } from "@/lib/suggestions/inbox";
 import type {
   DataProvider,
   CaptureCustomerInput,
@@ -18,6 +22,7 @@ import type {
   GoogleSyncResult,
   SaveGoogleCredentialInput,
   GoogleCredential,
+  InstagramCredential,
 } from "./provider";
 // Id conventions + pure helpers only — the server-only Google modules
 // (places/profile-sync) are dynamically imported inside the sync methods so
@@ -45,6 +50,10 @@ import type {
   WorkspaceSettings,
   WhiteLabelConfig,
   Integration,
+  AiContentAsset,
+  ContentPublishingJob,
+  MonitoringRun,
+  Notification,
 } from "./types";
 
 /**
@@ -72,6 +81,14 @@ interface MemoryStore {
   workspaces: Map<string, FoundlyData>;
   users: Map<string, StoredUser>; // key: lowercase email
   credentials: Map<string, GoogleCredential>; // key: workspaceId
+  instagramCredentials: Map<string, InstagramCredential>; // key: workspaceId
+  aiContentAssets: Map<string, AiContentAsset>; // key: asset id
+  contentPublishingJobs: Map<string, ContentPublishingJob>; // key: job id
+  monitoringRuns: Map<string, MonitoringRun>; // key: run id
+  passwordResets: Map<
+    string,
+    { userId: string; expiresAt: string; createdAt: string; usedAt?: string }
+  >; // key: SHA-256 token hash
 }
 
 const globalRef = globalThis as unknown as { __foundlyStore?: MemoryStore };
@@ -82,11 +99,31 @@ function store(): MemoryStore {
       workspaces: new Map(),
       users: new Map(),
       credentials: new Map(),
+      instagramCredentials: new Map(),
+      aiContentAssets: new Map(),
+      contentPublishingJobs: new Map(),
+      monitoringRuns: new Map(),
+      passwordResets: new Map(),
     };
   }
   // Back-compat for stores created before credentials existed.
   if (!globalRef.__foundlyStore.credentials) {
     globalRef.__foundlyStore.credentials = new Map();
+  }
+  if (!globalRef.__foundlyStore.instagramCredentials) {
+    globalRef.__foundlyStore.instagramCredentials = new Map();
+  }
+  if (!globalRef.__foundlyStore.aiContentAssets) {
+    globalRef.__foundlyStore.aiContentAssets = new Map();
+  }
+  if (!globalRef.__foundlyStore.contentPublishingJobs) {
+    globalRef.__foundlyStore.contentPublishingJobs = new Map();
+  }
+  if (!globalRef.__foundlyStore.monitoringRuns) {
+    globalRef.__foundlyStore.monitoringRuns = new Map();
+  }
+  if (!globalRef.__foundlyStore.passwordResets) {
+    globalRef.__foundlyStore.passwordResets = new Map();
   }
   return globalRef.__foundlyStore;
 }
@@ -119,7 +156,7 @@ function nowIso() {
   return new Date().toISOString();
 }
 function id(prefix: string) {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+  return `${prefix}_${nanoid()}`;
 }
 
 function toAuthUser(u: StoredUser, isDemo = false): AuthUser {
@@ -138,6 +175,168 @@ export const memoryProvider: DataProvider = {
 
   async getData(workspaceId) {
     return db(workspaceId);
+  },
+
+  async listOrganizationWorkspaces(workspaceId) {
+    const current = db(workspaceId);
+    if (!current) return [];
+    return allWorkspaces()
+      .filter((data) => data.organization.id === current.organization.id)
+      .map((data) => {
+        const latest = [...data.metrics].sort((a, b) => a.date.localeCompare(b.date)).pop();
+        const trustedScore = data.workspace.isDemo || Boolean(latest?.sources?.scores);
+        return {
+          workspaceId: data.workspace.id,
+          locationId: data.location.id,
+          name: data.location.name,
+          city: data.location.city,
+          rating: data.location.rating,
+          reviewCount: data.location.reviewCount,
+          growthScore: trustedScore ? latest?.growthScore ?? null : null,
+        };
+      });
+  },
+
+  async listAgencyClients(workspaceId) {
+    const current = db(workspaceId);
+    if (!current) return [];
+    if (current.workspace.isDemo) return current.agency.clients;
+    const cutoff = Date.now() - 30 * 86_400_000;
+    return current.agency.clients.map((stored) => {
+      const child = allWorkspaces().find(
+        (candidate) =>
+          candidate.organization.id === current.organization.id &&
+          candidate.location.id === stored.locationId,
+      );
+      if (!child) return stored;
+      const latest = [...child.metrics].sort((a, b) => a.date.localeCompare(b.date)).pop();
+      const growthScore = latest?.sources?.scores ? latest.growthScore : 0;
+      const needsReply = child.reviews.filter((review) => review.needsReply).length;
+      const newReviews30d = child.reviews.filter(
+        (review) => new Date(review.publishedAt).getTime() >= cutoff,
+      ).length;
+      const status =
+        growthScore < 50 || needsReply > 7
+          ? "at_risk" as const
+          : growthScore < 70 || needsReply > 3
+            ? "attention" as const
+            : "healthy" as const;
+      return {
+        ...stored,
+        name: child.location.name,
+        city: child.location.city,
+        growthScore,
+        rating: child.location.rating,
+        newReviews30d,
+        needsReply,
+        plan: child.subscription.tier,
+        status,
+      };
+    });
+  },
+
+  async createOrganizationWorkspace(workspaceId, input) {
+    const current = db(workspaceId);
+    if (!current) return { ok: false, error: "Current workspace was not found." };
+    const siblings = allWorkspaces().filter(
+      (data) => data.organization.id === current.organization.id,
+    );
+    const plan = PLANS[current.subscription.tier];
+    if (siblings.length >= plan.limits.locations) {
+      return {
+        ok: false,
+        error: `${plan.name} supports ${plan.limits.locations} location${plan.limits.locations === 1 ? "" : "s"}. Upgrade to add another.`,
+      };
+    }
+    const nextWorkspaceId = id("ws");
+    const data = emptyFoundlyData({
+      workspaceId: nextWorkspaceId,
+      organizationId: current.organization.id,
+      userId: id("usr"),
+      businessName: input.businessName,
+      ownerName: current.owner.name,
+      email: current.owner.email,
+      industryKey: input.industryKey,
+      category: input.category,
+      region: input.region,
+      city: input.city,
+      address: input.address,
+    });
+    data.organization = { ...current.organization };
+    data.workspace.plan = current.subscription.tier;
+    data.subscription.tier = current.subscription.tier;
+    data.subscription.status = current.subscription.status;
+    data.subscription.interval = current.subscription.interval;
+    data.subscription.currency = current.subscription.currency;
+    data.subscription.usage.aiDraftsLimit = plan.limits.aiDraftsPerMonth;
+    data.subscription.usage.smsCreditsTotal = plan.limits.smsCredits;
+    store().workspaces.set(nextWorkspaceId, data);
+    if (current.subscription.tier === "agency" && input.contactEmail) {
+      current.agency.clients.push({
+        locationId: data.location.id,
+        name: data.location.name,
+        city: data.location.city,
+        contactEmail: input.contactEmail,
+        growthScore: 0,
+        rating: 0,
+        newReviews30d: 0,
+        needsReply: 0,
+        plan: "agency",
+        status: "attention",
+      });
+    }
+    const workspace = (await memoryProvider.listOrganizationWorkspaces(nextWorkspaceId)).find(
+      (item) => item.workspaceId === nextWorkspaceId,
+    );
+    return workspace
+      ? { ok: true, workspace }
+      : { ok: false, error: "The new location could not be loaded." };
+  },
+
+  async getReferralSummary(workspaceId) {
+    const referrals = allWorkspaces().filter(
+      (data) => data.workspace.referredByWorkspaceId === workspaceId,
+    );
+    const qualified = referrals.filter(
+      (data) =>
+        data.workspace.referralRewardStatus === "applied" ||
+        (data.subscription.status === "active" && data.subscription.tier !== "free"),
+    );
+    const applied = referrals.filter(
+      (data) => data.workspace.referralRewardStatus === "applied",
+    );
+    return {
+      signedUp: referrals.length,
+      qualified: qualified.length,
+      creditsApplied: applied.length * 50,
+      pendingCredits: (qualified.length - applied.length) * 50,
+    };
+  },
+
+  async getPendingReferralReward(referredWorkspaceId) {
+    const referred = db(referredWorkspaceId);
+    if (
+      !referred?.workspace.referredByWorkspaceId ||
+      referred.workspace.referralRewardStatus !== "pending" ||
+      referred.subscription.status !== "active" ||
+      referred.subscription.tier === "free"
+    ) return null;
+    const referrer = db(referred.workspace.referredByWorkspaceId);
+    const stripeCustomerId = referrer?.subscription.stripeCustomerId;
+    if (!referrer || !stripeCustomerId) return null;
+    return {
+      referredWorkspaceId,
+      referrerWorkspaceId: referrer.workspace.id,
+      stripeCustomerId,
+      currency: referrer.subscription.currency,
+    };
+  },
+
+  async markReferralRewardApplied(referredWorkspaceId, appliedAt) {
+    const referred = db(referredWorkspaceId);
+    if (!referred || referred.workspace.referralRewardStatus === "applied") return;
+    referred.workspace.referralRewardStatus = "applied";
+    referred.workspace.referralRewardAppliedAt = appliedAt;
   },
 
   // ── Auth ──────────────────────────────────────────────────
@@ -163,6 +362,10 @@ export const memoryProvider: DataProvider = {
       category: input.industryKey.replace(/_/g, " "),
       region: input.region,
     });
+    if (input.referredByWorkspaceId && s.workspaces.has(input.referredByWorkspaceId)) {
+      data.workspace.referredByWorkspaceId = input.referredByWorkspaceId;
+      data.workspace.referralRewardStatus = "pending";
+    }
     s.workspaces.set(workspaceId, data);
 
     const user: StoredUser = {
@@ -190,7 +393,45 @@ export const memoryProvider: DataProvider = {
     return user ? toAuthUser(user) : null;
   },
 
-  async upsertGoogleUser({ googleSub, email, name }) {
+  async savePasswordResetToken(input) {
+    const s = store();
+    for (const [hash, record] of s.passwordResets) {
+      if (record.userId === input.userId || new Date(record.expiresAt).getTime() <= Date.now()) {
+        s.passwordResets.delete(hash);
+      }
+    }
+    s.passwordResets.set(input.tokenHash, {
+      userId: input.userId,
+      expiresAt: input.expiresAt,
+      createdAt: input.createdAt,
+    });
+  },
+
+  async revokePasswordResetToken(tokenHash) {
+    store().passwordResets.delete(tokenHash);
+  },
+
+  async consumePasswordResetToken(tokenHash, passwordHash, consumedAt) {
+    const s = store();
+    const record = s.passwordResets.get(tokenHash);
+    if (
+      !record ||
+      record.usedAt ||
+      new Date(record.expiresAt).getTime() <= new Date(consumedAt).getTime()
+    ) {
+      return false;
+    }
+    const user = [...s.users.values()].find((candidate) => candidate.id === record.userId);
+    if (!user) return false;
+    record.usedAt = consumedAt;
+    user.passwordHash = passwordHash;
+    for (const [hash, candidate] of s.passwordResets) {
+      if (candidate.userId === user.id && hash !== tokenHash) s.passwordResets.delete(hash);
+    }
+    return true;
+  },
+
+  async upsertGoogleUser({ googleSub, email, name, referredByWorkspaceId }) {
     const s = store();
     const key = email.trim().toLowerCase();
     const existing = s.users.get(key);
@@ -213,6 +454,10 @@ export const memoryProvider: DataProvider = {
       category: "Local business",
       region: "US",
     });
+    if (referredByWorkspaceId && s.workspaces.has(referredByWorkspaceId)) {
+      data.workspace.referredByWorkspaceId = referredByWorkspaceId;
+      data.workspace.referralRewardStatus = "pending";
+    }
     s.workspaces.set(workspaceId, data);
     const user: StoredUser = {
       id: userId,
@@ -264,10 +509,10 @@ export const memoryProvider: DataProvider = {
       staffId: input.staffId,
       visitCount: 1,
       lastVisitAt: nowIso(),
-      lastRequestAt: nowIso(),
+      lastRequestAt: undefined,
       services: input.services,
       sentiment: "neutral",
-      lifecycleStage: "requested",
+      lifecycleStage: "new",
       consent,
       tags: [],
     };
@@ -281,10 +526,10 @@ export const memoryProvider: DataProvider = {
       staffId: input.staffId,
       channel: input.channel,
       token: id("tok"),
-      status: input.serviceConsent ? "sent" : "queued",
+      status: "queued",
       isTest: false,
       createdAt: nowIso(),
-      sentAt: input.serviceConsent ? nowIso() : undefined,
+      sentAt: undefined,
       attributes: [],
     };
     data.requests.unshift(request);
@@ -294,7 +539,6 @@ export const memoryProvider: DataProvider = {
       staff.captures += 1;
       staff.lastActiveAt = nowIso();
     }
-    data.subscription.usage.requestsSent += 1;
     data.auditLog.unshift({
       id: id("aud"), workspaceId: data.workspace.id, actor: staff?.displayName ?? "Owner",
       action: "customer.captured", targetType: "customer", targetId: customer.id, at: nowIso(),
@@ -364,19 +608,63 @@ export const memoryProvider: DataProvider = {
       staffId: input.staffId,
       channel: input.channel,
       token: id("tok"),
-      status: "sent",
+      status: "queued",
       isTest: false,
       createdAt: nowIso(),
-      sentAt: nowIso(),
+      sentAt: undefined,
       attributes: [],
     };
     data.requests.unshift(request);
-    if (customer) {
-      customer.lastRequestAt = nowIso();
-      if (customer.lifecycleStage === "new") customer.lifecycleStage = "requested";
-    }
-    data.subscription.usage.requestsSent += 1;
     return request;
+  },
+
+  async setRequestDeliveryStatus(workspaceId, requestId, status, reason) {
+    const data = mustDb(workspaceId);
+    const request = data.requests.find((item) => item.id === requestId);
+    if (!request) return null;
+    const accepted = status === "sent" || status === "delivered";
+    const firstAccepted = accepted && !request.sentAt;
+    request.status = status;
+    if (accepted) request.sentAt ??= nowIso();
+    if (reason) request.suppressedReason = reason;
+    if (firstAccepted) {
+      data.subscription.usage.requestsSent += 1;
+      if (request.channel === "sms") data.subscription.usage.smsCreditsUsed += 1;
+      const customer = data.customers.find((item) => item.id === request.customerId);
+      if (customer) {
+        customer.lastRequestAt = request.sentAt;
+        if (customer.lifecycleStage === "new") customer.lifecycleStage = "requested";
+      }
+    }
+    return request;
+  },
+
+  async suppressPhoneGlobally(phone, reason) {
+    const needle = canonicalPhone(phone);
+    if (!needle) return 0;
+    let count = 0;
+    for (const data of allWorkspaces()) {
+      const matches = data.customers.filter((customer) => canonicalPhone(customer.phone) === needle);
+      if (!matches.length) continue;
+      if (!data.suppression.some((entry) => entry.matchType === "phone" && canonicalPhone(entry.value) === needle)) {
+        data.suppression.unshift({
+          id: id("sup"),
+          locationId: data.location.id,
+          matchType: "phone",
+          value: needle,
+          reason,
+          addedAt: nowIso(),
+        });
+      }
+      for (const customer of matches) {
+        customer.suppressedReason = reason;
+        customer.consent.serviceConsent = false;
+        customer.consent.marketingConsent = false;
+        customer.consent.withdrawnAt = nowIso();
+        count += 1;
+      }
+    }
+    return count;
   },
 
   async advanceRequest(token, to, meta) {
@@ -470,12 +758,9 @@ export const memoryProvider: DataProvider = {
     const task = data.tasks.find((t) => t.id === taskId);
     if (!task) return null;
     task.status = "done";
-    data.location.profile.completeness = Math.min(100, data.location.profile.completeness + 3);
-    if (task.kind === "post") data.location.profile.postCount += 1;
-    if (task.kind === "qna") data.location.profile.qnaCount += 1;
     data.auditLog.unshift({
       id: id("aud"), workspaceId, actor: "Owner",
-      action: "task.approved", targetType: "gbp_task", targetId: task.id, at: nowIso(),
+      action: "task.completed", targetType: "gbp_task", targetId: task.id, at: nowIso(),
     });
     return task;
   },
@@ -516,10 +801,9 @@ export const memoryProvider: DataProvider = {
       postedAt: nowIso(), approvedBy: "Owner",
     };
     review.needsReply = false;
-    data.location.profile.responseRate = Math.min(1, data.location.profile.responseRate + 0.02);
     data.auditLog.unshift({
       id: id("aud"), workspaceId, actor: "Owner",
-      action: "review.replied", targetType: "review", targetId: review.id, at: nowIso(),
+      action: "review.reply_saved", targetType: "review", targetId: review.id, at: nowIso(),
     });
     return review;
   },
@@ -543,7 +827,7 @@ export const memoryProvider: DataProvider = {
       channel: input.channel,
       subject: input.subject,
       body: input.body,
-      status: input.scheduledAt ? "scheduled" : "sending",
+      status: "draft",
       scheduledAt: input.scheduledAt,
       audienceTotal: total,
       audienceConsented: consented,
@@ -553,7 +837,7 @@ export const memoryProvider: DataProvider = {
           count: total - consented,
         },
       ],
-      stats: { sent: input.scheduledAt ? 0 : consented, opened: 0, clicked: 0 },
+      stats: { sent: 0, opened: 0, clicked: 0 },
       createdAt: nowIso(),
     };
     data.campaigns.unshift(campaign);
@@ -679,6 +963,19 @@ export const memoryProvider: DataProvider = {
     }
   },
 
+  async saveRankGridScan(workspaceId, scan) {
+    const data = mustDb(workspaceId);
+    data.rankScans = [scan, ...data.rankScans.filter((item) => item.id !== scan.id)].slice(0, 24);
+  },
+
+  async markAgencyReportsSent(workspaceId, locationIds, sentAt) {
+    const data = mustDb(workspaceId);
+    const selected = new Set(locationIds);
+    data.agency.clients = data.agency.clients.map((client) =>
+      selected.has(client.locationId) ? { ...client, lastReportSent: sentAt } : client,
+    );
+  },
+
   async updateWhiteLabel(workspaceId, config: WhiteLabelConfig) {
     const data = mustDb(workspaceId);
     data.agency.whiteLabel = config;
@@ -697,6 +994,12 @@ export const memoryProvider: DataProvider = {
     const data = mustDb(workspaceId);
     if (patch.status !== undefined) data.subscription.status = patch.status;
     if (patch.tier !== undefined) data.subscription.tier = patch.tier;
+    if (patch.interval !== undefined) data.subscription.interval = patch.interval;
+    if (patch.stripeCustomerId !== undefined) data.subscription.stripeCustomerId = patch.stripeCustomerId;
+    if (patch.stripeSubscriptionId !== undefined) data.subscription.stripeSubscriptionId = patch.stripeSubscriptionId;
+    if (patch.stripePriceId !== undefined) data.subscription.stripePriceId = patch.stripePriceId;
+    if (patch.currentPeriodEnd !== undefined) data.subscription.currentPeriodEnd = patch.currentPeriodEnd;
+    if (patch.cancelAtPeriodEnd !== undefined) data.subscription.cancelAtPeriodEnd = patch.cancelAtPeriodEnd;
   },
 
   async setIntegrationStatus(workspaceId, provider, status, detail) {
@@ -763,8 +1066,13 @@ export const memoryProvider: DataProvider = {
       return { ok: false, error: "The demo uses sample data." };
     }
     const credential = store().credentials.get(workspaceId) ?? null;
-    const { fetchGoogleProfile } = await import("@/lib/google/profile-sync");
-    const outcome = await fetchGoogleProfile(credential, data.location, nowIso());
+    const { fetchGoogleProfile, locationFromProfileSnapshot } = await import("@/lib/google/profile-sync");
+    const outcome = await fetchGoogleProfile(
+      credential,
+      data.location,
+      nowIso(),
+      store().instagramCredentials.get(workspaceId) ?? null,
+    );
     if (!outcome.ok) return { ok: false, error: outcome.error };
 
     if (outcome.pendingApproval) {
@@ -777,6 +1085,16 @@ export const memoryProvider: DataProvider = {
       return { ok: true, pendingApproval: true };
     }
 
+    if (outcome.profileSnapshot) {
+      data.location = locationFromProfileSnapshot(data.location, outcome.profileSnapshot);
+    }
+    if (outcome.profileAudit) data.location.gbpAudit = outcome.profileAudit;
+    if (outcome.suggestionInbox) {
+      data.location.suggestionInbox = mergeSuggestionInbox(
+        data.location.suggestionInbox ?? [],
+        outcome.suggestionInbox,
+      );
+    }
     if (typeof outcome.rating === "number") data.location.rating = outcome.rating;
     if (typeof outcome.reviewCount === "number") data.location.reviewCount = outcome.reviewCount;
     const imported = outcome.reviews ?? [];
@@ -785,19 +1103,38 @@ export const memoryProvider: DataProvider = {
       ...imported,
       ...data.reviews.filter((r) => !isImportedGoogleReview(r.id)),
     ];
+    for (const snapshot of outcome.performanceSnapshots ?? []) {
+      data.metrics = upsertSnapshot(data.metrics, snapshot);
+    }
     if (outcome.snapshot) data.metrics = upsertSnapshot(data.metrics, outcome.snapshot);
     data.location.gbpConnected = true;
     const g = data.integrations.find((i) => i.provider === "google");
     if (g) {
-      g.status = "connected";
+      g.status = outcome.performanceError ? "needs_attention" : "connected";
       g.detail = `Google Business Profile synced — ${outcome.reviewCount ?? imported.length} reviews`;
+      if (outcome.performanceError) {
+        g.detail = `Reviews synced; GBP performance unavailable - ${outcome.performanceError}`;
+      } else {
+        g.detail = `Google Business Profile synced - ${outcome.reviewCount ?? imported.length} reviews and performance`;
+      }
       g.lastSyncAt = nowIso();
+    }
+    const external = outcome.profileSnapshot?.externalEvidence;
+    if (external) {
+      updateMemoryIntegration(data, "website", external.website.status, external.website.error ?? `${external.website.pages.length} website pages cross-checked`);
+      updateMemoryIntegration(data, "search_console", external.searchConsole.status, external.searchConsole.error ?? `${external.searchConsole.rows.length} Search Console query rows synced`);
+      updateMemoryIntegration(data, "instagram", external.instagram.status, external.instagram.error ?? `${external.instagram.media.length} Instagram posts synced`);
     }
     return {
       ok: true,
       rating: outcome.rating,
       reviewCount: outcome.reviewCount,
       reviewsImported: imported.length,
+      capabilityScore: outcome.profileSnapshot?.capabilityScore.score,
+      mediaImported: outcome.profileSnapshot?.media.length,
+      warnings: outcome.profileSnapshot?.warnings,
+      auditFindings: outcome.profileAudit?.summary.openFindings,
+      suggestionsCreated: outcome.suggestionInbox?.length,
     };
   },
 
@@ -816,6 +1153,144 @@ export const memoryProvider: DataProvider = {
 
   async getGoogleCredential(workspaceId) {
     return store().credentials.get(workspaceId) ?? null;
+  },
+
+  async saveInstagramCredential(workspaceId, input) {
+    const now = nowIso();
+    const existing = store().instagramCredentials.get(workspaceId);
+    store().instagramCredentials.set(workspaceId, {
+      workspaceId,
+      encryptedAccessToken: input.encryptedAccessToken,
+      accountId: input.accountId,
+      username: input.username ?? existing?.username,
+      scopes: input.scopes,
+      expiresAt: input.expiresAt,
+      connectedAt: existing?.connectedAt ?? now,
+      updatedAt: now,
+    });
+  },
+
+  async getInstagramCredential(workspaceId) {
+    return store().instagramCredentials.get(workspaceId) ?? null;
+  },
+
+  async updateProfileSuggestion(workspaceId, suggestionId, patch) {
+    const data = mustDb(workspaceId);
+    const suggestion = (data.location.suggestionInbox ?? []).find((item) => item.id === suggestionId);
+    if (!suggestion) return null;
+    Object.assign(suggestion, patch);
+    return suggestion;
+  },
+
+  async createProfileMutationJob(workspaceId, job) {
+    const data = mustDb(workspaceId);
+    data.mutationJobs ??= [];
+    const existing = data.mutationJobs.find((item) => item.idempotencyKey === job.idempotencyKey);
+    if (existing) return { job: existing, created: false };
+    if (job.workspaceId !== workspaceId) throw new Error("Mutation job workspace mismatch.");
+    data.mutationJobs.unshift(job);
+    return { job, created: true };
+  },
+
+  async updateProfileMutationJob(workspaceId, jobId, patch) {
+    const data = mustDb(workspaceId);
+    data.mutationJobs ??= [];
+    const job = data.mutationJobs.find((item) => item.id === jobId);
+    if (!job) return null;
+    Object.assign(job, patch);
+    return job;
+  },
+
+  async getProfileMutationJobByIdempotency(workspaceId, idempotencyKey) {
+    const data = mustDb(workspaceId);
+    data.mutationJobs ??= [];
+    return data.mutationJobs.find((item) => item.idempotencyKey === idempotencyKey) ?? null;
+  },
+
+  async createContentPublishingJob(workspaceId, job) {
+    if (job.workspaceId !== workspaceId) throw new Error("Content publishing job workspace mismatch.");
+    const existing = [...store().contentPublishingJobs.values()].find(
+      (item) => item.workspaceId === workspaceId && item.idempotencyKey === job.idempotencyKey,
+    );
+    if (existing) return { job: existing, created: false };
+    store().contentPublishingJobs.set(job.id, job);
+    return { job, created: true };
+  },
+
+  async updateContentPublishingJob(workspaceId, jobId, patch) {
+    const job = store().contentPublishingJobs.get(jobId);
+    if (!job || job.workspaceId !== workspaceId) return null;
+    Object.assign(job, patch);
+    return job;
+  },
+
+  async getContentPublishingJobByIdempotency(workspaceId, idempotencyKey) {
+    return [...store().contentPublishingJobs.values()].find(
+      (item) => item.workspaceId === workspaceId && item.idempotencyKey === idempotencyKey,
+    ) ?? null;
+  },
+
+  async listGoogleConnectedWorkspaceIds() {
+    return [...store().credentials.keys()].filter((workspaceId) => {
+      const data = db(workspaceId);
+      return Boolean(data && !data.workspace.isDemo);
+    });
+  },
+
+  async createMonitoringRun(workspaceId, run) {
+    if (run.workspaceId !== workspaceId) throw new Error("Monitoring run workspace mismatch.");
+    const existing = [...store().monitoringRuns.values()].find(
+      (item) => item.workspaceId === workspaceId && item.windowKey === run.windowKey,
+    );
+    if (existing) return { run: existing, created: false };
+    store().monitoringRuns.set(run.id, run);
+    return { run, created: true };
+  },
+
+  async updateMonitoringRun(workspaceId, runId, patch) {
+    const run = store().monitoringRuns.get(runId);
+    if (!run || run.workspaceId !== workspaceId) return null;
+    Object.assign(run, patch);
+    return run;
+  },
+
+  async getMonitoringRunByWindow(workspaceId, windowKey) {
+    return [...store().monitoringRuns.values()].find(
+      (item) => item.workspaceId === workspaceId && item.windowKey === windowKey,
+    ) ?? null;
+  },
+
+  async saveAiContentAsset(workspaceId, asset) {
+    if (asset.workspaceId !== workspaceId) throw new Error("AI content asset workspace mismatch.");
+    for (const [id, current] of store().aiContentAssets) {
+      if (current.workspaceId === workspaceId && current.suggestionId === asset.suggestionId && id !== asset.id) {
+        store().aiContentAssets.delete(id);
+      }
+    }
+    store().aiContentAssets.set(asset.id, asset);
+  },
+
+  async getAiContentAssetById(workspaceId, assetId) {
+    const asset = store().aiContentAssets.get(assetId);
+    return asset?.workspaceId === workspaceId ? asset : null;
+  },
+
+  async getAiContentAssetBySuggestion(workspaceId, suggestionId) {
+    return [...store().aiContentAssets.values()].find(
+      (asset) => asset.workspaceId === workspaceId && asset.suggestionId === suggestionId,
+    ) ?? null;
+  },
+
+  async appendAuditLog(workspaceId, entry) {
+    const data = mustDb(workspaceId);
+    if (entry.workspaceId !== workspaceId) throw new Error("Audit log workspace mismatch.");
+    if (!data.auditLog.some((item) => item.id === entry.id)) data.auditLog.unshift(entry);
+  },
+
+  async appendNotification(workspaceId, notification: Notification) {
+    const data = mustDb(workspaceId);
+    if (notification.locationId !== data.location.id) throw new Error("Notification location mismatch.");
+    if (!data.notifications.some((item) => item.id === notification.id)) data.notifications.unshift(notification);
   },
 
   // ── Team ──────────────────────────────────────────────────
@@ -884,3 +1359,32 @@ export const memoryProvider: DataProvider = {
     store().workspaces.set(DEMO_WORKSPACE_ID, buildSeed());
   },
 };
+
+function updateMemoryIntegration(
+  data: FoundlyData,
+  provider: Integration["provider"],
+  sourceStatus: "synced" | "not_connected" | "not_authorized" | "unavailable" | "error",
+  detail: string,
+): void {
+  const status: Integration["status"] = sourceStatus === "synced"
+    ? "connected"
+    : sourceStatus === "not_connected"
+      ? "disconnected"
+      : "needs_attention";
+  const existing = data.integrations.find((item) => item.provider === provider);
+  if (existing) {
+    existing.status = status;
+    existing.detail = detail;
+    if (status === "connected") existing.lastSyncAt = nowIso();
+    return;
+  }
+  data.integrations.push({
+    id: `int_${provider}_${data.location.id}`,
+    locationId: data.location.id,
+    provider,
+    label: provider === "website" ? "Business website" : provider === "search_console" ? "Google Search Console" : "Instagram professional account",
+    status,
+    detail,
+    ...(status === "connected" ? { lastSyncAt: nowIso() } : {}),
+  });
+}

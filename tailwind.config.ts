@@ -24,6 +24,7 @@ const config: Config = {
           dark: "#085546",
           tint: "#E3F0EB",
           wash: "#F0F6F3",
+          mint: "#8FE3CE",
         },
         gold: {
           DEFAULT: "#E8A33D",
@@ -39,6 +40,7 @@ const config: Config = {
       },
       fontFamily: {
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
+        serif: ["Iowan Old Style", "Baskerville", "Georgia", "serif"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
       borderRadius: {

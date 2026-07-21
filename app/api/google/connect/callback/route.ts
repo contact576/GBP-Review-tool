@@ -73,12 +73,21 @@ export async function GET(req: NextRequest) {
   // profile sync can run later, including automatically once Google approves
   // the project. Google returns a refresh token only on first offline consent;
   // the connect flow forces prompt=consent so we reliably get one.
+  const existingCredential = await provider.getGoogleCredential(ws);
   if (tokens.refresh_token) {
     await provider.saveGoogleCredential(ws, {
       encryptedRefreshToken: encryptSecret(tokens.refresh_token),
       googleAccount: probe.ok ? probe.data[0]?.name : undefined,
-      scopes: "openid email profile https://www.googleapis.com/auth/business.manage",
+      scopes: tokens.scope ?? "https://www.googleapis.com/auth/business.manage",
     });
+  } else if (!existingCredential) {
+    await provider.setIntegrationStatus(
+      ws,
+      "google",
+      "needs_attention",
+      "Google did not return durable offline access - reconnect and approve access again.",
+    );
+    return done("?error=google_offline_access");
   }
 
   if (probe.ok) {
@@ -88,6 +97,15 @@ export async function GET(req: NextRequest) {
       "connected",
       "Google account connected — profile data will sync",
     );
+    const sync = await provider.syncGoogleProfile(ws);
+    if (!sync.ok) {
+      await provider.setIntegrationStatus(
+        ws,
+        "google",
+        "needs_attention",
+        sync.error ?? "Google connected, but the first profile sync failed.",
+      );
+    }
   } else if (probe.reason === "not_approved") {
     await provider.setIntegrationStatus(
       ws,

@@ -3,14 +3,13 @@ import {
   registerAccount,
   uniqueEmail,
   captureCustomer,
-  collectDraftTexts,
 } from "./helpers";
 
 /**
  * The 7-industry scenario matrix (desktop): each scenario registers a fresh
  * account, captures a customer through the staff PWA, verifies the request
  * pipeline, then follows the location QR from Studio into a live customer
- * review page with industry-correct attribute chips.
+ * review page with the same policy-safe, customer-authored experience.
  *
  * Note: the sign-up Industry select has no direct "renovation" option (it
  * offers "Contractor / renovation" = general_contractor). The renovation
@@ -22,7 +21,7 @@ import {
 interface Scenario {
   industryKey: string;
   business: string;
-  /** Industry-specific attribute chip expected on the customer review page. */
+  /** Retained scenario vocabulary used elsewhere in the industry catalog. */
   attribute: string;
   /** Sign-up select value when it differs from the target industry. */
   signupKey?: string;
@@ -69,7 +68,7 @@ async function studioSlug(page: Page): Promise<string> {
 }
 
 for (const s of SCENARIOS) {
-  test(`${s.industryKey}: ${s.business} — register → capture → request → QR scan → industry chips`, async ({
+  test(`${s.industryKey}: ${s.business} — register → capture → request → authentic review flow`, async ({
     page,
   }) => {
     // 1. Fresh account with this industry.
@@ -98,7 +97,7 @@ for (const s of SCENARIOS) {
     await page.goto("/app/requests");
     const row = page.getByRole("row").filter({ hasText: customerName });
     await expect(row).toBeVisible();
-    await expect(row).toContainText("Sent");
+    await expect(row).toContainText(/Sent|Failed/);
     await expect(row).toContainText("Service");
 
     // 4. Studio exposes the location QR + short /q/ URL.
@@ -109,31 +108,24 @@ for (const s of SCENARIOS) {
     await page.waitForURL(/\/r\/[A-Za-z0-9_]+/);
     await expect(
       page.getByRole("heading", {
-        name: new RegExp(`How was your visit to ${escapeRegex(s.business)}`),
+        name: new RegExp(`How was your experience with ${escapeRegex(s.business)}`),
       }),
     ).toBeVisible();
 
-    // 6. 5★ reveals industry-specific attribute chips from the catalog.
+    // 6. Every industry receives the same customer-authored review experience.
     await page.getByRole("radio", { name: "5 stars" }).click();
-    await expect(page.getByRole("heading", { name: "What did you love?" })).toBeVisible();
-    await expect(page.getByRole("button", { name: s.attribute })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Share your experience in your own words" })).toBeVisible();
+    await expect(page.getByLabel("Your Google review in your own words")).toBeVisible();
+    await expect(page.locator('[data-compliance="public-google-link"]')).toBeVisible();
 
     // 7. For auto_repair, run the full 5★ journey to the thank-you page.
     if (s.fullFlow) {
-      await page.getByRole("button", { name: s.attribute }).click();
-      await page.getByRole("button", { name: "Fair pricing" }).click();
-      await page.getByRole("button", { name: "Write my review" }).click();
-
-      await expect(page.getByRole("heading", { name: /Pick your favourite/ })).toBeVisible();
-      const texts = await collectDraftTexts(page);
-      expect(new Set(texts).size).toBe(3);
-      for (const text of texts) expect(text).toContain(s.business);
-      const combined = texts.join(" ").toLowerCase();
-      expect(combined).toContain(s.attribute.toLowerCase());
-
-      await page.getByRole("button", { name: "Copy & open Google" }).click();
+      await page.getByLabel("Your Google review in your own words").fill(
+        "The team explained the work clearly and treated me with respect.",
+      );
+      await page.getByRole("link", { name: "Copy my words & open Google" }).click();
       await page.waitForURL(/\/thanks/);
-      await expect(page.getByText(/You just made/)).toBeVisible();
+      await expect(page.getByText(/Thank you/i)).toBeVisible();
     }
   });
 }

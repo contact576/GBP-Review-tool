@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { searchBusinesses } from "@/lib/google/places";
+import { boundedString, guardAuthenticatedApi, readJsonObject } from "@/lib/security/api";
 
 export const runtime = "nodejs";
 
@@ -9,11 +10,17 @@ export const runtime = "nodejs";
  * an expected state the UI turns into an honest fallback, not an error.
  */
 export async function POST(req: Request) {
+  const guard = await guardAuthenticatedApi(req, {
+    scope: "places-search",
+    roles: ["owner", "manager"],
+    limit: 30,
+  });
+  if (!guard.ok) return guard.response;
   let query = "";
   let region: "US" | "CA" = "US";
   try {
-    const body = (await req.json()) as { query?: unknown; region?: unknown };
-    query = typeof body.query === "string" ? body.query : "";
+    const body = await readJsonObject(req, 8_192);
+    query = boundedString(body.query, 200);
     if (body.region === "CA") region = "CA";
   } catch {
     return NextResponse.json(

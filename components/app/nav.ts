@@ -46,7 +46,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Studio",
     items: [
-      { label: "QR & Widgets", href: "/app/studio", icon: "qr" },
+      { label: "AI Content Studio", href: "/app/studio", icon: "sparkles" },
       { label: "Growth Report", href: "/app/report", icon: "file" },
     ],
   },
@@ -67,7 +67,7 @@ export const MORE_ITEMS: NavItem[] = [
   { label: "Analytics", href: "/app/analytics", icon: "trend" },
   { label: "AI Visibility", href: "/app/visibility", icon: "compass", pro: true },
   { label: "Rank Grid", href: "/app/rank-grid", icon: "grid", pro: true },
-  { label: "QR & Widgets", href: "/app/studio", icon: "qr" },
+  { label: "AI Content Studio", href: "/app/studio", icon: "sparkles" },
   { label: "Growth Report", href: "/app/report", icon: "file" },
   { label: "Milestones", href: "/app/milestones", icon: "trophy" },
   { label: "Settings", href: "/app/settings/business", icon: "settings" },

@@ -7,6 +7,7 @@ import { Icon, type IconName } from "@/components/icons";
 
 const ITEMS: { label: string; href: string; icon: IconName }[] = [
   { label: "Business", href: "/app/settings/business", icon: "building" },
+  { label: "Locations", href: "/app/settings/locations", icon: "map-pin" },
   { label: "Channels", href: "/app/settings/channels", icon: "send" },
   { label: "Consent", href: "/app/settings/consent", icon: "shield" },
   { label: "Team", href: "/app/settings/team", icon: "users" },

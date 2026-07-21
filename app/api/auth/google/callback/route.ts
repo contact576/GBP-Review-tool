@@ -4,6 +4,9 @@ import { getRealProvider } from "@/lib/data";
 import { googleSignInEnabled } from "@/lib/google/config";
 import { decodeIdToken, exchangeCode, OAUTH_STATE_COOKIE } from "@/lib/google/oauth";
 import { appUrl } from "@/lib/utils/app-url";
+import { parseReferralCode } from "@/lib/referrals/code";
+
+const REFERRAL_COOKIE = "foundly_referral";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +23,7 @@ export async function GET(req: NextRequest) {
   const fail = (code: string) => {
     const res = NextResponse.redirect(new URL(`/sign-in?error=${code}`, origin));
     res.cookies.delete(OAUTH_STATE_COOKIE);
+    res.cookies.delete(REFERRAL_COOKIE);
     return res;
   };
 
@@ -47,6 +51,9 @@ export async function GET(req: NextRequest) {
     googleSub: identity.sub,
     email: identity.email,
     name: identity.name,
+    referredByWorkspaceId: parseReferralCode(
+      req.cookies.get(REFERRAL_COOKIE)?.value,
+    ) ?? undefined,
   });
   if (!user) return fail("google");
 
@@ -61,5 +68,6 @@ export async function GET(req: NextRequest) {
 
   const res = NextResponse.redirect(new URL("/app", origin));
   res.cookies.delete(OAUTH_STATE_COOKIE);
+  res.cookies.delete(REFERRAL_COOKIE);
   return res;
 }

@@ -25,7 +25,69 @@ import type {
   Region,
   Integration,
   Subscription,
+  RankGridScan,
+  AgencyClient,
+  ProfileSuggestion,
+  ProfileMutationJob,
+  ContentPublishingJob,
+  MonitoringRun,
+  AiContentAsset,
+  AuditLog,
+  Notification,
 } from "./types";
+
+export type ProfileSuggestionPatch = Partial<
+  Pick<
+    ProfileSuggestion,
+    | "status"
+    | "proposedValue"
+    | "exactPreviewReady"
+    | "blockers"
+    | "nextStep"
+    | "updatedAt"
+    | "approvedAt"
+    | "approvedBy"
+    | "factsConfirmedAt"
+    | "factsConfirmedBy"
+  >
+>;
+
+export type ProfileMutationJobPatch = Partial<
+  Pick<
+    ProfileMutationJob,
+    | "status"
+    | "beforeValue"
+    | "providerResponse"
+    | "verifiedValue"
+    | "rollbackValue"
+    | "attempts"
+    | "updatedAt"
+    | "startedAt"
+    | "appliedAt"
+    | "failedAt"
+    | "lastError"
+  >
+>;
+
+export type ContentPublishingJobPatch = Partial<
+  Pick<
+    ContentPublishingJob,
+    | "status"
+    | "providerResponse"
+    | "providerResourceName"
+    | "verifiedValue"
+    | "attempts"
+    | "updatedAt"
+    | "startedAt"
+    | "publishedAt"
+    | "failedAt"
+    | "lastError"
+  >
+>;
+
+export type MonitoringRunPatch = Partial<
+  Pick<MonitoringRun, "status" | "attempts" | "summary" | "updatedAt" | "completedAt" | "lastError">
+>;
 
 // ── Auth types ──────────────────────────────────────────────
 export interface RegisterInput {
@@ -35,6 +97,7 @@ export interface RegisterInput {
   businessName: string;
   industryKey: string;
   region: Region;
+  referredByWorkspaceId?: string;
 }
 
 export interface AuthUser {
@@ -98,7 +161,7 @@ export interface CreateCampaignInput {
 
 export interface SubmitPrivateFeedbackInput {
   token: string;
-  rating: 1 | 2 | 3;
+  rating: 1 | 2 | 3 | 4 | 5;
   text: string;
 }
 
@@ -141,6 +204,14 @@ export interface GoogleSyncResult {
   reviewsImported?: number;
   /** True when the deeper Business Profile sync is waiting on Google's API approval. */
   pendingApproval?: boolean;
+  /** Applicable Google profile completion, excluding unsupported capabilities. */
+  capabilityScore?: number;
+  /** Number of original Google-hosted media records refreshed in this sync. */
+  mediaImported?: number;
+  /** Optional-source failures that did not invalidate the core profile sync. */
+  warnings?: string[];
+  auditFindings?: number;
+  suggestionsCreated?: number;
   error?: string;
 }
 
@@ -161,6 +232,66 @@ export interface GoogleCredential {
   updatedAt: string;
 }
 
+export interface InstagramCredential {
+  workspaceId: string;
+  encryptedAccessToken: string;
+  accountId: string;
+  username?: string;
+  scopes: string;
+  expiresAt?: string;
+  connectedAt: string;
+  updatedAt: string;
+}
+
+export interface SaveInstagramCredentialInput {
+  encryptedAccessToken: string;
+  accountId: string;
+  username?: string;
+  scopes: string;
+  expiresAt?: string;
+}
+
+export interface PasswordResetRecord {
+  tokenHash: string;
+  userId: string;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface OrganizationWorkspaceSummary {
+  workspaceId: string;
+  locationId: string;
+  name: string;
+  city: string;
+  rating: number;
+  reviewCount: number;
+  growthScore: number | null;
+}
+
+export interface CreateOrganizationWorkspaceInput {
+  businessName: string;
+  industryKey: string;
+  category: string;
+  region: Region;
+  city?: string;
+  address?: string;
+  contactEmail?: string;
+}
+
+export interface ReferralSummary {
+  signedUp: number;
+  qualified: number;
+  creditsApplied: number;
+  pendingCredits: number;
+}
+
+export interface PendingReferralReward {
+  referredWorkspaceId: string;
+  referrerWorkspaceId: string;
+  stripeCustomerId: string;
+  currency: "USD" | "CAD";
+}
+
 /**
  * The single data-access contract — now multi-tenant.
  * Scoped methods take the workspaceId (always resolved server-side from the
@@ -172,15 +303,32 @@ export interface DataProvider {
 
   // Whole-tenant read
   getData(workspaceId: string): Promise<FoundlyData | null>;
+  listOrganizationWorkspaces(workspaceId: string): Promise<OrganizationWorkspaceSummary[]>;
+  listAgencyClients(workspaceId: string): Promise<AgencyClient[]>;
+  createOrganizationWorkspace(
+    workspaceId: string,
+    input: CreateOrganizationWorkspaceInput,
+  ): Promise<{ ok: true; workspace: OrganizationWorkspaceSummary } | { ok: false; error: string }>;
+  getReferralSummary(workspaceId: string): Promise<ReferralSummary>;
+  getPendingReferralReward(referredWorkspaceId: string): Promise<PendingReferralReward | null>;
+  markReferralRewardApplied(referredWorkspaceId: string, appliedAt: string): Promise<void>;
 
   // Auth
   registerUser(input: RegisterInput): Promise<RegisterResult>;
   verifyCredentials(email: string, password: string): Promise<AuthUser | null>;
   getUserByEmail(email: string): Promise<AuthUser | null>;
+  savePasswordResetToken(input: PasswordResetRecord): Promise<void>;
+  revokePasswordResetToken(tokenHash: string): Promise<void>;
+  consumePasswordResetToken(
+    tokenHash: string,
+    passwordHash: string,
+    consumedAt: string,
+  ): Promise<boolean>;
   upsertGoogleUser(input: {
     googleSub: string;
     email: string;
     name: string;
+    referredByWorkspaceId?: string;
   }): Promise<AuthUser | null>;
 
   // Focused reads
@@ -201,6 +349,14 @@ export interface DataProvider {
     inputs: AddCustomerInput[],
   ): Promise<{ added: number; skipped: number }>;
   sendRequest(workspaceId: string, input: SendRequestInput): Promise<ReviewRequest>;
+  setRequestDeliveryStatus(
+    workspaceId: string,
+    requestId: string,
+    status: "sent" | "delivered" | "failed" | "suppressed",
+    reason?: string,
+  ): Promise<ReviewRequest | null>;
+  /** Apply a signed provider opt-out across every tenant record for this phone. */
+  suppressPhoneGlobally(phone: string, reason: string): Promise<number>;
   advanceRequest(
     token: string,
     to: "opened" | "clicked" | "posted_google" | "private_feedback",
@@ -243,6 +399,8 @@ export interface DataProvider {
     patch: Partial<WorkspaceSettings>,
   ): Promise<void>;
   updateLocationGoogle(workspaceId: string, patch: GoogleLocationPatch): Promise<void>;
+  saveRankGridScan(workspaceId: string, scan: RankGridScan): Promise<void>;
+  markAgencyReportsSent(workspaceId: string, locationIds: string[], sentAt: string): Promise<void>;
   updateWhiteLabel(workspaceId: string, config: WhiteLabelConfig): Promise<void>;
 
   // Feature flags (admin)
@@ -253,7 +411,19 @@ export interface DataProvider {
   /** Patch the workspace subscription's status and/or tier. */
   setSubscription(
     workspaceId: string,
-    patch: { status?: Subscription["status"]; tier?: Subscription["tier"] },
+    patch: Partial<
+      Pick<
+        Subscription,
+        | "status"
+        | "tier"
+        | "interval"
+        | "stripeCustomerId"
+        | "stripeSubscriptionId"
+        | "stripePriceId"
+        | "currentPeriodEnd"
+        | "cancelAtPeriodEnd"
+      >
+    >,
   ): Promise<void>;
 
   // Google data sync
@@ -266,12 +436,64 @@ export interface DataProvider {
     input: SaveGoogleCredentialInput,
   ): Promise<void>;
   getGoogleCredential(workspaceId: string): Promise<GoogleCredential | null>;
+  saveInstagramCredential(workspaceId: string, input: SaveInstagramCredentialInput): Promise<void>;
+  getInstagramCredential(workspaceId: string): Promise<InstagramCredential | null>;
   setIntegrationStatus(
     workspaceId: string,
     provider: Integration["provider"],
     status: Integration["status"],
     detail: string,
   ): Promise<void>;
+  updateProfileSuggestion(
+    workspaceId: string,
+    suggestionId: string,
+    patch: ProfileSuggestionPatch,
+  ): Promise<ProfileSuggestion | null>;
+  createProfileMutationJob(
+    workspaceId: string,
+    job: ProfileMutationJob,
+  ): Promise<{ job: ProfileMutationJob; created: boolean }>;
+  updateProfileMutationJob(
+    workspaceId: string,
+    jobId: string,
+    patch: ProfileMutationJobPatch,
+  ): Promise<ProfileMutationJob | null>;
+  getProfileMutationJobByIdempotency(
+    workspaceId: string,
+    idempotencyKey: string,
+  ): Promise<ProfileMutationJob | null>;
+  createContentPublishingJob(
+    workspaceId: string,
+    job: ContentPublishingJob,
+  ): Promise<{ job: ContentPublishingJob; created: boolean }>;
+  updateContentPublishingJob(
+    workspaceId: string,
+    jobId: string,
+    patch: ContentPublishingJobPatch,
+  ): Promise<ContentPublishingJob | null>;
+  getContentPublishingJobByIdempotency(
+    workspaceId: string,
+    idempotencyKey: string,
+  ): Promise<ContentPublishingJob | null>;
+  listGoogleConnectedWorkspaceIds(): Promise<string[]>;
+  createMonitoringRun(
+    workspaceId: string,
+    run: MonitoringRun,
+  ): Promise<{ run: MonitoringRun; created: boolean }>;
+  updateMonitoringRun(
+    workspaceId: string,
+    runId: string,
+    patch: MonitoringRunPatch,
+  ): Promise<MonitoringRun | null>;
+  getMonitoringRunByWindow(
+    workspaceId: string,
+    windowKey: string,
+  ): Promise<MonitoringRun | null>;
+  saveAiContentAsset(workspaceId: string, asset: AiContentAsset): Promise<void>;
+  getAiContentAssetById(workspaceId: string, assetId: string): Promise<AiContentAsset | null>;
+  getAiContentAssetBySuggestion(workspaceId: string, suggestionId: string): Promise<AiContentAsset | null>;
+  appendAuditLog(workspaceId: string, entry: AuditLog): Promise<void>;
+  appendNotification(workspaceId: string, notification: Notification): Promise<void>;
 
   // Team
   createStaffInvite(

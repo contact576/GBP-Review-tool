@@ -169,8 +169,14 @@ export function CustomersView({
 
   function sendRequest(c: Customer) {
     start(async () => {
-      await sendRequestAction({ locationId, customerId: c.id, channel: c.email ? "email" : "sms" });
-      toast(`Request sent to ${c.name}`, "success", "send");
+      const result = await sendRequestAction({ locationId, customerId: c.id, channel: c.email ? "email" : "sms" });
+      toast(
+        result.status === "sent"
+          ? `Request accepted for delivery to ${c.name}`
+          : `Request saved, but delivery failed for ${c.name}`,
+        result.status === "sent" ? "success" : "warning",
+        result.status === "sent" ? "send" : "alert",
+      );
       setOpenId(null);
       router.refresh();
     });

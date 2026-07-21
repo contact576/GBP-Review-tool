@@ -16,6 +16,9 @@ export const MICROCOPY = Object.freeze({
 
   // Review page / customer flow
   aiDraftDisclaimer: "AI-drafted starting point — edit it so it's your own words.",
+  customerWordsOnly: "Write about your genuine experience in your own words.",
+  aiReviewEditDisclaimer: "Optional clarity edit only - Foundly never adds services, names, keywords, or claims.",
+  samePathEveryRating: "The public Google review option is available for every rating.",
   publicLinkAlways: "Prefer to post publicly? Leave a Google review:",
   privateFeedbackHeader: "Tell us what went wrong — the owner reads every word.",
   privateFeedbackReassure: "This goes privately to the owner. You can still post a public review below.",
@@ -30,7 +33,7 @@ export const MICROCOPY = Object.freeze({
   poweredByFoundly: "Reviews powered by Foundly",
 
   // GBP guardrail
-  nameStuffBlocked: "We never edit your business name — that would violate Google policy.",
+  nameStuffBlocked: "We never add ranking keywords to your business name; real-world corrections require confirmed evidence and explicit approval.",
 } as const);
 
 export type MicrocopyKey = keyof typeof MICROCOPY;

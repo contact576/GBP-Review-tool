@@ -1,54 +1,51 @@
-# Foundly — v3 Execution Report (Full-Blueprint Completion & Design Overhaul)
+# Foundly v3 implementation report
 
-Honest status of the v3 pass. Everything below is either verified green, or
-clearly marked as ready-but-inactive / gated. Nothing is faked.
+This file records the current implementation state after the commercial hardening and premium dashboard pass.
 
-## What was rebuilt / added
+## Product and design
 
-**Wave 1 — Desktop-first design overhaul**
-- One standardized `PageHeader` (H1 26/30) across owner, agency, and admin — killed the drifting/inconsistent titles.
-- Content width 1560→1400 (readable, not sprawling); prominent business label in the top bar.
-- Guided `EmptyState` (icon + sentence + action) replacing bare-`<p>` empties across owner/admin/agency; admin table text bumped to 14px.
-- (Shell was already responsive: desktop rail + mobile bottom-tab + More sheet.)
+- Rebuilt the owner dashboard around the selected premium concept: dark executive hero, source-aware Growth Score, strong information hierarchy, compact KPI rhythm, and the “People found you / contacted you” trend treatment inspired by concept 3.
+- Standardized the authenticated shells, page headers, cards, charts, empty states, mobile navigation, account controls, and location switching.
+- Preserved accessibility signals in quantitative UI: text values accompany color, controls have accessible labels, responsive layouts keep touch targets, and customer review compliance paths remain visible at every rating.
 
-**Wave 2 — Premium re-skin of the two public surfaces**
-- Customer review flow: one decision per screen, labelled stars, attribute-chip grid, selectable AI draft cards (tone/regenerate/edit), "Copy & open Google" mega-CTA with Copied confirmation + restrained gold celebration; **1–3★ keeps the public Google link visible (compliance invariant preserved)**; powered-by badge; honest loading/offline/expired/already-used states; **no emoji**.
-- Staff PWA: ≤10s one-handed capture, dual consent (CASL), giant Send, optimistic tally + rank, kiosk QR, offline queue + validation.
+## Commercial systems implemented
 
-**Wave 3 — Every control real or honestly gated**
-- Integrations "Reconnect/Manage" → real per-provider routes (killed the setTimeout fake).
-- Admin feature flags → persist (setFeatureFlagAction, optimistic + rollback).
-- Customers CSV **import** → real parse + preview + de-dupe + importCustomersAction.
-- Email wired best-effort (Resend) into review-request + staff-invite; honest "queued" when unconfigured.
+- Auth: bcrypt credentials, Google sign-in, signed JWT sessions, role scoping, password recovery with expiring one-time hashed tokens, referral attribution across email and Google registration.
+- Security: bounded request parsing, authenticated AI endpoints, request rate limits, protected deep health, CSP and security headers, signed Stripe/Twilio webhooks, encrypted Google refresh tokens, workspace-scoped persistence.
+- Google: Places matching/details, complete GBP review pagination, Business Profile Performance time series, rolling dashboard snapshots, durable OAuth refresh, immediate post-connect sync, and explicit 3×3/5×5 Places visibility scans.
+- Delivery: Resend email, Twilio SMS, consent and suppression enforcement, E.164 validation, plan-credit limits, delivery callbacks, and STOP/HELP handling.
+- Billing: Stripe Checkout, customer reuse, Billing Portal, signed webhook lifecycle reconciliation, Price-to-plan entitlement mapping, cancellation/payment state, and idempotent referral credits.
+- Multi-location: isolated workspaces under one organization, plan limits, organization-verified switching, and location management UI.
+- Agency: paid-owner access, isolated client creation, live rollups from client workspaces, white-label configuration, economics, and branded per-client/bulk reports.
+- PWA: install manifest, app icon, staff service-worker registration, safe asset caching, and local offline capture queue. Authenticated HTML and API data are not cached.
 
-**Wave 4 — Commercial layer (ready-but-inactive)**
-- Real Billing screen: plan status + trial day-N + living-free explainer, AI/SMS usage meters, full plan matrix (Growth anchor, monthly/annual), upgrades → Stripe Checkout (honest "connect billing" when off), pause + **celebratory downgrade**.
-- Stripe adapter (checkout/portal/webhook-verify) + webhook route; Resend adapter + templates; `lib/billing/plans` entitlements engine; `/setup` + SETUP.md activation guides.
+## Data honesty
 
-**Wave 5 — Growth / moat features**
-- Milestone share cards (canvas PNG, watermarked).
-- Pro paywall gating (visibility, rank-grid) via entitlements.
-- Referral card (give/get shareable link).
-- Embeddable website widget (`/w/[slug]`) + real iframe embed snippet in Studio.
-- Review durability watchdog (vanished/at-risk banner + tab).
-- Reminder automations section (real on/off toggles).
-- Free-score: compare-any-business head-to-head + downloadable score card.
+- Dashboard values carry per-field source and freshness. Unavailable Google data does not become an invented zero.
+- Public Places review samples are labelled and kept separate from owned-profile review history.
+- Rank Grid is labelled as relevance-ranked Google Places Text Search visibility, not as scraped Google Maps Local Pack rank.
+- Demo actions are explicitly simulated and never write to production providers.
+- Unconfigured external providers return actionable configuration states and do not record fake success.
 
-**Wave 6 — Accessibility (WCAG AA)**
-- Additive pass on DS + chart components (dialog focus-trap, aria-live toasts, labelled inputs, value-as-text on dials/sparklines/bars). *(final agent — see commit log)*
+## Verification
 
-## Verified
-- `npm run typecheck` = 0 errors; `npm run build` green; **66/66 vitest**; **21/21 Playwright** (desktop 1440 + mobile 390) at each integration point.
-- Live deployment verified via `/api/health?deep=1` (AI, Places incl. Place Details, DB schema all green).
+- `npm run typecheck`: green.
+- `npx vitest run`: 91/91 green across 14 files.
+- `npm run build`: green on Next.js 15.5.20.
+- `npx playwright test`: 38/38 green across desktop and mobile.
+- `git diff --check`: clean apart from platform line-ending notices.
 
-## Ready-but-inactive (you activate with keys — nothing faked)
-- **Stripe** billing, **Resend** email, **Twilio/A2P** SMS — fully coded; honest "connect X" states until keys added (guides in SETUP.md).
+See `TESTING.md` for browser coverage and the exact command matrix.
 
-## Gated by external approval
-- **Google Business Profile API** (full review history import + Co-Pilot publishing + performance snapshot): built + unit-tested, live-untested until Google approves your project (pending, 1–2 weeks).
+## External launch gates
 
-## Honestly still partial / not built (would need more scope or paid data)
-- Multi-location rollup (schema is single-location today).
-- Rank-Grid / AI-Visibility **real** data providers (SERP/LLM scans) — shipped as honest Pro previews, not live scans.
-- Agency white-label report **send** engine (email-gated) and deeper admin console modules.
-- Native mobile apps (the web app is responsive; not a packaged PWA/native build).
+The code paths are implemented, but a production launch still depends on external state:
+
+- Google must approve the Cloud project for Business Profile APIs; the target accounts must grant the required OAuth scopes.
+- Resend needs a verified sending domain.
+- Twilio/carrier registration and production messaging policy approval must be complete.
+- Stripe live products, Prices, customer portal configuration, and webhook endpoint must be created in the live account.
+- Postgres backup/restore, provider quotas, billing alerts, error monitoring, privacy policy, terms, retention policy, and jurisdiction-specific legal review remain operator responsibilities.
+- Physical-device PWA and deliverability testing must be repeated against the final production origin.
+
+No source-control commit, push, or deployment is performed by this implementation pass unless explicitly requested.

@@ -1,19 +1,55 @@
+"use client";
+
+import { useMemo, useState, useTransition } from "react";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Button, LinkButton } from "@/components/ds/Button";
-import { Badge } from "@/components/ds/misc";
+import { Badge, EmptyState } from "@/components/ds/misc";
+import { Checkbox } from "@/components/ds/form";
 import { Icon } from "@/components/icons";
 import { formatRelative } from "@/lib/utils/format";
+import { sendAgencyReportsAction, type AgencyReportSendResult } from "@/lib/actions";
 import type { AgencyClient } from "@/lib/data/types";
 
-/**
- * Honest report roster: bulk sending waits on the email service (no fake
- * progress), while previewing the report itself is real.
- */
-export function ReportsSender({ clients, brandName }: { clients: AgencyClient[]; brandName: string }) {
-  const stale = clients.filter((c) => {
-    if (!c.lastReportSent) return true;
-    return Date.now() - new Date(c.lastReportSent).getTime() > 14 * 86_400_000;
-  }).length;
+export function ReportsSender({
+  clients,
+  brandName,
+  deliveryConnected,
+}: {
+  clients: AgencyClient[];
+  brandName: string;
+  deliveryConnected: boolean;
+}) {
+  const overdue = useMemo(
+    () =>
+      clients.filter(
+        (client) =>
+          !client.lastReportSent ||
+          Date.now() - new Date(client.lastReportSent).getTime() > 14 * 86_400_000,
+      ),
+    [clients],
+  );
+  const [selected, setSelected] = useState(
+    () => new Set((overdue.length ? overdue : clients).map((client) => client.locationId)),
+  );
+  const [pending, startTransition] = useTransition();
+  const [result, setResult] = useState<AgencyReportSendResult | null>(null);
+
+  function toggle(locationId: string, checked: boolean) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (checked) next.add(locationId);
+      else next.delete(locationId);
+      return next;
+    });
+  }
+
+  function sendSelected() {
+    setResult(null);
+    startTransition(async () => {
+      const response = await sendAgencyReportsAction([...selected]);
+      setResult(response);
+    });
+  }
 
   return (
     <Card>
@@ -23,50 +59,99 @@ export function ReportsSender({ clients, brandName }: { clients: AgencyClient[];
         action={
           <div className="flex items-center gap-2">
             <LinkButton href="/app/report" variant="secondary" size="sm" icon="file">
-              Preview report
+              Preview
             </LinkButton>
-            <span title="Sends when the email service is connected">
-              <Button variant="primary" size="sm" icon="send" disabled>
-                Send to all
-              </Button>
-            </span>
+            <Button
+              variant="primary"
+              size="sm"
+              icon="send"
+              loading={pending}
+              disabled={!selected.size || !deliveryConnected}
+              onClick={sendSelected}
+            >
+              Send {selected.size || "selected"}
+            </Button>
           </div>
         }
       />
 
-      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-btn bg-primary-wash p-3 text-[12px] text-sub">
-        <Icon name="file" size={16} className="shrink-0 text-primary" />
-        <span>
-          The Growth Report is the agency deliverable — a plain-English, {brandName}-branded monthly
-          recap of found-you, contacted-you and new-review activity.{" "}
-          {stale > 0 ? `${stale} client${stale === 1 ? "" : "s"} are overdue.` : "All clients are current."}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-btn bg-primary-wash p-3 text-[12px] text-sub">
+        <span className="flex min-w-0 items-start gap-2">
+          <Icon name="file" size={16} className="mt-0.5 shrink-0 text-primary" />
+          <span>
+            A plain-English, {brandName}-branded recap of Growth Score, rating, new reviews, and
+            outstanding replies. {overdue.length ? `${overdue.length} clients are overdue.` : "All clients are current."}
+          </span>
+        </span>
+        <span className="flex shrink-0 gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setSelected(new Set(overdue.map((client) => client.locationId)))}
+          >
+            Select overdue
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setSelected(new Set(clients.map((client) => client.locationId)))}
+          >
+            Select all
+          </Button>
         </span>
       </div>
 
-      <div className="mb-4 flex items-start gap-2 rounded-btn border border-hairline bg-card p-3 text-[12px] text-sub">
-        <Icon name="clock" size={15} className="mt-0.5 shrink-0 text-primary" />
-        <span>
-          <span className="font-semibold text-ink">Sending is not live yet.</span> Bulk report
-          emails go out when the email service is connected — until then, preview the report and
-          share it with clients directly.
-        </span>
-      </div>
+      {!deliveryConnected ? (
+        <div className="mb-4 flex items-start gap-2 rounded-btn border border-gold/30 bg-gold-tint p-3 text-[12px] text-gold-deep">
+          <Icon name="alert" size={15} className="mt-0.5 shrink-0" />
+          Connect Resend and verify EMAIL_FROM to activate report delivery.
+        </div>
+      ) : null}
+      {result ? (
+        <div
+          role="status"
+          className={`mb-4 rounded-btn border p-3 text-[13px] font-medium ${
+            result.ok
+              ? "border-primary/25 bg-primary-wash text-primary-dark"
+              : "border-danger/25 bg-danger-tint text-danger"
+          }`}
+        >
+          {result.message}
+        </div>
+      ) : null}
 
-      <ul className="divide-y divide-hairline">
-        {clients.map((c) => (
-          <li key={c.locationId} className="flex items-center gap-3 py-3">
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-[14px] font-semibold text-ink">{c.name}</div>
-              <div className="text-[12px] text-sub">{c.city} · Growth {c.growthScore}</div>
-            </div>
-            {c.lastReportSent ? (
-              <span className="text-[12px] text-faint">Last sent {formatRelative(c.lastReportSent)}</span>
-            ) : (
-              <Badge tone="sub" icon="clock">Never sent</Badge>
-            )}
-          </li>
-        ))}
-      </ul>
+      {clients.length ? (
+        <ul className="divide-y divide-hairline">
+          {clients.map((client) => (
+            <li key={client.locationId} className="flex items-center gap-3 py-3">
+              <Checkbox
+                checked={selected.has(client.locationId)}
+                onChange={(checked) => toggle(client.locationId, checked)}
+                label={<span className="sr-only">Select {client.name}</span>}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[14px] font-semibold text-ink">{client.name}</div>
+                <div className="truncate text-[12px] text-sub">
+                  {client.city} · {client.contactEmail ?? "Contact email missing"} · Growth {client.growthScore}
+                </div>
+              </div>
+              {client.lastReportSent ? (
+                <span className="text-[12px] text-faint">Last sent {formatRelative(client.lastReportSent)}</span>
+              ) : (
+                <Badge tone="sub" icon="clock">Never sent</Badge>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <EmptyState
+          icon="users"
+          title="No clients yet"
+          description="Add an agency client before sending a branded report."
+        />
+      )}
     </Card>
   );
 }

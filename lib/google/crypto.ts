@@ -15,8 +15,11 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 const FALLBACK_SECRET = "foundly-dev-encryption-set-ENCRYPTION_SECRET-in-production";
 
 function encryptionKey(): Buffer {
-  const secret =
-    process.env.ENCRYPTION_SECRET || process.env.AUTH_SECRET || FALLBACK_SECRET;
+  const configured = process.env.ENCRYPTION_SECRET || process.env.AUTH_SECRET;
+  if (process.env.NODE_ENV === "production" && !configured) {
+    throw new Error("ENCRYPTION_SECRET or AUTH_SECRET is required in production");
+  }
+  const secret = configured || FALLBACK_SECRET;
   return createHash("sha256").update(secret).digest();
 }
 

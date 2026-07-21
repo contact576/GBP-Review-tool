@@ -16,12 +16,13 @@ test.describe("demo mode", () => {
     await expect(page.getByTestId("demo-banner")).toBeVisible();
     await expect(page.getByTestId("demo-banner")).toContainText("Demo mode");
 
-    // Dashboard hero: Harbourview score dial with seeded (non-zero) data.
-    const hero = page.locator(".on-hero");
-    await expect(hero).toBeVisible();
-    await expect(hero).toContainText("Local Growth Score");
-    await expect(hero).toContainText("Harbourview Physiotherapy");
-    await expect(hero).toContainText("/ 100");
+    // Premium dashboard: Harbourview score card with seeded (non-zero) data.
+    const growthCard = page.locator('section[aria-labelledby="growth-title"]');
+    await expect(growthCard).toBeVisible();
+    await expect(growthCard).toContainText("Local Growth Score");
+    await expect(growthCard.getByText("78", { exact: true })).toBeVisible();
+    await expect(growthCard.getByText("Strong", { exact: true })).toBeVisible();
+    await expect(page.getByText("Harbourview Physiotherapy", { exact: true }).first()).toBeVisible();
 
     // Seeded reviews render in the inbox.
     await page.goto("/app/reviews");
@@ -47,6 +48,6 @@ test.describe("demo mode", () => {
     // Middleware role gate: owner -> bounced to /app, never sees /admin.
     await page.waitForURL(/\/app$/);
     expect(new URL(page.url()).pathname).toBe("/app");
-    await expect(page.locator(".on-hero")).toContainText("Local Growth Score");
+    await expect(page.getByText("Local Growth Score", { exact: true })).toBeVisible();
   });
 });

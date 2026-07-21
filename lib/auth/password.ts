@@ -18,6 +18,7 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
 
 export function validatePasswordStrength(plain: string): string | null {
   if (plain.length < 8) return "Password must be at least 8 characters.";
+  if (plain.length > 128) return "Password must be 128 characters or fewer.";
   if (!/[a-zA-Z]/.test(plain) || !/[0-9]/.test(plain)) {
     return "Use at least one letter and one number.";
   }

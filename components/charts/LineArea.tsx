@@ -127,9 +127,16 @@ export function LineArea({
   const gridColor = onHero ? "rgba(255,255,255,0.14)" : CHART.hairline;
   const lineColor = onHero ? "#FFFFFF" : color;
 
-  // Sparse, non-crowding x labels: always the endpoints, then an even sample.
-  const labelStep = Math.max(1, Math.ceil(data.length / maxLabels));
-  const showLabel = (i: number) => i === 0 || i === data.length - 1 || i % labelStep === 0;
+  // Sparse, non-crowding x labels: choose one evenly spaced set that already
+  // includes both endpoints. Appending the final point to a step-based sample
+  // made the last two labels collide on 31-point series.
+  const labelCount = Math.min(Math.max(2, maxLabels), data.length);
+  const labelIndexes = new Set(
+    Array.from({ length: labelCount }, (_, index) =>
+      Math.round((index * Math.max(0, data.length - 1)) / Math.max(1, labelCount - 1)),
+    ),
+  );
+  const showLabel = (index: number) => labelIndexes.has(index);
 
   const active = hover !== null ? geo.points[hover] : undefined;
 

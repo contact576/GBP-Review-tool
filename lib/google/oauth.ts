@@ -57,6 +57,7 @@ export interface TokenResponse {
   access_token: string;
   refresh_token?: string;
   id_token?: string;
+  scope?: string;
   expires_in: number;
 }
 
@@ -85,6 +86,7 @@ export async function exchangeCode(input: {
       access_token: data.access_token,
       refresh_token: typeof data.refresh_token === "string" ? data.refresh_token : undefined,
       id_token: typeof data.id_token === "string" ? data.id_token : undefined,
+      scope: typeof data.scope === "string" ? data.scope : undefined,
       expires_in: typeof data.expires_in === "number" ? data.expires_in : 3600,
     };
   } catch {

@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
+import { timingSafeEqual } from "node:crypto";
 import { hasAiKey } from "@/lib/ai/model";
+import { getSession } from "@/lib/auth/session";
 import { isDbBacked } from "@/lib/data";
+import { guardPublicApi } from "@/lib/security/api";
 
 export const runtime = "nodejs";
 
@@ -16,13 +19,17 @@ export async function GET(req: Request) {
   const base = {
     ok: true,
     service: "foundly",
-    aiKeyed: hasAiKey(),
-    dbBacked: isDbBacked(),
     time: new Date().toISOString(),
   };
 
   const url = new URL(req.url);
   if (url.searchParams.get("deep") !== "1") return NextResponse.json(base);
+
+  if (!(await canRunDeepHealth(req))) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+  const limited = guardPublicApi(req, "deep-health", 5, 60_000, "authorized");
+  if (limited) return limited;
 
   const now = Date.now();
   if (throttle.__foundlyDeepCheckAt && now - throttle.__foundlyDeepCheckAt < 60_000) {
@@ -31,7 +38,30 @@ export async function GET(req: Request) {
   throttle.__foundlyDeepCheckAt = now;
 
   const [ai, places, db] = await Promise.all([probeAi(), probePlaces(), probeDb()]);
-  return NextResponse.json({ ...base, deep: { ai, places, db } });
+  return NextResponse.json({
+    ...base,
+    configuration: {
+      aiKeyed: hasAiKey(),
+      openAiKeyed: Boolean(process.env.OPENAI_API_KEY),
+      dbBacked: isDbBacked(),
+      monitoringConfigured: Boolean(process.env.CRON_SECRET && process.env.DATABASE_URL),
+      assetSigningConfigured: Boolean(process.env.CONTENT_ASSET_SIGNING_SECRET || process.env.AUTH_SECRET),
+    },
+    deep: { ai, places, db },
+  });
+}
+
+async function canRunDeepHealth(req: Request): Promise<boolean> {
+  const configured = process.env.HEALTH_CHECK_SECRET;
+  const presented = req.headers.get("x-foundly-health-secret");
+  if (configured && presented) {
+    const expected = Buffer.from(configured);
+    const actual = Buffer.from(presented);
+    if (expected.length === actual.length && timingSafeEqual(expected, actual)) return true;
+  }
+
+  const session = await getSession();
+  return session?.role === "platform_admin";
 }
 
 async function probeAi(): Promise<{ ok: boolean; error?: string }> {

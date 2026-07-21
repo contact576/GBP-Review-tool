@@ -18,6 +18,18 @@ const TARGET: Record<
     connected: { href: "/onboarding/find-business", label: "Manage", icon: "settings" },
     disconnected: { href: "/onboarding/find-business", label: "Find business", icon: "refresh" },
   },
+  website: {
+    connected: { href: "/app/settings/business", label: "Review", icon: "external" },
+    disconnected: { href: "/app/settings/business", label: "Add website", icon: "settings" },
+  },
+  search_console: {
+    connected: { href: "/api/google/connect", label: "Reconnect", icon: "refresh" },
+    disconnected: { href: "/api/google/connect", label: "Connect", icon: "refresh" },
+  },
+  instagram: {
+    connected: { href: "/api/instagram/connect", label: "Reconnect", icon: "refresh" },
+    disconnected: { href: "/api/instagram/connect", label: "Connect", icon: "refresh" },
+  },
   resend: {
     connected: { href: "/setup", label: "Manage", icon: "settings" },
     disconnected: { href: "/setup", label: "Set up", icon: "external" },

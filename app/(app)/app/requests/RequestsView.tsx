@@ -178,8 +178,14 @@ export function RequestsView({
     if (!pickedCustomer) return;
     const cust = customerById.get(pickedCustomer);
     start(async () => {
-      await sendRequestAction({ locationId, customerId: pickedCustomer, channel });
-      toast(`Request sent to ${cust?.name ?? "customer"}`, "success", "send");
+      const result = await sendRequestAction({ locationId, customerId: pickedCustomer, channel });
+      toast(
+        result.status === "sent"
+          ? `Request accepted for delivery to ${cust?.name ?? "customer"}`
+          : `Request saved, but delivery failed for ${cust?.name ?? "customer"}`,
+        result.status === "sent" ? "success" : "warning",
+        result.status === "sent" ? "send" : "alert",
+      );
       setDrawerOpen(false);
       setPickedCustomer("");
       router.refresh();

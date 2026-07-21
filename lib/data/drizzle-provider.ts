@@ -1,10 +1,14 @@
-import { and, eq, like, sql } from "drizzle-orm";
+import { and, eq, gt, isNotNull, isNull, like, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
+import { nanoid } from "nanoid";
 import { getDb, type FoundlyDb } from "../db/client";
 import { ensureSchema } from "../db/ensure";
 import * as t from "../db/schema";
 import { emptyFoundlyData, makeSlug } from "./empty";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import { canonicalPhone } from "@/lib/sms/phone";
+import { PLANS } from "@/lib/billing/plans";
+import { mergeSuggestionInbox } from "@/lib/suggestions/inbox";
 import {
   buildGooglePublicUpdate,
   upsertSnapshot,
@@ -29,6 +33,12 @@ import type {
   GoogleSyncResult,
   SaveGoogleCredentialInput,
   GoogleCredential,
+  InstagramCredential,
+  SaveInstagramCredentialInput,
+  ProfileSuggestionPatch,
+  ProfileMutationJobPatch,
+  ContentPublishingJobPatch,
+  MonitoringRunPatch,
 } from "./provider";
 import type {
   FoundlyData,
@@ -53,6 +63,11 @@ import type {
   QrAsset,
   Integration,
   WorkspaceSettings,
+  ProfileSuggestion,
+  ProfileMutationJob,
+  ContentPublishingJob,
+  MonitoringRun,
+  AiContentAsset,
 } from "./types";
 
 /**
@@ -89,6 +104,7 @@ type StaffRow = typeof t.staffMember.$inferSelect;
 type SubscriptionRow = typeof t.subscription.$inferSelect;
 type PrivateFeedbackRow = typeof t.privateFeedback.$inferSelect;
 type NotificationRow = typeof t.notification.$inferSelect;
+type AiContentAssetRow = typeof t.aiContentAsset.$inferSelect;
 type AuditRow = typeof t.auditLog.$inferSelect;
 type OrgRow = typeof t.organization.$inferSelect;
 type WorkspaceRow = typeof t.workspace.$inferSelect;
@@ -96,13 +112,16 @@ type UserRow = typeof t.appUser.$inferSelect;
 type LocationRow = typeof t.location.$inferSelect;
 type InviteRow = typeof t.staffInvite.$inferSelect;
 type QrRow = typeof t.qrAsset.$inferSelect;
+type MutationJobRow = typeof t.profileMutationJob.$inferSelect;
+type ContentPublishingJobRow = typeof t.contentPublishingJob.$inferSelect;
+type MonitoringRunRow = typeof t.monitoringRun.$inferSelect;
 
 // ── Small helpers ───────────────────────────────────────────
 function nowIso(): string {
   return new Date().toISOString();
 }
 function id(prefix: string): string {
-  return `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
+  return `${prefix}_${nanoid()}`;
 }
 /** Newest-first ordering key for mutation inserts (mirrors `unshift`). */
 function front(): number {
@@ -170,7 +189,12 @@ async function findUserRowByEmail(
   const rows = await db
     .select()
     .from(t.appUser)
-    .where(sql`lower(${t.appUser.email}) = ${key}`)
+    .where(
+      and(
+        sql`lower(${t.appUser.email}) = ${key}`,
+        or(isNotNull(t.appUser.passwordHash), isNotNull(t.appUser.googleSub)),
+      ),
+    )
     .limit(1);
   return rows[0] ?? null;
 }
@@ -212,6 +236,9 @@ function mapWorkspace(row: WorkspaceRow): Workspace {
     isDemo: row.isDemo,
     whiteLabel: row.whiteLabel ?? undefined,
     settings: row.settings ?? undefined,
+    referredByWorkspaceId: row.referredByWorkspaceId ?? undefined,
+    referralRewardStatus: (row.referralRewardStatus ?? undefined) as Workspace["referralRewardStatus"],
+    referralRewardAppliedAt: row.referralRewardAppliedAt ?? undefined,
   };
 }
 
@@ -232,6 +259,9 @@ function mapLocation(row: LocationRow): Location {
     reviewCount: row.reviewCount,
     joinedAt: row.joinedAt,
     gbpConnected: row.gbpConnected,
+    gbpSnapshot: row.gbpSnapshot ?? undefined,
+    gbpAudit: row.gbpAudit ?? undefined,
+    suggestionInbox: row.suggestionInbox ?? undefined,
     profile: {
       description: row.profileDescription,
       primaryCategory: row.profilePrimaryCategory,
@@ -438,6 +468,11 @@ function mapSubscription(row: SubscriptionRow): Subscription {
     status: row.status as Subscription["status"],
     trialEndsAt: row.trialEndsAt ?? undefined,
     currency: row.currency as Subscription["currency"],
+    stripeCustomerId: row.stripeCustomerId ?? undefined,
+    stripeSubscriptionId: row.stripeSubscriptionId ?? undefined,
+    stripePriceId: row.stripePriceId ?? undefined,
+    currentPeriodEnd: row.currentPeriodEnd ?? undefined,
+    cancelAtPeriodEnd: row.cancelAtPeriodEnd ?? undefined,
     usage: row.usage,
   };
 }
@@ -524,6 +559,9 @@ function buildWorkspaceRow(w: Workspace): typeof t.workspace.$inferInsert {
     industryConfig: w.industryConfig ?? null,
     settings: w.settings ?? null,
     isDemo: w.isDemo ?? false,
+    referredByWorkspaceId: w.referredByWorkspaceId,
+    referralRewardStatus: w.referralRewardStatus,
+    referralRewardAppliedAt: w.referralRewardAppliedAt,
   };
 }
 
@@ -556,6 +594,9 @@ function buildLocationRow(l: Location): typeof t.location.$inferInsert {
     profileServicesTotal: l.profile.servicesTotal,
     profileResponseRate: l.profile.responseRate,
     profileCompleteness: l.profile.completeness,
+    gbpSnapshot: l.gbpSnapshot,
+    gbpAudit: l.gbpAudit,
+    suggestionInbox: l.suggestionInbox,
   };
 }
 
@@ -818,6 +859,11 @@ function buildSubscriptionRow(s: Subscription): typeof t.subscription.$inferInse
     status: s.status,
     trialEndsAt: s.trialEndsAt,
     currency: s.currency,
+    stripeCustomerId: s.stripeCustomerId,
+    stripeSubscriptionId: s.stripeSubscriptionId,
+    stripePriceId: s.stripePriceId,
+    currentPeriodEnd: s.currentPeriodEnd,
+    cancelAtPeriodEnd: s.cancelAtPeriodEnd,
     usage: s.usage,
   };
 }
@@ -951,9 +997,160 @@ async function createWorkspaceWithOwner(
   await db.batch(statements as [BatchItem<"pg">, ...BatchItem<"pg">[]]);
 }
 
+function mapMutationJob(row: MutationJobRow): ProfileMutationJob {
+  return {
+    id: row.id,
+    workspaceId: row.workspaceId,
+    locationId: row.locationId,
+    suggestionId: row.suggestionId,
+    idempotencyKey: row.idempotencyKey,
+    target: row.target as ProfileMutationJob["target"],
+    status: row.status as ProfileMutationJob["status"],
+    updateMask: row.updateMask,
+    beforeValue: row.beforeValue ?? undefined,
+    proposedValue: row.proposedValue,
+    providerResponse: row.providerResponse ?? undefined,
+    verifiedValue: row.verifiedValue ?? undefined,
+    rollbackValue: row.rollbackValue ?? undefined,
+    attempts: row.attempts,
+    approvedAt: row.approvedAt,
+    approvedBy: row.approvedBy,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    startedAt: row.startedAt ?? undefined,
+    appliedAt: row.appliedAt ?? undefined,
+    failedAt: row.failedAt ?? undefined,
+    lastError: row.lastError ?? undefined,
+  };
+}
+
+function buildMutationJobRow(job: ProfileMutationJob): typeof t.profileMutationJob.$inferInsert {
+  return {
+    id: job.id,
+    workspaceId: job.workspaceId,
+    locationId: job.locationId,
+    suggestionId: job.suggestionId,
+    idempotencyKey: job.idempotencyKey,
+    target: job.target,
+    status: job.status,
+    updateMask: job.updateMask,
+    beforeValue: job.beforeValue,
+    proposedValue: job.proposedValue,
+    providerResponse: job.providerResponse,
+    verifiedValue: job.verifiedValue,
+    rollbackValue: job.rollbackValue,
+    attempts: job.attempts,
+    approvedAt: job.approvedAt,
+    approvedBy: job.approvedBy,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    startedAt: job.startedAt,
+    appliedAt: job.appliedAt,
+    failedAt: job.failedAt,
+    lastError: job.lastError,
+  };
+}
+
+function mapAiContentAsset(row: AiContentAssetRow): AiContentAsset {
+  return {
+    id: row.id,
+    workspaceId: row.workspaceId,
+    locationId: row.locationId,
+    suggestionId: row.suggestionId,
+    kind: row.kind,
+    mimeType: row.mimeType,
+    base64Data: row.base64Data,
+    prompt: row.prompt,
+    altText: row.altText,
+    model: row.model,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function mapContentPublishingJob(row: ContentPublishingJobRow): ContentPublishingJob {
+  return {
+    id: row.id,
+    workspaceId: row.workspaceId,
+    locationId: row.locationId,
+    suggestionId: row.suggestionId,
+    assetId: row.assetId ?? undefined,
+    idempotencyKey: row.idempotencyKey,
+    kind: row.kind as ContentPublishingJob["kind"],
+    status: row.status as ContentPublishingJob["status"],
+    exactPayload: row.exactPayload,
+    providerResponse: row.providerResponse ?? undefined,
+    providerResourceName: row.providerResourceName ?? undefined,
+    verifiedValue: row.verifiedValue ?? undefined,
+    attempts: row.attempts,
+    approvedAt: row.approvedAt,
+    approvedBy: row.approvedBy,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    startedAt: row.startedAt ?? undefined,
+    publishedAt: row.publishedAt ?? undefined,
+    failedAt: row.failedAt ?? undefined,
+    lastError: row.lastError ?? undefined,
+  };
+}
+
+function buildContentPublishingJobRow(job: ContentPublishingJob): typeof t.contentPublishingJob.$inferInsert {
+  return { ...job };
+}
+
+function mapMonitoringRun(row: MonitoringRunRow): MonitoringRun {
+  return {
+    id: row.id,
+    workspaceId: row.workspaceId,
+    windowKey: row.windowKey,
+    trigger: row.trigger as MonitoringRun["trigger"],
+    status: row.status as MonitoringRun["status"],
+    attempts: row.attempts,
+    summary: row.summary as MonitoringRun["summary"],
+    startedAt: row.startedAt,
+    updatedAt: row.updatedAt,
+    completedAt: row.completedAt ?? undefined,
+    lastError: row.lastError ?? undefined,
+  };
+}
+
+/** Create another location workspace under an existing organization row. */
+async function createOrganizationLocation(
+  db: FoundlyDb,
+  data: FoundlyData,
+): Promise<void> {
+  const ws = data.workspace.id;
+  const statements: BatchItem<"pg">[] = [
+    db.insert(t.workspace).values(buildWorkspaceRow(data.workspace)),
+    db.insert(t.location).values(buildLocationRow(data.location)),
+    db.insert(t.appUser).values(
+      buildUserRow(data.owner, {
+        passwordHash: null,
+        googleSub: null,
+        emailVerified: true,
+        createdAt: data.workspace.createdAt,
+      }),
+    ),
+    db.insert(t.subscription).values(buildSubscriptionRow(data.subscription)),
+    db.insert(t.datasetMeta).values(buildMetaRow(data)),
+  ];
+  data.qrAssets.forEach((qr, index) => {
+    statements.push(db.insert(t.qrAsset).values(buildQrRow(qr, ws, index)));
+  });
+  data.notifications.forEach((notification, index) => {
+    statements.push(
+      db.insert(t.notification).values(buildNotificationRow(notification, ws, index)),
+    );
+  });
+  await db.batch(statements as [BatchItem<"pg">, ...BatchItem<"pg">[]]);
+}
+
 // ── Clear + seed (shared with the seed-runner) ──────────────
 export async function clearAllTables(): Promise<void> {
   const db = getDb();
+  await db.delete(t.profileMutationJob);
+  await db.delete(t.instagramCredential);
+  await db.delete(t.googleCredential);
   await db.delete(t.reviewReply);
   await db.delete(t.customerConsent);
   await db.delete(t.reviewDraft);
@@ -1075,6 +1272,10 @@ export async function seedDatabase(data: FoundlyData): Promise<void> {
       .values(data.auditLog.map((a, i) => buildAuditRow(a, i)));
   }
 
+  if (data.mutationJobs.length) {
+    await db.insert(t.profileMutationJob).values(data.mutationJobs.map(buildMutationJobRow));
+  }
+
   await db.insert(t.datasetMeta).values(buildMetaRow(data));
 }
 
@@ -1104,13 +1305,16 @@ export const drizzleProvider: DataProvider = {
       notifRows,
       auditRows,
       qrRows,
+      mutationJobRows,
       metaRows,
     ] = await Promise.all([
       db.select().from(t.workspace).where(eq(t.workspace.id, workspaceId)).limit(1),
       db
         .select()
         .from(t.organization)
-        .where(eq(t.organization.workspaceId, workspaceId))
+        .where(
+          sql`${t.organization.id} = (select ${t.workspace.organizationId} from ${t.workspace} where ${t.workspace.id} = ${workspaceId})`,
+        )
         .limit(1),
       db
         .select()
@@ -1197,6 +1401,11 @@ export const drizzleProvider: DataProvider = {
         .orderBy(t.qrAsset.seq),
       db
         .select()
+        .from(t.profileMutationJob)
+        .where(eq(t.profileMutationJob.workspaceId, workspaceId))
+        .orderBy(t.profileMutationJob.createdAt),
+      db
+        .select()
         .from(t.datasetMeta)
         .where(eq(t.datasetMeta.workspaceId, workspaceId))
         .limit(1),
@@ -1227,6 +1436,7 @@ export const drizzleProvider: DataProvider = {
       reviews: reviewRows.map((r) => mapReview(r, replyByReview.get(r.id))),
       drafts: draftRows.map(mapDraft),
       tasks: taskRows.map(mapTask),
+      mutationJobs: mutationJobRows.map(mapMutationJob),
       campaigns: campaignRows.map(mapCampaign),
       subscription: mapSubscription(one(subRows, "subscription")),
       invoices: meta.invoices,
@@ -1250,6 +1460,240 @@ export const drizzleProvider: DataProvider = {
   },
 
   // ── Auth ──────────────────────────────────────────────────
+  async listOrganizationWorkspaces(workspaceId) {
+    const db = getDb();
+    const currentRows = await db
+      .select()
+      .from(t.workspace)
+      .where(eq(t.workspace.id, workspaceId))
+      .limit(1);
+    const current = currentRows[0];
+    if (!current) return [];
+    const workspaces = await db
+      .select({ id: t.workspace.id })
+      .from(t.workspace)
+      .where(eq(t.workspace.organizationId, current.organizationId));
+    const summaries = [];
+    for (const workspace of workspaces) {
+      const data = await drizzleProvider.getData(workspace.id);
+      if (!data) continue;
+      const latest = [...data.metrics].sort((a, b) => a.date.localeCompare(b.date)).pop();
+      const trustedScore = data.workspace.isDemo || Boolean(latest?.sources?.scores);
+      summaries.push({
+        workspaceId: data.workspace.id,
+        locationId: data.location.id,
+        name: data.location.name,
+        city: data.location.city,
+        rating: data.location.rating,
+        reviewCount: data.location.reviewCount,
+        growthScore: trustedScore ? latest?.growthScore ?? null : null,
+      });
+    }
+    return summaries;
+  },
+
+  async listAgencyClients(workspaceId) {
+    const current = await drizzleProvider.getData(workspaceId);
+    if (!current) return [];
+    if (current.workspace.isDemo) return current.agency.clients;
+    const siblingIds = new Set(
+      (await drizzleProvider.listOrganizationWorkspaces(workspaceId)).map((item) => item.workspaceId),
+    );
+    const cutoff = Date.now() - 30 * 86_400_000;
+    const clients = [];
+    for (const stored of current.agency.clients) {
+      const rows = await getDb()
+        .select({ workspaceId: t.location.workspaceId })
+        .from(t.location)
+        .where(eq(t.location.id, stored.locationId))
+        .limit(1);
+      const childWorkspaceId = rows[0]?.workspaceId;
+      if (!childWorkspaceId || !siblingIds.has(childWorkspaceId)) {
+        clients.push(stored);
+        continue;
+      }
+      const child = await drizzleProvider.getData(childWorkspaceId);
+      if (!child) {
+        clients.push(stored);
+        continue;
+      }
+      const latest = [...child.metrics].sort((a, b) => a.date.localeCompare(b.date)).pop();
+      const growthScore = latest?.sources?.scores ? latest.growthScore : 0;
+      const needsReply = child.reviews.filter((review) => review.needsReply).length;
+      const newReviews30d = child.reviews.filter(
+        (review) => new Date(review.publishedAt).getTime() >= cutoff,
+      ).length;
+      const status =
+        growthScore < 50 || needsReply > 7
+          ? "at_risk" as const
+          : growthScore < 70 || needsReply > 3
+            ? "attention" as const
+            : "healthy" as const;
+      clients.push({
+        ...stored,
+        name: child.location.name,
+        city: child.location.city,
+        growthScore,
+        rating: child.location.rating,
+        newReviews30d,
+        needsReply,
+        plan: child.subscription.tier,
+        status,
+      });
+    }
+    return clients;
+  },
+
+  async createOrganizationWorkspace(workspaceId, input) {
+    const current = await drizzleProvider.getData(workspaceId);
+    if (!current) return { ok: false, error: "Current workspace was not found." };
+    const siblings = await drizzleProvider.listOrganizationWorkspaces(workspaceId);
+    const plan = PLANS[current.subscription.tier];
+    if (siblings.length >= plan.limits.locations) {
+      return {
+        ok: false,
+        error: `${plan.name} supports ${plan.limits.locations} location${plan.limits.locations === 1 ? "" : "s"}. Upgrade to add another.`,
+      };
+    }
+    const nextWorkspaceId = id("ws");
+    const data = emptyFoundlyData({
+      workspaceId: nextWorkspaceId,
+      organizationId: current.organization.id,
+      userId: id("usr"),
+      businessName: input.businessName,
+      ownerName: current.owner.name,
+      email: current.owner.email,
+      industryKey: input.industryKey,
+      category: input.category,
+      region: input.region,
+      city: input.city,
+      address: input.address,
+    });
+    data.organization = { ...current.organization };
+    data.workspace.plan = current.subscription.tier;
+    data.subscription.tier = current.subscription.tier;
+    data.subscription.status = current.subscription.status;
+    data.subscription.interval = current.subscription.interval;
+    data.subscription.currency = current.subscription.currency;
+    data.subscription.usage.aiDraftsLimit = plan.limits.aiDraftsPerMonth;
+    data.subscription.usage.smsCreditsTotal = plan.limits.smsCredits;
+    await createOrganizationLocation(getDb(), data);
+    if (current.subscription.tier === "agency" && input.contactEmail) {
+      const db = getDb();
+      const metaRows = await db
+        .select({ agency: t.datasetMeta.agency })
+        .from(t.datasetMeta)
+        .where(eq(t.datasetMeta.workspaceId, workspaceId))
+        .limit(1);
+      const agency = metaRows[0]?.agency;
+      if (agency) {
+        await db
+          .update(t.datasetMeta)
+          .set({
+            agency: {
+              ...agency,
+              clients: [
+                ...agency.clients,
+                {
+                  locationId: data.location.id,
+                  name: data.location.name,
+                  city: data.location.city,
+                  contactEmail: input.contactEmail,
+                  growthScore: 0,
+                  rating: 0,
+                  newReviews30d: 0,
+                  needsReply: 0,
+                  plan: "agency",
+                  status: "attention",
+                },
+              ],
+            },
+          })
+          .where(eq(t.datasetMeta.workspaceId, workspaceId));
+      }
+    }
+    const workspace = (await drizzleProvider.listOrganizationWorkspaces(nextWorkspaceId)).find(
+      (item) => item.workspaceId === nextWorkspaceId,
+    );
+    return workspace
+      ? { ok: true, workspace }
+      : { ok: false, error: "The new location could not be loaded." };
+  },
+
+  async getReferralSummary(workspaceId) {
+    const db = getDb();
+    const referrals = await db
+      .select()
+      .from(t.workspace)
+      .where(eq(t.workspace.referredByWorkspaceId, workspaceId));
+    let qualified = 0;
+    let applied = 0;
+    for (const referral of referrals) {
+      if (referral.referralRewardStatus === "applied") {
+        applied += 1;
+        qualified += 1;
+        continue;
+      }
+      const subscriptions = await db
+        .select({ status: t.subscription.status, tier: t.subscription.tier })
+        .from(t.subscription)
+        .where(eq(t.subscription.workspaceId, referral.id))
+        .limit(1);
+      if (subscriptions[0]?.status === "active" && subscriptions[0]?.tier !== "free") {
+        qualified += 1;
+      }
+    }
+    return {
+      signedUp: referrals.length,
+      qualified,
+      creditsApplied: applied * 50,
+      pendingCredits: (qualified - applied) * 50,
+    };
+  },
+
+  async getPendingReferralReward(referredWorkspaceId) {
+    const db = getDb();
+    const referredRows = await db
+      .select()
+      .from(t.workspace)
+      .where(eq(t.workspace.id, referredWorkspaceId))
+      .limit(1);
+    const referred = referredRows[0];
+    if (!referred?.referredByWorkspaceId || referred.referralRewardStatus !== "pending") return null;
+    const referredSubscriptions = await db
+      .select()
+      .from(t.subscription)
+      .where(eq(t.subscription.workspaceId, referredWorkspaceId))
+      .limit(1);
+    const referredSubscription = referredSubscriptions[0];
+    if (referredSubscription?.status !== "active" || referredSubscription.tier === "free") return null;
+    const referrerSubscriptions = await db
+      .select()
+      .from(t.subscription)
+      .where(eq(t.subscription.workspaceId, referred.referredByWorkspaceId))
+      .limit(1);
+    const referrerSubscription = referrerSubscriptions[0];
+    if (!referrerSubscription?.stripeCustomerId) return null;
+    return {
+      referredWorkspaceId,
+      referrerWorkspaceId: referred.referredByWorkspaceId,
+      stripeCustomerId: referrerSubscription.stripeCustomerId,
+      currency: referrerSubscription.currency as "USD" | "CAD",
+    };
+  },
+
+  async markReferralRewardApplied(referredWorkspaceId, appliedAt) {
+    await getDb()
+      .update(t.workspace)
+      .set({ referralRewardStatus: "applied", referralRewardAppliedAt: appliedAt })
+      .where(
+        and(
+          eq(t.workspace.id, referredWorkspaceId),
+          eq(t.workspace.referralRewardStatus, "pending"),
+        ),
+      );
+  },
+
   async registerUser(input: RegisterInput): Promise<RegisterResult> {
     // Self-initialize the schema on first real signup (no terminal needed).
     const schema = await ensureSchema();
@@ -1282,6 +1726,17 @@ export const drizzleProvider: DataProvider = {
       category: input.industryKey.replace(/_/g, " "),
       region: input.region,
     });
+    if (input.referredByWorkspaceId) {
+      const referrer = await db
+        .select({ id: t.workspace.id })
+        .from(t.workspace)
+        .where(eq(t.workspace.id, input.referredByWorkspaceId))
+        .limit(1);
+      if (referrer[0]) {
+        data.workspace.referredByWorkspaceId = input.referredByWorkspaceId;
+        data.workspace.referralRewardStatus = "pending";
+      }
+    }
     await createWorkspaceWithOwner(db, data, { passwordHash });
 
     return {
@@ -1311,7 +1766,47 @@ export const drizzleProvider: DataProvider = {
     return user ? toAuthUser(user) : null;
   },
 
-  async upsertGoogleUser({ googleSub, email, name }) {
+  async savePasswordResetToken(input) {
+    const db = getDb();
+    // One active link per user. Issuing a new link invalidates every older one.
+    await db.delete(t.passwordResetToken).where(eq(t.passwordResetToken.userId, input.userId));
+    await db.insert(t.passwordResetToken).values({
+      tokenHash: input.tokenHash,
+      userId: input.userId,
+      expiresAt: input.expiresAt,
+      createdAt: input.createdAt,
+      usedAt: null,
+    });
+  },
+
+  async revokePasswordResetToken(tokenHash) {
+    const db = getDb();
+    await db.delete(t.passwordResetToken).where(eq(t.passwordResetToken.tokenHash, tokenHash));
+  },
+
+  async consumePasswordResetToken(tokenHash, passwordHash, consumedAt) {
+    const db = getDb();
+    // Claim first with a conditional update, so concurrent submissions cannot
+    // use the same reset link twice.
+    const claimed = await db
+      .update(t.passwordResetToken)
+      .set({ usedAt: consumedAt })
+      .where(
+        and(
+          eq(t.passwordResetToken.tokenHash, tokenHash),
+          isNull(t.passwordResetToken.usedAt),
+          gt(t.passwordResetToken.expiresAt, consumedAt),
+        ),
+      )
+      .returning({ userId: t.passwordResetToken.userId });
+    const userId = claimed[0]?.userId;
+    if (!userId) return false;
+    await db.update(t.appUser).set({ passwordHash }).where(eq(t.appUser.id, userId));
+    await db.delete(t.passwordResetToken).where(eq(t.passwordResetToken.userId, userId));
+    return true;
+  },
+
+  async upsertGoogleUser({ googleSub, email, name, referredByWorkspaceId }) {
     const db = getDb();
     const key = email.trim().toLowerCase();
     const existing = await findUserRowByEmail(db, key);
@@ -1336,6 +1831,17 @@ export const drizzleProvider: DataProvider = {
       category: "Local business",
       region: "US",
     });
+    if (referredByWorkspaceId) {
+      const referrer = await db
+        .select({ id: t.workspace.id })
+        .from(t.workspace)
+        .where(eq(t.workspace.id, referredByWorkspaceId))
+        .limit(1);
+      if (referrer[0]) {
+        data.workspace.referredByWorkspaceId = referredByWorkspaceId;
+        data.workspace.referralRewardStatus = "pending";
+      }
+    }
     await createWorkspaceWithOwner(db, data, { googleSub });
     return {
       id: userId,
@@ -1423,10 +1929,10 @@ export const drizzleProvider: DataProvider = {
       staffId: input.staffId,
       visitCount: 1,
       lastVisitAt: now,
-      lastRequestAt: now,
+      lastRequestAt: undefined,
       services: input.services,
       sentiment: "neutral",
-      lifecycleStage: "requested",
+      lifecycleStage: "new",
       consent,
       tags: [],
     };
@@ -1438,10 +1944,10 @@ export const drizzleProvider: DataProvider = {
       staffId: input.staffId,
       channel: input.channel,
       token: id("tok"),
-      status: input.serviceConsent ? "sent" : "queued",
+      status: "queued",
       isTest: false,
       createdAt: now,
-      sentAt: input.serviceConsent ? now : undefined,
+      sentAt: undefined,
       attributes: [],
     };
 
@@ -1478,11 +1984,6 @@ export const drizzleProvider: DataProvider = {
           );
       }
     }
-
-    await bumpUsage(db, workspaceId, (u) => ({
-      ...u,
-      requestsSent: u.requestsSent + 1,
-    }));
 
     await db.insert(t.auditLog).values({
       id: id("aud"),
@@ -1603,31 +2104,142 @@ export const drizzleProvider: DataProvider = {
       staffId: input.staffId,
       channel: input.channel,
       token: id("tok"),
-      status: "sent",
+      status: "queued",
       isTest: false,
       createdAt: now,
-      sentAt: now,
+      sentAt: undefined,
       attributes: [],
     };
     await db.insert(t.reviewRequest).values(buildRequestRow(request, workspaceId, seq));
 
-    if (customer) {
-      const nextStage =
-        customer.lifecycleStage === "new" ? "requested" : customer.lifecycleStage;
+    return request;
+  },
+
+  async setRequestDeliveryStatus(workspaceId, requestId, status, reason) {
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(t.reviewRequest)
+      .where(
+        and(
+          eq(t.reviewRequest.id, requestId),
+          eq(t.reviewRequest.workspaceId, workspaceId),
+        ),
+      )
+      .limit(1);
+    const current = rows[0];
+    if (!current) return null;
+
+    const accepted = status === "sent" || status === "delivered";
+    const sentAt = accepted ? current.sentAt ?? nowIso() : current.sentAt;
+    await db
+      .update(t.reviewRequest)
+      .set({ status, sentAt, suppressedReason: reason ?? current.suppressedReason })
+      .where(
+        and(
+          eq(t.reviewRequest.id, requestId),
+          eq(t.reviewRequest.workspaceId, workspaceId),
+        ),
+      );
+
+    if (accepted && !current.sentAt) {
+      await bumpUsage(db, workspaceId, (usage) => ({
+        ...usage,
+        requestsSent: usage.requestsSent + 1,
+        smsCreditsUsed:
+          current.channel === "sms" ? usage.smsCreditsUsed + 1 : usage.smsCreditsUsed,
+      }));
+      const customerRows = await db
+        .select()
+        .from(t.customer)
+        .where(
+          and(
+            eq(t.customer.id, current.customerId),
+            eq(t.customer.workspaceId, workspaceId),
+          ),
+        )
+        .limit(1);
+      const customer = customerRows[0];
       await db
         .update(t.customer)
-        .set({ lastRequestAt: now, lifecycleStage: nextStage })
+        .set({
+          lastRequestAt: sentAt,
+          lifecycleStage:
+            customer?.lifecycleStage === "new" ? "requested" : customer?.lifecycleStage,
+        })
         .where(
-          and(eq(t.customer.id, customer.id), eq(t.customer.workspaceId, workspaceId)),
+          and(
+            eq(t.customer.id, current.customerId),
+            eq(t.customer.workspaceId, workspaceId),
+          ),
         );
     }
 
-    await bumpUsage(db, workspaceId, (u) => ({
-      ...u,
-      requestsSent: u.requestsSent + 1,
-    }));
+    return mapRequest({
+      ...current,
+      status,
+      sentAt,
+      suppressedReason: reason ?? current.suppressedReason,
+    });
+  },
 
-    return request;
+  async suppressPhoneGlobally(phone, reason) {
+    const needle = canonicalPhone(phone);
+    if (!needle) return 0;
+    const db = getDb();
+    const customers = (await db.select().from(t.customer)).filter(
+      (customer) => canonicalPhone(customer.phone ?? undefined) === needle,
+    );
+    const byWorkspace = new Map<string, typeof customers>();
+    for (const customer of customers) {
+      const list = byWorkspace.get(customer.workspaceId) ?? [];
+      list.push(customer);
+      byWorkspace.set(customer.workspaceId, list);
+    }
+    const at = nowIso();
+    for (const [workspaceId, matches] of byWorkspace) {
+      const meta = one(
+        await db.select().from(t.datasetMeta).where(eq(t.datasetMeta.workspaceId, workspaceId)).limit(1),
+        `dataset_meta for workspace ${workspaceId}`,
+      );
+      const alreadySuppressed = meta.suppression.some(
+        (entry) => entry.matchType === "phone" && canonicalPhone(entry.value) === needle,
+      );
+      if (!alreadySuppressed) {
+        await db
+          .update(t.datasetMeta)
+          .set({
+            suppression: [
+              {
+                id: id("sup"),
+                locationId: matches[0]!.locationId,
+                matchType: "phone" as const,
+                value: needle,
+                reason,
+                addedAt: at,
+              },
+              ...meta.suppression,
+            ],
+          })
+          .where(eq(t.datasetMeta.workspaceId, workspaceId));
+      }
+      for (const customer of matches) {
+        await db
+          .update(t.customer)
+          .set({ suppressedReason: reason })
+          .where(and(eq(t.customer.id, customer.id), eq(t.customer.workspaceId, workspaceId)));
+        await db
+          .update(t.customerConsent)
+          .set({ serviceConsent: false, marketingConsent: false, withdrawnAt: at })
+          .where(
+            and(
+              eq(t.customerConsent.customerId, customer.id),
+              eq(t.customerConsent.workspaceId, workspaceId),
+            ),
+          );
+      }
+    }
+    return customers.length;
   },
 
   async advanceRequest(token, to, meta) {
@@ -1820,7 +2432,6 @@ export const drizzleProvider: DataProvider = {
 
   async approveTask(workspaceId, taskId) {
     const db = getDb();
-    const ctx = await loadContext(db, workspaceId);
     const now = nowIso();
 
     const taskRows = await db
@@ -1836,22 +2447,11 @@ export const drizzleProvider: DataProvider = {
       .set({ status: "done" })
       .where(and(eq(t.gbpTask.id, task.id), eq(t.gbpTask.workspaceId, workspaceId)));
 
-    const loc = ctx.location;
-    const locSet: Partial<typeof t.location.$inferInsert> = {
-      profileCompleteness: Math.min(100, loc.profileCompleteness + 3),
-    };
-    if (task.kind === "post") locSet.profilePostCount = loc.profilePostCount + 1;
-    if (task.kind === "qna") locSet.profileQnaCount = loc.profileQnaCount + 1;
-    await db
-      .update(t.location)
-      .set(locSet)
-      .where(and(eq(t.location.id, loc.id), eq(t.location.workspaceId, workspaceId)));
-
     await db.insert(t.auditLog).values({
       id: id("aud"),
       workspaceId,
       actor: "Owner",
-      action: "task.approved",
+      action: "task.completed",
       targetType: "gbp_task",
       targetId: task.id,
       at: now,
@@ -1901,7 +2501,6 @@ export const drizzleProvider: DataProvider = {
 
   async postReply(workspaceId, input: PostReplyInput) {
     const db = getDb();
-    const ctx = await loadContext(db, workspaceId);
     const now = nowIso();
 
     const revRows = await db
@@ -1941,23 +2540,11 @@ export const drizzleProvider: DataProvider = {
       .set({ needsReply: false })
       .where(and(eq(t.review.id, rev.id), eq(t.review.workspaceId, workspaceId)));
 
-    await db
-      .update(t.location)
-      .set({
-        profileResponseRate: Math.min(1, ctx.location.profileResponseRate + 0.02),
-      })
-      .where(
-        and(
-          eq(t.location.id, ctx.location.id),
-          eq(t.location.workspaceId, workspaceId),
-        ),
-      );
-
     await db.insert(t.auditLog).values({
       id: id("aud"),
       workspaceId,
       actor: "Owner",
-      action: "review.replied",
+      action: "review.reply_saved",
       targetType: "review",
       targetId: rev.id,
       at: now,
@@ -2004,7 +2591,7 @@ export const drizzleProvider: DataProvider = {
       channel: input.channel,
       subject: input.subject,
       body: input.body,
-      status: input.scheduledAt ? "scheduled" : "sending",
+      status: "draft",
       scheduledAt: input.scheduledAt,
       audienceTotal: total,
       audienceConsented: consented,
@@ -2017,7 +2604,7 @@ export const drizzleProvider: DataProvider = {
           count: total - consented,
         },
       ],
-      stats: { sent: input.scheduledAt ? 0 : consented, opened: 0, clicked: 0 },
+      stats: { sent: 0, opened: 0, clicked: 0 },
       createdAt: now,
     };
     await db.insert(t.campaign).values(buildCampaignRow(campaign, workspaceId, front()));
@@ -2273,6 +2860,45 @@ export const drizzleProvider: DataProvider = {
     }
   },
 
+  async saveRankGridScan(workspaceId, scan) {
+    const db = getDb();
+    const rows = await db
+      .select({ rankScans: t.datasetMeta.rankScans })
+      .from(t.datasetMeta)
+      .where(eq(t.datasetMeta.workspaceId, workspaceId))
+      .limit(1);
+    const current = rows[0]?.rankScans ?? [];
+    await db
+      .update(t.datasetMeta)
+      .set({
+        rankScans: [scan, ...current.filter((item) => item.id !== scan.id)].slice(0, 24),
+      })
+      .where(eq(t.datasetMeta.workspaceId, workspaceId));
+  },
+
+  async markAgencyReportsSent(workspaceId, locationIds, sentAt) {
+    const db = getDb();
+    const rows = await db
+      .select({ agency: t.datasetMeta.agency })
+      .from(t.datasetMeta)
+      .where(eq(t.datasetMeta.workspaceId, workspaceId))
+      .limit(1);
+    const agency = rows[0]?.agency;
+    if (!agency) return;
+    const selected = new Set(locationIds);
+    await db
+      .update(t.datasetMeta)
+      .set({
+        agency: {
+          ...agency,
+          clients: agency.clients.map((client) =>
+            selected.has(client.locationId) ? { ...client, lastReportSent: sentAt } : client,
+          ),
+        },
+      })
+      .where(eq(t.datasetMeta.workspaceId, workspaceId));
+  },
+
   async updateWhiteLabel(workspaceId, config) {
     const db = getDb();
     const metaRows = await db
@@ -2328,6 +2954,12 @@ export const drizzleProvider: DataProvider = {
     const set: Partial<typeof t.subscription.$inferInsert> = {};
     if (patch.status !== undefined) set.status = patch.status;
     if (patch.tier !== undefined) set.tier = patch.tier;
+    if (patch.interval !== undefined) set.interval = patch.interval;
+    if (patch.stripeCustomerId !== undefined) set.stripeCustomerId = patch.stripeCustomerId;
+    if (patch.stripeSubscriptionId !== undefined) set.stripeSubscriptionId = patch.stripeSubscriptionId;
+    if (patch.stripePriceId !== undefined) set.stripePriceId = patch.stripePriceId;
+    if (patch.currentPeriodEnd !== undefined) set.currentPeriodEnd = patch.currentPeriodEnd;
+    if (patch.cancelAtPeriodEnd !== undefined) set.cancelAtPeriodEnd = patch.cancelAtPeriodEnd;
     if (Object.keys(set).length === 0) return;
     await db
       .update(t.subscription)
@@ -2545,8 +3177,13 @@ export const drizzleProvider: DataProvider = {
     const ctx = await loadContext(db, workspaceId);
     const location = mapLocation(ctx.location);
     const credential = await loadGoogleCredential(db, workspaceId);
-    const { fetchGoogleProfile } = await import("@/lib/google/profile-sync");
-    const outcome = await fetchGoogleProfile(credential, location, nowIso());
+    const { fetchGoogleProfile, locationFromProfileSnapshot } = await import("@/lib/google/profile-sync");
+    const outcome = await fetchGoogleProfile(
+      credential,
+      location,
+      nowIso(),
+      await loadInstagramCredential(db, workspaceId),
+    );
     if (!outcome.ok) return { ok: false, error: outcome.error };
 
     if (outcome.pendingApproval) {
@@ -2559,13 +3196,44 @@ export const drizzleProvider: DataProvider = {
       return { ok: true, pendingApproval: true };
     }
 
-    if (typeof outcome.rating === "number" || typeof outcome.reviewCount === "number") {
+    const syncedLocation = outcome.profileSnapshot
+      ? locationFromProfileSnapshot(location, outcome.profileSnapshot)
+      : { ...location, gbpConnected: true };
+    if (
+      outcome.profileSnapshot ||
+      typeof outcome.rating === "number" ||
+      typeof outcome.reviewCount === "number"
+    ) {
       await db
         .update(t.location)
         .set({
           rating: outcome.rating ?? location.rating,
           reviewCount: outcome.reviewCount ?? location.reviewCount,
           gbpConnected: true,
+          name: syncedLocation.name,
+          category: syncedLocation.category,
+          address: syncedLocation.address,
+          city: syncedLocation.city,
+          region: syncedLocation.region,
+          googlePlaceId: syncedLocation.googlePlaceId,
+          reviewUrl: syncedLocation.reviewUrl,
+          profileDescription: syncedLocation.profile.description,
+          profilePrimaryCategory: syncedLocation.profile.primaryCategory,
+          profileSecondaryCategories: syncedLocation.profile.secondaryCategories,
+          profilePhotoCount: syncedLocation.profile.photoCount,
+          profilePostCount: syncedLocation.profile.postCount,
+          profileQnaCount: syncedLocation.profile.qnaCount,
+          profileHoursSet: syncedLocation.profile.hoursSet,
+          profileHolidayHoursSet: syncedLocation.profile.holidayHoursSet,
+          profileServicesWithDescriptions: syncedLocation.profile.servicesWithDescriptions,
+          profileServicesTotal: syncedLocation.profile.servicesTotal,
+          profileResponseRate: syncedLocation.profile.responseRate,
+          profileCompleteness: syncedLocation.profile.completeness,
+          gbpSnapshot: syncedLocation.gbpSnapshot,
+          gbpAudit: outcome.profileAudit ?? syncedLocation.gbpAudit,
+          suggestionInbox: outcome.suggestionInbox
+            ? mergeSuggestionInbox(ctx.location.suggestionInbox ?? [], outcome.suggestionInbox)
+            : syncedLocation.suggestionInbox,
         })
         .where(and(eq(t.location.id, ctx.location.id), eq(t.location.workspaceId, workspaceId)));
     }
@@ -2584,12 +3252,16 @@ export const drizzleProvider: DataProvider = {
         .values(imported.map((r, i) => buildReviewRow(r, workspaceId, front() - i)));
     }
 
-    if (outcome.snapshot) {
+    if (outcome.snapshot || outcome.performanceSnapshots?.length) {
       const meta = one(
         await db.select().from(t.datasetMeta).where(eq(t.datasetMeta.workspaceId, workspaceId)).limit(1),
         `dataset_meta for workspace ${workspaceId}`,
       );
-      const metrics = upsertSnapshot(meta.metrics, outcome.snapshot);
+      let metrics = meta.metrics;
+      for (const snapshot of outcome.performanceSnapshots ?? []) {
+        metrics = upsertSnapshot(metrics, snapshot);
+      }
+      if (outcome.snapshot) metrics = upsertSnapshot(metrics, outcome.snapshot);
       await db
         .update(t.datasetMeta)
         .set({ metrics })
@@ -2598,15 +3270,26 @@ export const drizzleProvider: DataProvider = {
     await setGoogleIntegration(
       db,
       workspaceId,
-      "connected",
+      outcome.performanceError ? "needs_attention" : "connected",
       `Google Business Profile synced — ${outcome.reviewCount ?? imported.length} reviews`,
     );
+    const external = outcome.profileSnapshot?.externalEvidence;
+    if (external) {
+      await setProviderIntegration(db, workspaceId, "website", external.website.status, external.website.error ?? `${external.website.pages.length} website pages cross-checked`);
+      await setProviderIntegration(db, workspaceId, "search_console", external.searchConsole.status, external.searchConsole.error ?? `${external.searchConsole.rows.length} Search Console query rows synced`);
+      await setProviderIntegration(db, workspaceId, "instagram", external.instagram.status, external.instagram.error ?? `${external.instagram.media.length} Instagram posts synced`);
+    }
 
     return {
       ok: true,
       rating: outcome.rating,
       reviewCount: outcome.reviewCount,
       reviewsImported: imported.length,
+      capabilityScore: outcome.profileSnapshot?.capabilityScore.score,
+      mediaImported: outcome.profileSnapshot?.media.length,
+      warnings: outcome.profileSnapshot?.warnings,
+      auditFindings: outcome.profileAudit?.summary.openFindings,
+      suggestionsCreated: outcome.suggestionInbox?.length,
     };
   },
 
@@ -2641,6 +3324,277 @@ export const drizzleProvider: DataProvider = {
     return loadGoogleCredential(db, workspaceId);
   },
 
+  async saveInstagramCredential(
+    workspaceId: string,
+    input: SaveInstagramCredentialInput,
+  ) {
+    const db = getDb();
+    const now = nowIso();
+    const existing = await loadInstagramCredential(db, workspaceId);
+    const row: typeof t.instagramCredential.$inferInsert = {
+      workspaceId,
+      encryptedAccessToken: input.encryptedAccessToken,
+      accountId: input.accountId,
+      username: input.username ?? existing?.username ?? null,
+      scopes: input.scopes,
+      expiresAt: input.expiresAt ?? null,
+      connectedAt: existing?.connectedAt ?? now,
+      updatedAt: now,
+    };
+    await db
+      .insert(t.instagramCredential)
+      .values(row)
+      .onConflictDoUpdate({
+        target: t.instagramCredential.workspaceId,
+        set: {
+          encryptedAccessToken: row.encryptedAccessToken,
+          accountId: row.accountId,
+          username: row.username,
+          scopes: row.scopes,
+          expiresAt: row.expiresAt,
+          updatedAt: row.updatedAt,
+        },
+      });
+  },
+
+  async getInstagramCredential(workspaceId) {
+    return loadInstagramCredential(getDb(), workspaceId);
+  },
+
+  async updateProfileSuggestion(
+    workspaceId: string,
+    suggestionId: string,
+    patch: ProfileSuggestionPatch,
+  ) {
+    const db = getDb();
+    const rows = await db
+      .select({ suggestionInbox: t.location.suggestionInbox })
+      .from(t.location)
+      .where(eq(t.location.workspaceId, workspaceId))
+      .limit(1);
+    const inbox = rows[0]?.suggestionInbox ?? [];
+    const index = inbox.findIndex((item) => item.id === suggestionId);
+    const existing = inbox[index];
+    if (index < 0 || !existing) return null;
+    const updated: ProfileSuggestion = { ...existing, ...patch };
+    const nextInbox = inbox.map((item, itemIndex) => itemIndex === index ? updated : item);
+    await db
+      .update(t.location)
+      .set({ suggestionInbox: nextInbox })
+      .where(eq(t.location.workspaceId, workspaceId));
+    return updated;
+  },
+
+  async createProfileMutationJob(workspaceId, job) {
+    if (job.workspaceId !== workspaceId) throw new Error("Mutation job workspace mismatch.");
+    const db = getDb();
+    const inserted = await db
+      .insert(t.profileMutationJob)
+      .values(buildMutationJobRow(job))
+      .onConflictDoNothing({ target: t.profileMutationJob.idempotencyKey })
+      .returning();
+    if (inserted[0]) return { job: mapMutationJob(inserted[0]), created: true };
+    const existing = await db
+      .select()
+      .from(t.profileMutationJob)
+      .where(and(
+        eq(t.profileMutationJob.workspaceId, workspaceId),
+        eq(t.profileMutationJob.idempotencyKey, job.idempotencyKey),
+      ))
+      .limit(1);
+    if (!existing[0]) throw new Error("Mutation idempotency key collision.");
+    return { job: mapMutationJob(existing[0]), created: false };
+  },
+
+  async updateProfileMutationJob(
+    workspaceId: string,
+    jobId: string,
+    patch: ProfileMutationJobPatch,
+  ) {
+    const db = getDb();
+    const rows = await db
+      .update(t.profileMutationJob)
+      .set(patch)
+      .where(and(
+        eq(t.profileMutationJob.workspaceId, workspaceId),
+        eq(t.profileMutationJob.id, jobId),
+      ))
+      .returning();
+    return rows[0] ? mapMutationJob(rows[0]) : null;
+  },
+
+  async getProfileMutationJobByIdempotency(workspaceId, idempotencyKey) {
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(t.profileMutationJob)
+      .where(and(
+        eq(t.profileMutationJob.workspaceId, workspaceId),
+        eq(t.profileMutationJob.idempotencyKey, idempotencyKey),
+      ))
+      .limit(1);
+    return rows[0] ? mapMutationJob(rows[0]) : null;
+  },
+
+  async createContentPublishingJob(workspaceId, job) {
+    if (job.workspaceId !== workspaceId) throw new Error("Content publishing job workspace mismatch.");
+    const inserted = await getDb()
+      .insert(t.contentPublishingJob)
+      .values(buildContentPublishingJobRow(job))
+      .onConflictDoNothing({ target: t.contentPublishingJob.idempotencyKey })
+      .returning();
+    if (inserted[0]) return { job: mapContentPublishingJob(inserted[0]), created: true };
+    const existing = await getDb()
+      .select()
+      .from(t.contentPublishingJob)
+      .where(and(
+        eq(t.contentPublishingJob.workspaceId, workspaceId),
+        eq(t.contentPublishingJob.idempotencyKey, job.idempotencyKey),
+      ))
+      .limit(1);
+    if (!existing[0]) throw new Error("Content publishing idempotency key collision.");
+    return { job: mapContentPublishingJob(existing[0]), created: false };
+  },
+
+  async updateContentPublishingJob(
+    workspaceId: string,
+    jobId: string,
+    patch: ContentPublishingJobPatch,
+  ) {
+    const rows = await getDb()
+      .update(t.contentPublishingJob)
+      .set(patch)
+      .where(and(
+        eq(t.contentPublishingJob.workspaceId, workspaceId),
+        eq(t.contentPublishingJob.id, jobId),
+      ))
+      .returning();
+    return rows[0] ? mapContentPublishingJob(rows[0]) : null;
+  },
+
+  async getContentPublishingJobByIdempotency(workspaceId, idempotencyKey) {
+    const rows = await getDb()
+      .select()
+      .from(t.contentPublishingJob)
+      .where(and(
+        eq(t.contentPublishingJob.workspaceId, workspaceId),
+        eq(t.contentPublishingJob.idempotencyKey, idempotencyKey),
+      ))
+      .limit(1);
+    return rows[0] ? mapContentPublishingJob(rows[0]) : null;
+  },
+
+  async listGoogleConnectedWorkspaceIds() {
+    const rows = await getDb().select({ workspaceId: t.googleCredential.workspaceId }).from(t.googleCredential);
+    return rows.map((row) => row.workspaceId);
+  },
+
+  async createMonitoringRun(workspaceId, run) {
+    if (run.workspaceId !== workspaceId) throw new Error("Monitoring run workspace mismatch.");
+    const inserted = await getDb()
+      .insert(t.monitoringRun)
+      .values(run)
+      .onConflictDoNothing({ target: [t.monitoringRun.workspaceId, t.monitoringRun.windowKey] })
+      .returning();
+    if (inserted[0]) return { run: mapMonitoringRun(inserted[0]), created: true };
+    const existing = await getDb()
+      .select()
+      .from(t.monitoringRun)
+      .where(and(eq(t.monitoringRun.workspaceId, workspaceId), eq(t.monitoringRun.windowKey, run.windowKey)))
+      .limit(1);
+    if (!existing[0]) throw new Error("Monitoring window collision.");
+    return { run: mapMonitoringRun(existing[0]), created: false };
+  },
+
+  async updateMonitoringRun(workspaceId: string, runId: string, patch: MonitoringRunPatch) {
+    const rows = await getDb()
+      .update(t.monitoringRun)
+      .set(patch)
+      .where(and(eq(t.monitoringRun.workspaceId, workspaceId), eq(t.monitoringRun.id, runId)))
+      .returning();
+    return rows[0] ? mapMonitoringRun(rows[0]) : null;
+  },
+
+  async getMonitoringRunByWindow(workspaceId, windowKey) {
+    const rows = await getDb()
+      .select()
+      .from(t.monitoringRun)
+      .where(and(eq(t.monitoringRun.workspaceId, workspaceId), eq(t.monitoringRun.windowKey, windowKey)))
+      .limit(1);
+    return rows[0] ? mapMonitoringRun(rows[0]) : null;
+  },
+
+  async saveAiContentAsset(workspaceId, asset) {
+    if (asset.workspaceId !== workspaceId) throw new Error("AI content asset workspace mismatch.");
+    const row: typeof t.aiContentAsset.$inferInsert = { ...asset };
+    await getDb()
+      .insert(t.aiContentAsset)
+      .values(row)
+      .onConflictDoUpdate({
+        target: [t.aiContentAsset.workspaceId, t.aiContentAsset.suggestionId],
+        set: {
+          id: row.id,
+          locationId: row.locationId,
+          kind: row.kind,
+          mimeType: row.mimeType,
+          base64Data: row.base64Data,
+          prompt: row.prompt,
+          altText: row.altText,
+          model: row.model,
+          updatedAt: row.updatedAt,
+        },
+      });
+  },
+
+  async getAiContentAssetById(workspaceId, assetId) {
+    const rows = await getDb()
+      .select()
+      .from(t.aiContentAsset)
+      .where(and(eq(t.aiContentAsset.workspaceId, workspaceId), eq(t.aiContentAsset.id, assetId)))
+      .limit(1);
+    return rows[0] ? mapAiContentAsset(rows[0]) : null;
+  },
+
+  async getAiContentAssetBySuggestion(workspaceId, suggestionId) {
+    const rows = await getDb()
+      .select()
+      .from(t.aiContentAsset)
+      .where(and(
+        eq(t.aiContentAsset.workspaceId, workspaceId),
+        eq(t.aiContentAsset.suggestionId, suggestionId),
+      ))
+      .limit(1);
+    return rows[0] ? mapAiContentAsset(rows[0]) : null;
+  },
+
+  async appendAuditLog(workspaceId, entry) {
+    if (entry.workspaceId !== workspaceId) throw new Error("Audit log workspace mismatch.");
+    const db = getDb();
+    await db
+      .insert(t.auditLog)
+      .values({
+        id: entry.id,
+        workspaceId,
+        actor: entry.actor,
+        action: entry.action,
+        targetType: entry.targetType,
+        targetId: entry.targetId,
+        at: entry.at,
+        meta: entry.meta,
+        seq: front(),
+      })
+      .onConflictDoNothing({ target: t.auditLog.id });
+  },
+
+  async appendNotification(workspaceId, notification) {
+    const data = await this.getData(workspaceId);
+    if (!data || notification.locationId !== data.location.id) throw new Error("Notification location mismatch.");
+    await getDb()
+      .insert(t.notification)
+      .values(buildNotificationRow(notification, workspaceId, front()))
+      .onConflictDoNothing({ target: t.notification.id });
+  },
+
   // ── Demo ──────────────────────────────────────────────────
   async resetDemo() {
     // No-op: the demo workspace is served entirely by the memory provider —
@@ -2670,6 +3624,29 @@ async function loadGoogleCredential(
   };
 }
 
+async function loadInstagramCredential(
+  db: FoundlyDb,
+  workspaceId: string,
+): Promise<InstagramCredential | null> {
+  const rows = await db
+    .select()
+    .from(t.instagramCredential)
+    .where(eq(t.instagramCredential.workspaceId, workspaceId))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    workspaceId: row.workspaceId,
+    encryptedAccessToken: row.encryptedAccessToken,
+    accountId: row.accountId,
+    username: row.username ?? undefined,
+    scopes: row.scopes,
+    expiresAt: row.expiresAt ?? undefined,
+    connectedAt: row.connectedAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
 /** Patch the `google` integration status inside dataset_meta. */
 async function setGoogleIntegration(
   db: FoundlyDb,
@@ -2689,6 +3666,54 @@ async function setGoogleIntegration(
       ? { ...intg, status, detail, lastSyncAt: nowIso() }
       : intg,
   );
+  await db
+    .update(t.datasetMeta)
+    .set({ integrations })
+    .where(eq(t.datasetMeta.workspaceId, workspaceId));
+}
+
+async function setProviderIntegration(
+  db: FoundlyDb,
+  workspaceId: string,
+  provider: Integration["provider"],
+  sourceStatus: "synced" | "not_connected" | "not_authorized" | "unavailable" | "error",
+  detail: string,
+): Promise<void> {
+  const rows = await db
+    .select()
+    .from(t.datasetMeta)
+    .where(eq(t.datasetMeta.workspaceId, workspaceId))
+    .limit(1);
+  const meta = rows[0];
+  if (!meta) return;
+  const status: Integration["status"] = sourceStatus === "synced"
+    ? "connected"
+    : sourceStatus === "not_connected"
+      ? "disconnected"
+      : "needs_attention";
+  const now = nowIso();
+  let found = false;
+  const integrations = meta.integrations.map((entry) => {
+    if (entry.provider !== provider) return entry;
+    found = true;
+    return { ...entry, status, detail, ...(status === "connected" ? { lastSyncAt: now } : {}) };
+  });
+  if (!found) {
+    const locationRows = await db
+      .select({ id: t.location.id })
+      .from(t.location)
+      .where(eq(t.location.workspaceId, workspaceId))
+      .limit(1);
+    integrations.push({
+      id: `int_${provider}_${workspaceId}`,
+      locationId: locationRows[0]?.id ?? "",
+      provider,
+      label: provider === "website" ? "Business website" : provider === "search_console" ? "Google Search Console" : "Instagram professional account",
+      status,
+      detail,
+      ...(status === "connected" ? { lastSyncAt: now } : {}),
+    });
+  }
   await db
     .update(t.datasetMeta)
     .set({ integrations })

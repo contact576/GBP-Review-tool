@@ -20,10 +20,6 @@ export async function getSession(): Promise<Session | null> {
   const store = await cookies();
   const raw = store.get(SESSION_COOKIE)?.value;
   if (!raw) return null;
-  // Legacy plain-role cookies (pre-auth builds) — treat as demo sessions.
-  if (raw === "owner" || raw === "agency_admin" || raw === "platform_admin") {
-    return demoClaims(raw);
-  }
   return verifySession(raw);
 }
 

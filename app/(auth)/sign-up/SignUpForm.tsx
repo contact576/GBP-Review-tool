@@ -53,9 +53,11 @@ const authFieldSize = "h-[54px] min-h-[54px]";
 export function SignUpForm({
   googleEnabled,
   dbBacked,
+  referralCode,
 }: {
   googleEnabled: boolean;
   dbBacked: boolean;
+  referralCode?: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -86,6 +88,7 @@ export function SignUpForm({
         businessName,
         industryKey,
         region,
+        referralCode,
       });
       if (!result.ok) {
         setError(result.error ?? "Something went wrong. Please try again.");
@@ -125,8 +128,17 @@ export function SignUpForm({
         </div>
       ) : null}
 
+      {referralCode ? (
+        <div className="mt-4 flex items-center gap-2 rounded-btn border border-primary/25 bg-primary-wash px-3 py-2.5 text-[12px] font-semibold text-primary-dark">
+          <Icon name="gift" size={15} /> Referral invitation applied
+        </div>
+      ) : null}
+
       {googleEnabled ? (
-        <a href="/api/auth/google" className={`${googleLinkClass} mt-5`}>
+        <a
+          href={referralCode ? `/api/auth/google?ref=${encodeURIComponent(referralCode)}` : "/api/auth/google"}
+          className={`${googleLinkClass} mt-5`}
+        >
           <Icon name="google" size={18} />
           Sign up with Google
         </a>

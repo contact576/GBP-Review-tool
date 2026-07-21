@@ -10,18 +10,19 @@ import { captureCustomerAction } from "@/lib/actions";
 import { consentLabels, makeConsentSourceText } from "@/lib/compliance/consent";
 import type { Region } from "@/lib/data/types";
 import type { CaptureCustomerInput } from "@/lib/data/provider";
+import { isE164 } from "@/lib/sms/phone";
 
 type ChannelChoice = "email" | "sms";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const QUEUE_KEY = "foundly.staff.capture-queue.v1";
 
 /** Inline contact validation — returns a reason string, or null when acceptable. */
 function validateContact(channel: ChannelChoice, value: string): string | null {
   const v = value.trim();
   if (!v) return null; // empty is handled by the disabled state, not an inline error
   if (channel === "email") return EMAIL_RE.test(v) ? null : "Enter a valid email address.";
-  const digits = v.replace(/\D/g, "");
-  return digits.length >= 7 && digits.length <= 15 ? null : "Enter a valid phone number.";
+  return isE164(v) ? null : "Include the country code, for example +14155550123.";
 }
 
 export function CaptureForm({
@@ -51,7 +52,7 @@ export function CaptureForm({
   const [serviceConsent, setServiceConsent] = useState(false);
   const [marketingConsent, setMarketingConsent] = useState(false);
   const [tally, setTally] = useState(0);
-  const [sentTo, setSentTo] = useState<{ name: string; mode: "sent" | "queued" } | null>(null);
+  const [sentTo, setSentTo] = useState<{ name: string; mode: "sent" | "queued" | "saved" } | null>(null);
   const [offline, setOffline] = useState(false);
   const [queueCount, setQueueCount] = useState(0);
   const queueRef = useRef<CaptureCustomerInput[]>([]);
@@ -64,25 +65,53 @@ export function CaptureForm({
 
   // Flush any queued captures when connectivity returns.
   useEffect(() => {
+    function persist(items: CaptureCustomerInput[]) {
+      try {
+        localStorage.setItem(QUEUE_KEY, JSON.stringify(items.slice(-100)));
+      } catch {
+        // Storage may be unavailable in private mode; the in-memory queue remains.
+      }
+    }
     async function drain() {
       if (!navigator.onLine || queueRef.current.length === 0) return;
       const items = queueRef.current;
       queueRef.current = [];
       setQueueCount(0);
       const failed: CaptureCustomerInput[] = [];
+      let deliveryFailures = 0;
       for (const p of items) {
-        try { await captureCustomerAction(p); } catch { failed.push(p); }
+        try {
+          const result = await captureCustomerAction(p);
+          if (result.status !== "sent") deliveryFailures += 1;
+        } catch {
+          failed.push(p);
+        }
       }
       if (failed.length) {
         queueRef.current = failed;
         setQueueCount(failed.length);
+        persist(failed);
+      } else if (deliveryFailures > 0) {
+        persist([]);
+        toast("Captures saved, but invite delivery needs attention", "warning", "alert");
       } else {
+        persist([]);
         toast("Queued invites sent", "success", "check-circle");
       }
+    }
+    try {
+      const saved = JSON.parse(localStorage.getItem(QUEUE_KEY) ?? "[]") as unknown;
+      if (Array.isArray(saved)) {
+        queueRef.current = saved.slice(-100) as CaptureCustomerInput[];
+        setQueueCount(queueRef.current.length);
+      }
+    } catch {
+      localStorage.removeItem(QUEUE_KEY);
     }
     const onOnline = () => { setOffline(false); void drain(); };
     const onOffline = () => setOffline(true);
     setOffline(!navigator.onLine);
+    if (navigator.onLine) void drain();
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
     return () => {
@@ -108,9 +137,14 @@ export function CaptureForm({
   function enqueue(p: CaptureCustomerInput) {
     queueRef.current = [...queueRef.current, p];
     setQueueCount(queueRef.current.length);
+    try {
+      localStorage.setItem(QUEUE_KEY, JSON.stringify(queueRef.current.slice(-100)));
+    } catch {
+      // The current-tab queue still protects the capture.
+    }
   }
 
-  function flashSuccess(customerName: string, mode: "sent" | "queued") {
+  function flashSuccess(customerName: string, mode: "sent" | "queued" | "saved") {
     resetForm();
     setSentTo({ name: customerName, mode });
     setTimeout(() => setSentTo(null), 1600);
@@ -154,9 +188,14 @@ export function CaptureForm({
 
     startTransition(async () => {
       try {
-        await captureCustomerAction(payload);
-        toast(`Invite sent to ${customerName}`, "success", "check-circle");
-        flashSuccess(customerName, "sent");
+        const result = await captureCustomerAction(payload);
+        if (result.status === "sent") {
+          toast(`Invite accepted for delivery to ${customerName}`, "success", "check-circle");
+          flashSuccess(customerName, "sent");
+        } else {
+          toast(`Customer saved — invite delivery is not connected`, "warning", "alert");
+          flashSuccess(customerName, "saved");
+        }
       } catch {
         // Network dropped mid-send — never lose the capture.
         enqueue(payload);
@@ -177,14 +216,18 @@ export function CaptureForm({
               sentTo.mode === "sent" ? "bg-primary-tint text-primary" : "bg-gold-tint text-gold-deep",
             )}
           >
-            <Icon name={sentTo.mode === "sent" ? "check-circle" : "clock"} size={56} />
+            <Icon name={sentTo.mode === "sent" ? "check-circle" : sentTo.mode === "queued" ? "clock" : "alert"} size={56} />
           </div>
           <div>
             <div className="text-[24px] font-extrabold text-ink">
               {sentTo.mode === "sent" ? `Sent to ${sentTo.name}` : `Saved for ${sentTo.name}`}
             </div>
             <p className="mt-1 text-[14px] text-sub">
-              {sentTo.mode === "sent" ? "Ready for the next one." : "Sends automatically when you're back online."}
+              {sentTo.mode === "sent"
+                ? "Accepted by the email provider. Ready for the next one."
+                : sentTo.mode === "queued"
+                  ? "Saved in this tab and retries when the connection returns."
+                  : "The customer is saved, but the invite was not delivered."}
             </p>
           </div>
         </div>

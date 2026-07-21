@@ -1,106 +1,178 @@
-# Foundly — Setup Guide (non-technical, click-by-click)
+# Foundly production setup
 
-Foundly works out of the box in demo mode. Each key below unlocks a real capability.
-You'll paste each value in **two places**: (1) to Claude in chat (so it can be tested during the build), and (2) into **Vercel** so your live site uses it.
+Foundly can be explored without provider keys, but do not sell or operate the production service until persistence, secrets, webhooks, and the providers you expose are configured and verified.
 
-> **How to add a key to Vercel (same steps every time):**
-> 1. Go to **vercel.com** → log in → click your **project** (the GBP-Review-tool one)
-> 2. Click **Settings** (top tab) → **Environment Variables** (left menu)
-> 3. In "Key" type the NAME exactly as shown below; in "Value" paste the secret → **Save**
-> 4. After adding keys, go to **Deployments** (top tab) → click the "⋯" on the newest deployment → **Redeploy** so the site picks them up.
+Never paste secrets into source files, screenshots, issues, or chat. Store local values in `.env.local` and deployment values in the hosting provider’s encrypted environment-variable settings.
 
----
+## 1. Application, database, and secrets
 
-## 1. Anthropic API key — unlocks real AI review writing  (~5 min)
+Set:
 
-What it fixes: review drafts, reply suggestions, and report text become genuinely AI-written and grounded in the rating/service/industry (instead of templates).
+```text
+NEXT_PUBLIC_APP_URL=https://your-domain.example
+DATABASE_URL=postgres://...
+AUTH_SECRET=<independent random value of at least 32 bytes>
+ENCRYPTION_SECRET=<independent random value of at least 32 bytes>
+HEALTH_CHECK_SECRET=<independent random value of at least 32 bytes>
+CONTENT_ASSET_SIGNING_SECRET=<independent random value of at least 32 bytes>
+CRON_SECRET=<independent random value of at least 32 bytes>
+```
 
-1. Go to **https://console.anthropic.com** → sign up / log in
-2. Left menu → **API keys** → **Create key** → name it `foundly` → **Copy** the key (starts with `sk-ant-`)
-3. You may need to add a payment method under **Billing** ($5 credit is plenty to start — drafts cost fractions of a cent with the model Foundly uses)
-4. Add to Vercel as: **`ANTHROPIC_API_KEY`**
+- `NEXT_PUBLIC_APP_URL` must be the permanent HTTPS origin with no trailing slash. OAuth callbacks, SMS callbacks, emails, and printed QR codes rely on it.
+- `DATABASE_URL` may point to Neon, Supabase, or standard Postgres. New deployments self-initialize idempotently; `npm run db:push` is also available for controlled migrations.
+- `AUTH_SECRET` signs sessions and referral codes.
+- `ENCRYPTION_SECRET` encrypts Google refresh tokens with AES-256-GCM.
+- `HEALTH_CHECK_SECRET` protects `GET /api/health?deep=1` through the `x-foundly-health-secret` header.
+- `CONTENT_ASSET_SIGNING_SECRET` signs short-lived, image-only URLs that Google fetches after a local post is approved.
+- `CRON_SECRET` protects the read-only continuous-monitoring route. Vercel sends it automatically to configured cron requests.
 
-## 2. Neon database — unlocks real saved data  (~5 min, free)
+Production auth and Google credential encryption fail closed when required secrets are missing.
 
-What it fixes: real accounts and everything you do (customers, requests, reviews, settings) is saved permanently instead of resetting.
+## 2. Google Cloud
 
-1. Go to **https://neon.tech** → **Sign up** (Google login is easiest) → it creates a free project automatically
-2. On the project dashboard, find **Connection string** → select **Pooled connection** → **Copy** (starts with `postgres://`)
-3. Add to Vercel as: **`DATABASE_URL`**
-4. Tell Claude when done — it will run the one-time database setup (`db:push`) for you.
+Create one Google Cloud project, enable billing, and enable Places API (New). Create a restricted server API key:
 
-## 3. Google Cloud — unlocks Google sign-in + real business lookup  (~15 min, free)
+```text
+GOOGLE_MAPS_API_KEY=...
+```
 
-What it fixes: "Sign in with Google" works; onboarding finds your REAL business on Google (so your QR/review links point at your actual Google review page); the free score tool uses your real rating and review count.
+This powers onboarding business search, public profile data, the score tool, and explicit rank-grid scans. Restrict the key to the required API and production server environment. Rank grids make 9 or 25 Places Text Search calls per scan, so configure quota and billing alerts.
 
-**A. Create the project**
-1. Go to **https://console.cloud.google.com** → sign in → top bar → **Select a project** → **New project** → name `foundly` → **Create** (then make sure it's selected)
+Create an OAuth 2.0 Web application and set:
 
-**B. Enable the Places API**
-2. Top search bar → type **"Places API (New)"** → open it → **Enable**
-3. Left menu → **APIs & Services → Credentials** → **+ Create credentials → API key** → **Copy** it
-4. Add to Vercel as: **`GOOGLE_MAPS_API_KEY`**
+```text
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+```
 
-**C. Google sign-in (OAuth)**
-5. **APIs & Services → OAuth consent screen** → User type **External** → fill only the required fields (app name `Foundly`, your email) → Save through the steps
-6. **Credentials** → **+ Create credentials → OAuth client ID** → Application type **Web application** → name `foundly-web`
-7. Under **Authorized redirect URIs**, click **+ Add URI** four times and paste (replace `YOUR-SITE` with your real Vercel URL):
-   - `https://YOUR-SITE.vercel.app/api/auth/google/callback`
-   - `https://YOUR-SITE.vercel.app/api/google/connect/callback`
-   - `http://localhost:3000/api/auth/google/callback`
-   - `http://localhost:3000/api/google/connect/callback`
-8. **Create** → copy both the **Client ID** and **Client secret**
-9. Add to Vercel as: **`GOOGLE_CLIENT_ID`** and **`GOOGLE_CLIENT_SECRET`**
+Register both production callback URLs exactly:
 
-**D. Google Business Profile API (the deep integration — reviews import, posting replies)**
-This one needs Google's per-project approval (typically 1–2 weeks). Foundly is built ready for it and shows an honest "approval pending" status until then.
-10. Read: **https://developers.google.com/my-business/content/prereqs** → submit the access request form: **https://support.google.com/business/contact/api_default** (describe: "Review management software for local businesses; requesting API access for reading and replying to reviews on behalf of authenticated business owners.")
-11. Once approved, in the Cloud console search for and **Enable**: "My Business Account Management API", "My Business Business Information API", "Business Profile Performance API" — then tell Claude.
+```text
+https://your-domain.example/api/auth/google/callback
+https://your-domain.example/api/google/connect/callback
+```
 
-## 4. Security secrets — Claude generates these for you
+Add the equivalent `http://localhost:3000` URLs only to a development OAuth client.
 
-Add these two to Vercel (Claude will give you the values in chat):
-- **`AUTH_SECRET`** — signs login sessions
-- **`ENCRYPTION_SECRET`** — encrypts stored Google tokens
+For owned-profile reviews and performance data, request Google Business Profile API access and enable the Account Management and Business Profile Performance APIs. Until Google approves the project, public Places data continues to work and the UI identifies the owned-profile connection as pending.
 
-## 5. Your site address
+## 3. Email with Resend
 
-Add to Vercel as: **`NEXT_PUBLIC_APP_URL`** = your live URL, e.g. `https://YOUR-SITE.vercel.app` (no trailing slash). Makes printed QR codes permanent even if the deploy URL changes.
+Verify a sending domain in Resend, create an API key, and set:
 
----
+```text
+RESEND_API_KEY=re_...
+EMAIL_FROM=Foundly <reviews@your-domain.example>
+```
 
-## Later — activate when ready (all built, ready-but-inactive)
+Email activates review requests, staff invitations, password resets, and branded agency reports. Use a verified production sender; Resend’s onboarding sender is only suitable for sandbox testing.
 
-These are fully coded. Until you add the keys, the app degrades honestly ("connect
-email to send", "connect billing to enable upgrades") and never fakes anything.
+## 4. SMS with Twilio
 
-### Email — Resend (unlocks review-request/invite/reset emails)
-1. Create a free account at **resend.com** → API Keys → create key.
-2. In Vercel → Settings → Environment Variables add:
-   - `RESEND_API_KEY` = the key
-   - `EMAIL_FROM` = `Foundly <onboarding@resend.dev>` (or your verified domain sender)
-3. Redeploy. Sending turns on automatically; `/setup` shows it green.
+Complete the carrier registration required for the countries where you send. For US application-to-person traffic, configure the relevant A2P registration and consent language.
 
-### Billing — Stripe (unlocks plan upgrades + the customer portal)
-1. Create an account at **stripe.com**. In Developers → API keys copy the **Secret key**.
-2. Create a recurring **Price** for each paid plan you want (Starter/Growth/Pro/Multi/Agency).
-3. In Vercel add:
-   - `STRIPE_SECRET_KEY` = your secret key
-   - `STRIPE_WEBHOOK_SECRET` = from Developers → Webhooks (endpoint `/(your-domain)/api/webhooks/stripe`)
-   - `STRIPE_PRICE_GROWTH`, `STRIPE_PRICE_PRO`, `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_MULTI`, `STRIPE_PRICE_AGENCY` = the matching Price IDs
-4. Redeploy. Upgrade buttons on `/app/settings/billing` now open real Stripe Checkout.
+Set:
 
-### SMS — Twilio (needs A2P 10DLC carrier approval, 1–5 days)
-Register a Twilio A2P brand/campaign first (long lead time). SMS stays honestly
-"pending" until approved; email is the working default meanwhile.
+```text
+TWILIO_ACCOUNT_SID=AC...
+TWILIO_AUTH_TOKEN=...
+TWILIO_MESSAGING_SERVICE_SID=MG...
+```
 
-## Checklist
+`TWILIO_FROM_NUMBER=+14155550123` may be used instead of a Messaging Service SID, but a Messaging Service is recommended.
 
-- [ ] `ANTHROPIC_API_KEY` in Vercel + pasted to Claude
-- [ ] `DATABASE_URL` in Vercel + pasted to Claude
-- [ ] `GOOGLE_MAPS_API_KEY` in Vercel + pasted to Claude
-- [ ] `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` in Vercel + pasted to Claude
-- [ ] `AUTH_SECRET` + `ENCRYPTION_SECRET` in Vercel (values from Claude)
-- [ ] `NEXT_PUBLIC_APP_URL` in Vercel
-- [ ] Redeployed after adding keys
-- [ ] GBP API access request submitted (approval takes days–weeks)
+Configure the Messaging Service’s incoming-message webhook as:
+
+```text
+POST https://your-domain.example/api/webhooks/twilio/inbound
+```
+
+Foundly supplies its signed status-callback URL on every outbound message. The implementation verifies Twilio signatures, persists sent/delivered/failed state, enforces service consent and plan credits, and globally suppresses numbers that send STOP-family keywords. HELP/INFO return service information.
+
+## 5. Stripe billing
+
+Create recurring monthly and annual Prices for each plan you intend to sell, then set:
+
+```text
+STRIPE_SECRET_KEY=sk_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_PRICE_STARTER_MONTHLY=price_...
+STRIPE_PRICE_STARTER_ANNUAL=price_...
+STRIPE_PRICE_GROWTH_MONTHLY=price_...
+STRIPE_PRICE_GROWTH_ANNUAL=price_...
+STRIPE_PRICE_PRO_MONTHLY=price_...
+STRIPE_PRICE_PRO_ANNUAL=price_...
+STRIPE_PRICE_MULTI_MONTHLY=price_...
+STRIPE_PRICE_MULTI_ANNUAL=price_...
+STRIPE_PRICE_AGENCY_MONTHLY=price_...
+STRIPE_PRICE_AGENCY_ANNUAL=price_...
+```
+
+Create this webhook endpoint:
+
+```text
+POST https://your-domain.example/api/webhooks/stripe
+```
+
+Subscribe it to:
+
+- `checkout.session.completed`
+- `customer.subscription.created`
+- `customer.subscription.updated`
+- `customer.subscription.deleted`
+- `customer.subscription.paused`
+- `customer.subscription.resumed`
+
+The webhook verifies Stripe’s raw-payload signature, reconciles customer/subscription/price/period/cancellation state, maps immutable Price IDs to entitlements, and returns 5xx on persistence or referral-credit failure so Stripe retries. Checkout reuses a stored customer, and plan/card changes use the Stripe Billing Portal.
+
+Referral rewards default to 5,000 minor units ($50.00):
+
+```text
+REFERRAL_CREDIT_CENTS=5000
+```
+
+Credits are idempotent Stripe customer-balance transactions and apply only after a referred workspace becomes an active paid subscriber.
+
+## 6. AI generation
+
+Set `ANTHROPIC_API_KEY` to use live generation for drafts, replies, campaigns, and narration. `FOUNDLY_AI_MODEL` overrides the configured model. Without a key, Foundly uses deterministic industry- and rating-aware templates that still pass the same compliance lints.
+
+Set the OpenAI project key used by the governed Content Studio:
+
+```text
+OPENAI_API_KEY=sk-proj-...
+FOUNDLY_OPENAI_TEXT_MODEL=gpt-5.4-mini
+FOUNDLY_OPENAI_IMAGE_MODEL=gpt-image-2
+```
+
+OpenAI API billing is separate from ChatGPT subscriptions. The selected API project must have available billing or credits. Generated text and images remain private until the owner reviews the exact proposal; approval creates an idempotent Google publishing job and read-after-write verification.
+
+## 7. Continuous monitoring
+
+`vercel.json` calls `GET /api/cron/monitor` hourly. Each connected workspace is processed at most once per UTC day, failed windows can retry, and large tenant sets drain in bounded batches. Configure `DATABASE_URL`, `CRON_SECRET`, and optionally `MONITORING_BATCH_SIZE` (default 15). Any other scheduler must send `Authorization: Bearer $CRON_SECRET`.
+
+## 8. Deployment verification
+
+After adding or changing environment variables, redeploy and open `/setup`. It shows configuration booleans and health only, never secret values.
+
+Run before release:
+
+```bash
+npm run typecheck
+npm test
+npm run build
+npx playwright test
+```
+
+Then verify on the deployed origin:
+
+1. Register and recover a password.
+2. Complete Google sign-in and Business Profile connect callbacks.
+3. Send one real email and one real SMS to consented test recipients; confirm delivery callbacks and STOP suppression.
+4. Complete a Stripe test checkout, open the portal, change plans, and cancel; confirm entitlements follow the webhook state.
+5. Run the protected deep health probe from the monitoring service.
+6. Confirm every webhook uses HTTPS and the exact deployed origin used to calculate provider signatures.
+7. Trigger one authenticated monitoring run and confirm a second call in the same UTC window does not duplicate the audit.
+8. Approve a controlled Google post, reply, and Q&A answer; verify the provider resource is read back before Foundly shows it as published.
+
+The PWA service worker intentionally avoids caching authenticated HTML or API responses. Test installation and offline staff capture on physical iOS and Android devices before field rollout.

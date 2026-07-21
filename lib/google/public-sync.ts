@@ -108,6 +108,8 @@ export function buildGooglePublicUpdate(
   const snapshot: MetricSnapshot = {
     locationId: location.id,
     date: nowIso.slice(0, 10),
+    window: "rolling_30d",
+    sources: { scores: "google_places" },
     foundYou: 0,
     contactedYou: 0,
     newReviews: 0,
@@ -130,6 +132,31 @@ export function upsertSnapshot(
   metrics: MetricSnapshot[],
   snapshot: MetricSnapshot,
 ): MetricSnapshot[] {
-  const withoutToday = metrics.filter((m) => m.date !== snapshot.date);
-  return [...withoutToday, snapshot];
+  const existing = metrics.find((m) => m.date === snapshot.date);
+  const hasProvenance = Boolean(existing?.sources || snapshot.sources);
+  let next = snapshot;
+
+  // A public-score refresh and a GBP performance refresh may land on the same
+  // date. Merge only fields whose source is present so one sync cannot erase
+  // another integration's trustworthy metrics with placeholder zeros.
+  if (existing && hasProvenance) {
+    const incoming = snapshot.sources ?? {};
+    next = {
+      ...existing,
+      ...snapshot,
+      foundYou: incoming.foundYou ? snapshot.foundYou : existing.foundYou,
+      contactedYou: incoming.contactedYou
+        ? snapshot.contactedYou
+        : existing.contactedYou,
+      newReviews: incoming.newReviews ? snapshot.newReviews : existing.newReviews,
+      growthScore: incoming.scores ? snapshot.growthScore : existing.growthScore,
+      reviewsScore: incoming.scores ? snapshot.reviewsScore : existing.reviewsScore,
+      profileScore: incoming.scores ? snapshot.profileScore : existing.profileScore,
+      sources: { ...existing.sources, ...snapshot.sources },
+    };
+  }
+
+  return [...metrics.filter((m) => m.date !== snapshot.date), next].sort((a, b) =>
+    a.date.localeCompare(b.date),
+  );
 }

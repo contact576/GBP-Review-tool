@@ -1,230 +1,149 @@
 import { getData } from "@/lib/data";
-import { sinceJoined, sparklinePoints } from "@/lib/data/selectors";
+import { buildDashboardModel, type DashboardSignal } from "@/lib/data/dashboard";
 import { Card, CardHeader } from "@/components/ds/Card";
-import { Badge } from "@/components/ds/misc";
+import { LinkButton } from "@/components/ds/Button";
+import { Badge, EmptyState } from "@/components/ds/misc";
 import { PageHeader } from "@/components/app/PageHeader";
+import { DashboardTrendCard } from "@/components/app/DashboardTrendCard";
 import { Icon, type IconName } from "@/components/icons";
-import { StatTile } from "@/components/charts/StatTile";
 import { Donut, type DonutSegment } from "@/components/charts/Donut";
-import { Heatmap } from "@/components/charts/Heatmap";
 import { NEUTRAL_SEG } from "@/components/charts/tokens";
+import { formatNumber } from "@/lib/utils/format";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
-import { formatDate } from "@/lib/utils/format";
-import type { LinePoint } from "@/components/charts/LineArea";
 import { SectionNav } from "./SectionNav";
-import { TrendCard } from "./TrendCard";
 
 const SECTIONS = [
   { id: "overview", label: "Overview" },
   { id: "trends", label: "Trends" },
   { id: "breakdown", label: "Rating mix" },
-  { id: "activity", label: "Activity" },
+  { id: "activity", label: "Request funnel" },
   { id: "sources", label: "Sources" },
 ];
 
-interface Kpi {
-  key: string;
-  label: string;
-  icon: IconName;
-  value: number;
-  delta: number;
-  spark: number[];
-  source: string;
-}
-
 export default async function AnalyticsPage() {
   const data = await getData();
-  const metrics = data.metrics ?? [];
+  const dashboard = buildDashboardModel(data);
   const reviews = data.reviews ?? [];
-  const last = metrics[metrics.length - 1];
-  const since = sinceJoined(metrics);
-  const joined = formatDate(data.location.joinedAt);
 
-  const kpis: Kpi[] = [
-    {
-      key: "foundYou",
-      label: MICROCOPY.foundYouLabel,
-      icon: "eye",
-      value: last?.foundYou ?? since.foundYou.now,
-      delta: since.foundYou.delta,
-      spark: sparklinePoints(metrics, "foundYou"),
-      source: "Google Business Profile insights",
-    },
-    {
-      key: "contactedYou",
-      label: MICROCOPY.contactedYouLabel,
-      icon: "phone",
-      value: last?.contactedYou ?? since.contactedYou.now,
-      delta: since.contactedYou.delta,
-      spark: sparklinePoints(metrics, "contactedYou"),
-      source: "Google Business Profile actions",
-    },
-    {
-      key: "newReviews",
-      label: MICROCOPY.newReviewsLabel,
-      icon: "star",
-      value: since.newReviews.now,
-      delta: since.newReviews.delta,
-      spark: sparklinePoints(metrics, "newReviews"),
-      source: "Google reviews (detected)",
-    },
-  ];
-
-  // Trend series (full 90d window; the card slices per timeframe).
-  const foundSeries: LinePoint[] = metrics.map((m) => ({ label: m.date, value: m.foundYou }));
-  const contactedSeries: LinePoint[] = metrics.map((m) => ({ label: m.date, value: m.contactedYou }));
-
-  // Rating mix — a genuine part-of-whole across public Google reviews.
-  const five = reviews.filter((r) => r.rating === 5).length;
-  const four = reviews.filter((r) => r.rating === 4).length;
-  const lower = reviews.filter((r) => r.rating <= 3).length;
+  const five = reviews.filter((review) => review.rating === 5).length;
+  const four = reviews.filter((review) => review.rating === 4).length;
+  const lower = reviews.filter((review) => review.rating <= 3).length;
   const ratingSegments: DonutSegment[] = [
     { label: "5 stars", value: five },
     { label: "4 stars", value: four },
     { label: "3 stars or lower", value: lower, color: NEUTRAL_SEG },
-  ].filter((s) => s.value > 0);
-  const reviewsTotal = reviews.length;
+  ].filter((segment) => segment.value > 0);
 
-  // Profile-views activity: weeks (rows) × weekday (cols) from real foundYou.
-  const dayCols = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  const weekMap = new Map<string, { day: number; value: number }[]>();
-  for (const m of metrics) {
-    const d = new Date(`${m.date}T00:00:00`);
-    if (Number.isNaN(d.getTime())) continue;
-    const dayIdx = (d.getDay() + 6) % 7; // Mon=0 … Sun=6
-    const ws = new Date(d);
-    ws.setDate(d.getDate() - dayIdx);
-    const key = ws.toISOString().slice(0, 10);
-    const bucket = weekMap.get(key) ?? [];
-    bucket.push({ day: dayIdx, value: m.foundYou });
-    weekMap.set(key, bucket);
-  }
-  const weekKeys = [...weekMap.keys()].sort().slice(-12);
-  const heatMatrix: (number | null)[][] = weekKeys.map((k) => {
-    const row: (number | null)[] = Array(7).fill(null);
-    for (const cell of weekMap.get(k) ?? []) row[cell.day] = cell.value;
-    return row;
-  });
-  const heatRowLabels = weekKeys.map((k) =>
-    new Date(`${k}T00:00:00`).toLocaleString("en", { month: "short", day: "numeric" }),
-  );
+  const requests = data.requests ?? [];
+  const requestFunnel = [
+    { label: "Accepted by delivery provider", value: requests.filter((request) => Boolean(request.sentAt)).length },
+    { label: "Opened", value: requests.filter((request) => Boolean(request.openedAt)).length },
+    { label: "Review-page handoffs", value: requests.filter((request) => Boolean(request.clickedAt)).length },
+    { label: "Private feedback received", value: requests.filter((request) => Boolean(request.privateFeedback)).length },
+  ];
+
+  const signals = [dashboard.foundYou, dashboard.contactedYou, dashboard.newReviews];
 
   return (
     <div>
       <PageHeader
+        kicker="Performance intelligence"
         title="Analytics"
-        sub={<>The three actions that matter — measured honestly, never inflated into &ldquo;customers.&rdquo;</>}
+        sub={<>Verified discovery, customer actions, review momentum, and Foundly request activity for {data.location.name}.</>}
+        actions={<LinkButton href="/app/report" variant="secondary" size="sm" icon="file">View growth report</LinkButton>}
       />
 
       <SectionNav sections={SECTIONS} />
 
-      {/* ── Overview KPIs ─────────────────────────────────── */}
       <section id="overview" className="scroll-mt-[128px] pt-4">
-        <div className="mb-3 flex items-center gap-2">
-          <span className="grid size-7 place-items-center rounded-btn bg-primary-wash text-primary">
-            <Icon name="chart" size={15} />
-          </span>
-          <h2 className="text-[15px] font-bold text-ink">Last 30 days at a glance</h2>
-        </div>
+        <SectionTitle icon="chart" title="Rolling 30 days at a glance" />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          {kpis.map((k) => (
-            <StatTile
-              key={k.key}
-              label={k.label}
-              value={k.value}
-              delta={k.delta}
-              favorableWhenUp
-              deltaCaption="vs prev. 30 days"
-              spark={k.spark}
-            />
-          ))}
+          <SignalTile signal={dashboard.foundYou} label="People found you" icon="eye" />
+          <SignalTile signal={dashboard.contactedYou} label="People contacted you" icon="phone" />
+          <SignalTile signal={dashboard.newReviews} label="New reviews" icon="star" />
         </div>
-        <p className="mt-3 flex items-center gap-1.5 text-[13px] text-faint">
-          <Icon name="clock" size={13} />
-          {MICROCOPY.sinceJoined} — you joined {joined}
+        <p className="mt-3 flex items-start gap-1.5 text-[12px] leading-relaxed text-faint">
+          <Icon name="shield" size={13} className="mt-0.5 shrink-0" />
+          Values remain unavailable until their own verified source is connected; a missing signal is never rendered as zero.
         </p>
       </section>
 
-      {/* ── Trends ────────────────────────────────────────── */}
       <section id="trends" className="scroll-mt-[128px] pt-8">
-        <div className="mb-3 flex items-center gap-2">
-          <span className="grid size-7 place-items-center rounded-btn bg-primary-wash text-primary">
-            <Icon name="trend" size={15} />
-          </span>
-          <h2 className="text-[15px] font-bold text-ink">Trends over time</h2>
-        </div>
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <TrendCard kicker="Profile views" label={MICROCOPY.foundYouLabel} series={foundSeries} favorableWhenUp />
-          <TrendCard kicker="Calls · directions · taps" label={MICROCOPY.contactedYouLabel} series={contactedSeries} favorableWhenUp />
+        <SectionTitle icon="trend" title="Discovery and conversion trends" />
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+          <DashboardTrendCard
+            signal={dashboard.foundYou}
+            kicker="Google profile views"
+            label="People found you"
+            description="Rolling profile impressions across Search and Maps; not a unique-person count."
+            icon="eye"
+          />
+          <DashboardTrendCard
+            signal={dashboard.contactedYou}
+            kicker="Calls, directions and website taps"
+            label="People contacted you"
+            description="Rolling customer actions; one customer may complete more than one action."
+            icon="phone"
+          />
         </div>
       </section>
 
-      {/* ── Rating mix + Activity ─────────────────────────── */}
       <section id="breakdown" className="scroll-mt-[128px] pt-8">
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
           <Card>
             <CardHeader
-              kicker="Breakdown"
+              kicker="Reputation"
               title="Review rating mix"
-              action={<Badge tone="neutral" icon="google">Public reviews</Badge>}
+              action={<Badge tone="neutral" icon="google">Imported Google reviews</Badge>}
             />
-            {reviewsTotal > 0 ? (
+            {reviews.length ? (
               <div className="flex justify-center py-2">
                 <Donut
                   segments={ratingSegments}
-                  centerValue={reviewsTotal}
-                  centerLabel="reviews"
-                  title="Review rating mix"
+                  centerValue={reviews.length}
+                  centerLabel="imported"
+                  title="Imported review rating mix"
                 />
               </div>
             ) : (
-              <p className="py-8 text-center text-[14px] text-sub">No reviews detected yet.</p>
+              <EmptyState
+                icon="star"
+                title="No reviews imported"
+                description="Connect Google review access before Foundly calculates the rating mix."
+                action={<LinkButton href="/app/settings/integrations" variant="secondary" size="sm">Review connection</LinkButton>}
+              />
             )}
-            <p className="mt-2 text-[12px] text-faint">
-              Share of your {reviewsTotal} public Google reviews by star rating.
+            <p className="mt-2 text-[12px] leading-relaxed text-faint">
+              Distribution of the Google reviews currently imported into Foundly. Public samples may not represent full history.
             </p>
           </Card>
 
           <div id="activity" className="scroll-mt-[128px]">
-            <Card>
-              <CardHeader kicker="Activity" title="When people find you" />
-              <div className="overflow-x-auto">
-                <Heatmap
-                  data={heatMatrix}
-                  rowLabels={heatRowLabels}
-                  colLabels={dayCols}
-                  title="Profile views by day"
-                  unit=" views"
-                />
-              </div>
-              <p className="mt-2 text-[12px] text-faint">
-                Google profile views by weekday over the last {weekKeys.length} weeks. One green hue,
-                denser = more views. Empty cells aren&apos;t yet sampled — never a fabricated zero.
-              </p>
-            </Card>
+            <RequestFunnel rows={requestFunnel} />
           </div>
         </div>
       </section>
 
-      {/* ── Sources ───────────────────────────────────────── */}
       <section id="sources" className="scroll-mt-[128px] pt-8">
         <Card>
-          <CardHeader kicker="Provenance" title="Sources" />
+          <CardHeader kicker="Provenance" title="Metric sources" />
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[440px] text-left text-[14px]">
+            <table className="w-full min-w-[620px] text-left text-[13px]">
               <thead>
                 <tr className="border-b border-hairline">
                   <th className="kicker py-2 pr-4 font-bold">Metric</th>
+                  <th className="kicker py-2 pr-4 font-bold">Status</th>
                   <th className="kicker py-2 pr-4 font-bold">Source</th>
                   <th className="kicker py-2 font-bold">Window</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-hairline">
-                {kpis.map((k) => (
-                  <tr key={k.key}>
-                    <td className="py-2.5 pr-4 font-semibold text-ink">{k.label}</td>
-                    <td className="py-2.5 pr-4 text-sub">{k.source}</td>
-                    <td className="py-2.5 text-sub tabular-nums">Last 90 days</td>
+                {signals.map((signal) => (
+                  <tr key={signal.key}>
+                    <td className="py-3 pr-4 font-semibold text-ink">{signalLabel(signal.key)}</td>
+                    <td className="py-3 pr-4"><SignalStatus signal={signal} /></td>
+                    <td className="py-3 pr-4 text-sub">{signal.source}</td>
+                    <td className="py-3 text-sub">Rolling 30 days</td>
                   </tr>
                 ))}
               </tbody>
@@ -236,11 +155,101 @@ export default async function AnalyticsPage() {
           <Icon name="shield" size={16} className="mt-0.5 shrink-0 text-primary" />
           <p className="text-[13px] text-sub">{MICROCOPY.actionsNotCustomers}</p>
         </div>
-
-        <div className="mt-3 px-1">
-          <Badge tone="neutral" icon="shield">No revenue guesses</Badge>
-        </div>
       </section>
     </div>
   );
+}
+
+function SignalTile({ signal, label, icon }: { signal: DashboardSignal; label: string; icon: IconName }) {
+  const available = (signal.status === "ready" || signal.status === "stale") && signal.value !== null;
+  return (
+    <Card className="relative overflow-hidden">
+      <div className="flex items-start justify-between gap-2">
+        <span className="grid size-9 place-items-center rounded-btn bg-primary-wash text-primary">
+          <Icon name={icon} size={17} />
+        </span>
+        <SignalStatus signal={signal} />
+      </div>
+      <div className="mt-5 text-[12px] font-semibold text-sub">{label}</div>
+      <div className="mt-1 text-[34px] font-extrabold leading-none tracking-tight text-ink tabular-nums">
+        {available ? formatNumber(signal.value!) : "—"}
+      </div>
+      <div className="mt-2 flex min-h-5 items-center gap-2 text-[11px] text-faint">
+        {available ? (
+          <>
+            {signal.delta !== null ? (
+              <span className={signal.delta >= 0 ? "font-semibold text-primary" : "font-semibold text-danger"}>
+                {signal.delta >= 0 ? "↑" : "↓"} {Math.abs(signal.delta)}%
+              </span>
+            ) : null}
+            <span>vs prior window · {signal.source}</span>
+          </>
+        ) : (
+          <span>{signal.status === "pending_approval" ? "Google access is pending" : "Verified source required"}</span>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function SignalStatus({ signal }: { signal: DashboardSignal }) {
+  if (signal.status === "ready") return <Badge tone="primary" icon="check-circle">Ready</Badge>;
+  if (signal.status === "stale") return <Badge tone="gold" icon="clock">Stale</Badge>;
+  if (signal.status === "pending_approval") return <Badge tone="gold" icon="clock">Pending</Badge>;
+  return <Badge tone="sub" icon="lock">Unavailable</Badge>;
+}
+
+function RequestFunnel({ rows }: { rows: { label: string; value: number }[] }) {
+  const max = Math.max(0, ...rows.map((row) => row.value));
+  return (
+    <Card>
+      <CardHeader
+        kicker="Foundly activity"
+        title="Review request funnel"
+        action={<LinkButton href="/app/requests" variant="ghost" size="sm" iconRight="chevron-right">Requests</LinkButton>}
+      />
+      {max ? (
+        <div className="space-y-4 pt-1">
+          {rows.map((row) => (
+            <div key={row.label}>
+              <div className="mb-1.5 flex items-center justify-between gap-3 text-[13px]">
+                <span className="text-sub">{row.label}</span>
+                <span className="font-bold text-ink tabular-nums">{formatNumber(row.value)}</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-chip bg-primary-wash">
+                <div className="h-full rounded-chip bg-primary" style={{ width: `${(row.value / max) * 100}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <EmptyState
+          icon="send"
+          title="No delivered requests yet"
+          description="Provider-accepted sends, opens, handoffs, and private feedback will appear here."
+          action={<LinkButton href="/app/requests" size="sm">Send a request</LinkButton>}
+        />
+      )}
+      <p className="mt-4 text-[12px] leading-relaxed text-faint">
+        Foundly records the handoff to Google, not whether a customer ultimately publishes a review.
+      </p>
+    </Card>
+  );
+}
+
+function SectionTitle({ icon, title }: { icon: IconName; title: string }) {
+  return (
+    <div className="mb-3 flex items-center gap-2">
+      <span className="grid size-7 place-items-center rounded-btn bg-primary-wash text-primary">
+        <Icon name={icon} size={15} />
+      </span>
+      <h2 className="text-[15px] font-bold text-ink">{title}</h2>
+    </div>
+  );
+}
+
+function signalLabel(key: DashboardSignal["key"]): string {
+  if (key === "foundYou") return "People found you";
+  if (key === "contactedYou") return "People contacted you";
+  return "New Google reviews";
 }
