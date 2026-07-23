@@ -82,6 +82,21 @@ export function passwordResetEmail(input: { link: string; brand?: string }): {
   };
 }
 
+export function verificationEmail(input: { link: string; brand?: string }): {
+  subject: string;
+  html: string;
+} {
+  return {
+    subject: "Confirm your Foundly email",
+    html: wrap(
+      h("Confirm your email") +
+        p("Confirm this address to activate review sending on your Foundly account. This link expires in 24 hours.") +
+        button(input.link, "Confirm email"),
+      { brand: input.brand },
+    ),
+  };
+}
+
 export function genericCampaignEmail(input: {
   subject: string;
   body: string;

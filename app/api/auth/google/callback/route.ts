@@ -64,6 +64,7 @@ export async function GET(req: NextRequest) {
     isDemo: false,
     name: user.name,
     email: user.email,
+    sessionVersion: user.sessionVersion ?? 0,
   });
 
   const res = NextResponse.redirect(new URL("/app", origin));

@@ -1,8 +1,15 @@
 import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { resolveSecret } from "@/lib/security/secret";
 
 function secret(): string {
-  return process.env.AUTH_SECRET || "foundly-referral-development-only";
+  // Previously fell back to a published constant with NO production guard (V11) —
+  // any deploy missing AUTH_SECRET signed referral codes with a public secret.
+  return resolveSecret({
+    value: process.env.AUTH_SECRET,
+    name: "AUTH_SECRET",
+    devFallback: "foundly-referral-development-only",
+  });
 }
 
 function signature(workspaceId: string): string {

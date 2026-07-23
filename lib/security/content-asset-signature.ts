@@ -1,14 +1,15 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { resolveSecret } from "@/lib/security/secret";
 
 const ASSET_ID_RE = /^asset_[a-f0-9]{24}$/;
 const WORKSPACE_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
 function signingSecret(): string {
-  const configured = process.env.CONTENT_ASSET_SIGNING_SECRET || process.env.AUTH_SECRET;
-  if (process.env.NODE_ENV === "production" && !configured) {
-    throw new Error("CONTENT_ASSET_SIGNING_SECRET or AUTH_SECRET is required in production.");
-  }
-  return configured || "foundly-content-asset-development-only";
+  return resolveSecret({
+    value: process.env.CONTENT_ASSET_SIGNING_SECRET || process.env.AUTH_SECRET,
+    name: "CONTENT_ASSET_SIGNING_SECRET (or AUTH_SECRET)",
+    devFallback: "foundly-content-asset-development-only",
+  });
 }
 
 function payload(workspaceId: string, assetId: string, expiresAt: number): string {

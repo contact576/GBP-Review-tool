@@ -2,6 +2,7 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 import { getSession, type Session, type SessionRole } from "@/lib/auth/session";
+import { trustedClientIp } from "@/lib/security/client-ip";
 
 interface RateBucket {
   count: number;
@@ -18,17 +19,20 @@ function buckets(): Map<string, RateBucket> {
 }
 
 function requestIdentity(req: Request): string {
-  return (
-    req.headers.get("cf-connecting-ip") ||
-    req.headers.get("x-real-ip") ||
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    "unknown"
-  );
+  return trustedClientIp((name) => req.headers.get(name));
 }
 
+/**
+ * CSRF origin check (V14). Safe methods (GET/HEAD) may legitimately omit the
+ * Origin header, so a missing Origin is allowed for them. State-changing methods
+ * must present a same-origin Origin — a missing or mismatched Origin now fails
+ * closed instead of the previous fail-open behavior.
+ */
 function sameOrigin(req: Request): boolean {
+  const method = (req.method || "GET").toUpperCase();
+  const isSafeMethod = method === "GET" || method === "HEAD";
   const origin = req.headers.get("origin");
-  if (!origin) return true;
+  if (!origin) return isSafeMethod;
   try {
     return new URL(origin).host === new URL(req.url).host;
   } catch {

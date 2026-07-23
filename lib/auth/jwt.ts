@@ -1,4 +1,5 @@
 import { SignJWT, jwtVerify } from "jose";
+import { resolveSecret } from "@/lib/security/secret";
 
 /**
  * Session JWT — signed HS256, httpOnly cookie payload.
@@ -13,6 +14,9 @@ export interface SessionClaims {
   isDemo: boolean;
   name: string;
   email: string;
+  /** Revocation counter (V8). Compared against the user's stored value on real
+   * sessions; a mismatch invalidates the token. Absent → treated as 0. */
+  sessionVersion?: number;
 }
 
 const FALLBACK_SECRET = "foundly-dev-secret-set-AUTH_SECRET-in-production";
@@ -25,11 +29,13 @@ const SESSION_ROLES = new Set<SessionClaims["role"]>([
 ]);
 
 function secretKey(): Uint8Array {
-  const configured = process.env.AUTH_SECRET;
-  if (process.env.NODE_ENV === "production" && !configured) {
-    throw new Error("AUTH_SECRET is required in production");
-  }
-  return new TextEncoder().encode(configured || FALLBACK_SECRET);
+  return new TextEncoder().encode(
+    resolveSecret({
+      value: process.env.AUTH_SECRET,
+      name: "AUTH_SECRET",
+      devFallback: FALLBACK_SECRET,
+    }),
+  );
 }
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
@@ -60,6 +66,8 @@ export async function verifySession(token: string): Promise<SessionClaims | null
       isDemo: Boolean(payload.isDemo),
       name: typeof payload.name === "string" ? payload.name : "",
       email: typeof payload.email === "string" ? payload.email : "",
+      sessionVersion:
+        typeof payload.sessionVersion === "number" ? payload.sessionVersion : 0,
     };
   } catch {
     return null;

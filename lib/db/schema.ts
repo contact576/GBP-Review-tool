@@ -133,6 +133,8 @@ export const appUser = pgTable("app_user", {
   emailVerified: boolean("email_verified").notNull().default(false),
   googleSub: text("google_sub"),
   createdAt: text("created_at"),
+  // V8: bumping this revokes every outstanding session JWT for the user.
+  sessionVersion: integer("session_version").notNull().default(0),
 });
 
 export const passwordResetToken = pgTable("password_reset_token", {

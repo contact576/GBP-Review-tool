@@ -54,6 +54,7 @@ export const ADDITIVE_STATEMENTS: string[] = [
   "CREATE TABLE IF NOT EXISTS \"google_credential\" (\n\t\"workspace_id\" text PRIMARY KEY NOT NULL,\n\t\"encrypted_refresh_token\" text NOT NULL,\n\t\"google_account\" text,\n\t\"scopes\" text NOT NULL,\n\t\"connected_at\" text NOT NULL,\n\t\"updated_at\" text NOT NULL\n);",
   "CREATE TABLE IF NOT EXISTS \"instagram_credential\" (\n\t\"workspace_id\" text PRIMARY KEY NOT NULL,\n\t\"encrypted_access_token\" text NOT NULL,\n\t\"account_id\" text NOT NULL,\n\t\"username\" text,\n\t\"scopes\" text NOT NULL,\n\t\"expires_at\" text,\n\t\"connected_at\" text NOT NULL,\n\t\"updated_at\" text NOT NULL\n);",
   "CREATE TABLE IF NOT EXISTS \"password_reset_token\" (\n\t\"token_hash\" text PRIMARY KEY NOT NULL,\n\t\"user_id\" text NOT NULL,\n\t\"expires_at\" text NOT NULL,\n\t\"used_at\" text,\n\t\"created_at\" text NOT NULL\n);",
+  "ALTER TABLE \"app_user\" ADD COLUMN IF NOT EXISTS \"session_version\" integer DEFAULT 0 NOT NULL;",
   "ALTER TABLE \"subscription\" ADD COLUMN IF NOT EXISTS \"stripe_customer_id\" text;",
   "ALTER TABLE \"subscription\" ADD COLUMN IF NOT EXISTS \"stripe_subscription_id\" text;",
   "ALTER TABLE \"subscription\" ADD COLUMN IF NOT EXISTS \"stripe_price_id\" text;",

@@ -1,6 +1,9 @@
 import "server-only";
 import { lookup } from "node:dns/promises";
+import { lookup as lookupCb } from "node:dns";
 import { isIP } from "node:net";
+import http from "node:http";
+import https from "node:https";
 import type { WebsiteEvidenceSnapshot, WebsitePageEvidence } from "@/lib/data/types";
 
 const MAX_PAGES = 5;
@@ -118,9 +121,105 @@ export function isBlockedIp(address: string): boolean {
   const octets = value.split(".").map(Number);
   const a = octets[0] ?? 0;
   const b = octets[1] ?? 0;
+  const c = octets[2] ?? 0;
   return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) ||
-    a >= 224 || (a === 100 && b >= 64 && b <= 127);
+    a >= 224 || (a === 100 && b >= 64 && b <= 127) ||
+    // V6: additional non-public ranges the original blocklist missed.
+    (a === 192 && b === 0 && c === 0) ||       // 192.0.0.0/24 (IETF protocol assignments)
+    (a === 198 && (b === 18 || b === 19));      // 198.18.0.0/15 (benchmarking)
+}
+
+/**
+ * Connection-time DNS guard (V6). undici resolves the hostname again at connect,
+ * independent of the pre-flight validation in assertPublicHttpUrl — a DNS-
+ * rebinding attacker can answer "public" for the first lookup and "internal" for
+ * the second. Enforcing the private-range blocklist inside the connector's own
+ * lookup makes the check atomic with the connection: the address that is
+ * validated is the exact address that gets dialed.
+ */
+function guardedLookup(
+  hostname: string,
+  _options: unknown,
+  callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void,
+): void {
+  lookupCb(hostname, { all: true, verbatim: true }, (err, addresses) => {
+    if (err) return callback(err, "", 0);
+    const list = Array.isArray(addresses) ? addresses : [addresses];
+    const safe = list.find((entry) => !isBlockedIp(entry.address));
+    if (!safe) {
+      return callback(
+        Object.assign(new Error("Resolved to a private or unsafe network address."), { code: "EAI_BLOCKED" }),
+        "",
+        0,
+      );
+    }
+    callback(null, safe.address, safe.family);
+  });
+}
+
+interface RawResponse {
+  status: number;
+  location?: string;
+  contentType: string;
+  body: Buffer;
+}
+
+/**
+ * Single GET via node:http(s) with the connect-time `lookup` guard (V6). Node's
+ * global fetch (undici) cannot be given a DNS-pinning lookup, so the crawler
+ * uses the core client here. Redirects are surfaced to the caller (never
+ * auto-followed) so each hop is re-validated. Body is capped mid-stream.
+ */
+function requestOnce(target: URL): Promise<RawResponse> {
+  return new Promise((resolve, reject) => {
+    const client = target.protocol === "https:" ? https : http;
+    const req = client.request(
+      target,
+      {
+        method: "GET",
+        lookup: guardedLookup,
+        headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "FoundlyEvidenceBot/1.0" },
+        timeout: FETCH_TIMEOUT_MS,
+      },
+      (res) => {
+        const status = res.statusCode ?? 0;
+        const location = typeof res.headers.location === "string" ? res.headers.location : undefined;
+        if ([301, 302, 303, 307, 308].includes(status)) {
+          res.resume(); // drain; caller re-validates and re-requests
+          resolve({ status, location, contentType: "", body: Buffer.alloc(0) });
+          return;
+        }
+        const declared = Number(res.headers["content-length"] ?? 0);
+        if (Number.isFinite(declared) && declared > MAX_BYTES) {
+          req.destroy();
+          reject(new Error("Website page is too large to analyze safely."));
+          return;
+        }
+        const chunks: Buffer[] = [];
+        let size = 0;
+        res.on("data", (chunk: Buffer) => {
+          size += chunk.length;
+          if (size > MAX_BYTES) {
+            req.destroy();
+            reject(new Error("Website page is too large to analyze safely."));
+            return;
+          }
+          chunks.push(chunk);
+        });
+        res.on("end", () =>
+          resolve({
+            status,
+            contentType: String(res.headers["content-type"] ?? ""),
+            body: Buffer.concat(chunks),
+          }),
+        );
+      },
+    );
+    req.on("timeout", () => req.destroy(new Error("Website request timed out.")));
+    req.on("error", reject);
+    req.end();
+  });
 }
 
 async function assertPublicHttpUrl(value: string): Promise<URL> {
@@ -144,27 +243,23 @@ async function assertPublicHttpUrl(value: string): Promise<URL> {
 async function fetchWebsiteHtml(value: string): Promise<{ url: string; html: string }> {
   let current = await assertPublicHttpUrl(value);
   for (let redirects = 0; redirects <= 3; redirects += 1) {
-    const response = await fetch(current, {
-      redirect: "manual",
-      headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "FoundlyEvidenceBot/1.0" },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      cache: "no-store",
-    });
+    const response = await requestOnce(current);
     if ([301, 302, 303, 307, 308].includes(response.status)) {
-      const destination = response.headers.get("location");
-      if (!destination) throw new Error("Website returned a redirect without a destination.");
-      current = await assertPublicHttpUrl(new URL(destination, current).toString());
+      if (!response.location) throw new Error("Website returned a redirect without a destination.");
+      // Re-validate every hop; the connect-time guard re-checks it again on dial.
+      current = await assertPublicHttpUrl(new URL(response.location, current).toString());
       continue;
     }
-    if (!response.ok) throw new Error(`Website returned HTTP ${response.status}.`);
-    if (!(response.headers.get("content-type") ?? "").toLowerCase().includes("text/html")) {
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`Website returned HTTP ${response.status}.`);
+    }
+    if (!response.contentType.toLowerCase().includes("text/html")) {
       throw new Error("Website did not return HTML.");
     }
-    const declared = Number(response.headers.get("content-length") ?? 0);
-    if (declared > MAX_BYTES) throw new Error("Website page is too large to analyze safely.");
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength > MAX_BYTES) throw new Error("Website page is too large to analyze safely.");
-    return { url: current.toString(), html: new TextDecoder().decode(bytes) };
+    if (response.body.byteLength > MAX_BYTES) {
+      throw new Error("Website page is too large to analyze safely.");
+    }
+    return { url: current.toString(), html: new TextDecoder().decode(response.body) };
   }
   throw new Error("Website redirected too many times.");
 }

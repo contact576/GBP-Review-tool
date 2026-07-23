@@ -1,19 +1,25 @@
+import { notFound } from "next/navigation";
 import { checkDatabase } from "@/lib/db/ensure";
 import { hasAiKey } from "@/lib/ai/model";
 import { appUrl } from "@/lib/utils/app-url";
 import { Icon, type IconName } from "@/components/icons";
 import { LinkButton } from "@/components/ds/Button";
 import { InitDbButton, TestAiButton, TestPlacesButton } from "./SetupActions";
+import { isSetupAdmin } from "./access";
 
-export const metadata = { title: "Setup checklist" };
+export const metadata = { title: "Setup checklist", robots: { index: false } };
 export const dynamic = "force-dynamic";
 
 /**
- * Self-service setup checklist — shows only presence/health booleans, never
- * secret values. Lets a non-technical owner verify their Vercel environment
- * variables and initialize the database with one click.
+ * Platform-admin setup checklist — shows only presence/health booleans, never
+ * secret values. Previously public (V2), it disclosed the full deployment
+ * configuration posture (which secrets/keys are set) to any anonymous visitor,
+ * acting as a reconnaissance oracle for the other findings. It is now gated to
+ * a real platform_admin session; anyone else gets a 404 (no existence signal).
  */
 export default async function SetupPage() {
+  if (!(await isSetupAdmin())) notFound();
+
   const db = await checkDatabase();
   const ai = hasAiKey();
   const openAi = Boolean(process.env.OPENAI_API_KEY);

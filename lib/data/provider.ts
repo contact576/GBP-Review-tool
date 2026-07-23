@@ -107,6 +107,9 @@ export interface AuthUser {
   role: User["role"];
   workspaceId: string;
   isDemo: boolean;
+  /** Monotonic counter embedded in the session JWT; bumping it revokes every
+   * outstanding session for the user (V8). Absent → treated as 0. */
+  sessionVersion?: number;
 }
 
 export type RegisterResult =
@@ -330,6 +333,15 @@ export interface DataProvider {
     name: string;
     referredByWorkspaceId?: string;
   }): Promise<AuthUser | null>;
+  /** Current session-version for a user, or null if the user is unknown (V8). */
+  getUserSessionVersion(userId: string): Promise<number | null>;
+  /** Increment a user's session-version, invalidating all existing sessions (V8). */
+  bumpUserSessionVersion(userId: string): Promise<void>;
+  /** Set a user's email-verified flag (V17). */
+  setEmailVerified(userId: string, verified: boolean): Promise<void>;
+  /** Whether the workspace owner's email is verified. Fails open (true) when the
+   * owner row is unknown, so callers never hard-block on missing data (V17). */
+  isWorkspaceEmailVerified(workspaceId: string): Promise<boolean>;
 
   // Focused reads
   getCustomer(workspaceId: string, id: CustomerId): Promise<Customer | null>;

@@ -20,7 +20,32 @@ export async function getSession(): Promise<Session | null> {
   const store = await cookies();
   const raw = store.get(SESSION_COOKIE)?.value;
   if (!raw) return null;
-  return verifySession(raw);
+  const claims = await verifySession(raw);
+  if (!claims) return null;
+  if (!claims.isDemo && !(await sessionVersionCurrent(claims))) return null;
+  return claims;
+}
+
+/**
+ * Enforce session revocation (V8): a real session is only valid while its
+ * embedded sessionVersion matches the user's current stored value. Bumping the
+ * stored value (on password reset, or an explicit "sign out everywhere")
+ * therefore invalidates every outstanding token.
+ *
+ * Only enforced when DB-backed — the in-memory store has no durable version to
+ * revoke against. Fails OPEN on a transient lookup error so a database hiccup
+ * cannot log every user out; only an explicit version mismatch fails closed.
+ */
+async function sessionVersionCurrent(claims: SessionClaims): Promise<boolean> {
+  try {
+    const { isDbBacked, currentSessionVersion } = await import("@/lib/data");
+    if (!isDbBacked()) return true;
+    const current = await currentSessionVersion(claims.userId);
+    if (current === null) return true; // unknown user row — don't hard-fail here
+    return current === (claims.sessionVersion ?? 0);
+  } catch {
+    return true; // availability over strictness on transient errors
+  }
 }
 
 export async function createSession(claims: SessionClaims): Promise<void> {

@@ -207,6 +207,7 @@ function toAuthUser(row: UserRow): AuthUser {
     role: row.role as AuthUser["role"],
     workspaceId: row.workspaceId,
     isDemo: false, // the database never holds demo data
+    sessionVersion: row.sessionVersion ?? 0,
   };
 }
 
@@ -1801,9 +1802,47 @@ export const drizzleProvider: DataProvider = {
       .returning({ userId: t.passwordResetToken.userId });
     const userId = claimed[0]?.userId;
     if (!userId) return false;
-    await db.update(t.appUser).set({ passwordHash }).where(eq(t.appUser.id, userId));
+    // Set the new password AND revoke every outstanding session (V8): a reset is
+    // the standard "I've been compromised" remediation, so old JWTs must die.
+    await db
+      .update(t.appUser)
+      .set({ passwordHash, sessionVersion: sql`${t.appUser.sessionVersion} + 1` })
+      .where(eq(t.appUser.id, userId));
     await db.delete(t.passwordResetToken).where(eq(t.passwordResetToken.userId, userId));
     return true;
+  },
+
+  async getUserSessionVersion(userId) {
+    const rows = await getDb()
+      .select({ sessionVersion: t.appUser.sessionVersion })
+      .from(t.appUser)
+      .where(eq(t.appUser.id, userId))
+      .limit(1);
+    return rows[0] ? rows[0].sessionVersion ?? 0 : null;
+  },
+
+  async bumpUserSessionVersion(userId) {
+    await getDb()
+      .update(t.appUser)
+      .set({ sessionVersion: sql`${t.appUser.sessionVersion} + 1` })
+      .where(eq(t.appUser.id, userId));
+  },
+
+  async setEmailVerified(userId, verified) {
+    await getDb()
+      .update(t.appUser)
+      .set({ emailVerified: verified })
+      .where(eq(t.appUser.id, userId));
+  },
+
+  async isWorkspaceEmailVerified(workspaceId) {
+    const rows = await getDb()
+      .select({ emailVerified: t.appUser.emailVerified })
+      .from(t.appUser)
+      .where(and(eq(t.appUser.workspaceId, workspaceId), eq(t.appUser.role, "owner")))
+      .limit(1);
+    // Fail open when there is no owner row to check.
+    return rows[0] ? rows[0].emailVerified : true;
   },
 
   async upsertGoogleUser({ googleSub, email, name, referredByWorkspaceId }) {

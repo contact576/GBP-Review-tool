@@ -124,6 +124,16 @@ export function isDbBacked(): boolean {
   return Boolean(process.env.DATABASE_URL);
 }
 
+/**
+ * Current session-version for a real (non-demo) user, used by getSession to
+ * enforce revocation (V8). Only meaningful when DB-backed; returns null for
+ * unknown users so the caller can decide how to treat it.
+ */
+export async function currentSessionVersion(userId: string): Promise<number | null> {
+  const provider = await dbProvider();
+  return provider.getUserSessionVersion(userId);
+}
+
 /** Public review-widget payload for an embeddable QR slug (no session). */
 export interface WidgetData {
   business: string;

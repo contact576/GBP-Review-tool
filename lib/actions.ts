@@ -19,6 +19,7 @@ import {
   type DataProvider,
 } from "@/lib/data";
 import { hashPassword, validatePasswordStrength } from "@/lib/auth/password";
+import { createEmailVerificationToken } from "@/lib/auth/email-verification";
 import {
   stripeEnabled,
   createCheckoutSession,
@@ -30,12 +31,14 @@ import {
   passwordResetEmail,
   reviewRequestEmail,
   staffInviteEmail,
+  verificationEmail,
 } from "@/lib/email/templates";
 import { reviewRequestSms } from "@/lib/sms/templates";
 import { sendSms, smsEnabled } from "@/lib/sms/twilio";
 import { canonicalPhone, isE164 } from "@/lib/sms/phone";
 import { appUrl } from "@/lib/utils/app-url";
 import { consumeRateLimit } from "@/lib/security/api";
+import { trustedClientIp } from "@/lib/security/client-ip";
 import { parseReferralCode } from "@/lib/referrals/code";
 import { hasFeature } from "@/lib/billing/plans";
 import type {
@@ -111,6 +114,12 @@ async function deliverReviewRequest(
   let reason: string | undefined;
   if (simulate) {
     status = "sent";
+  } else if (emailEnabled() && !(await provider.isWorkspaceEmailVerified(ws))) {
+    // V17: an account whose email is not yet confirmed cannot send outbound
+    // messages. Reuses the existing "suppressed" delivery state, so the request
+    // is recorded honestly rather than silently sent from an unverified account.
+    status = "suppressed";
+    reason = "Confirm your account email to start sending review requests.";
   } else {
     const data = await provider.getData(ws);
     const phone = canonicalPhone(customer?.phone);
@@ -165,12 +174,8 @@ async function deliverReviewRequest(
 
 async function requestIdentity(): Promise<string> {
   const store = await headers();
-  return (
-    store.get("cf-connecting-ip") ||
-    store.get("x-real-ip") ||
-    store.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    "unknown"
-  );
+  // Trusted-proxy IP derivation (V3) — see lib/security/client-ip.ts.
+  return trustedClientIp((name) => store.get(name));
 }
 
 async function guardPublicAction(
@@ -239,7 +244,25 @@ export async function registerAction(input: {
     isDemo: false,
     name: result.user.name,
     email: result.user.email,
+    sessionVersion: result.user.sessionVersion ?? 0,
   });
+
+  // V17: when email delivery is configured, require the registrant to confirm
+  // their address before the workspace can send review requests. Best-effort —
+  // a delivery failure never blocks registration; the account simply stays
+  // unverified until it can be confirmed. When email is NOT configured we cannot
+  // verify anything, so the account remains usable (registerUser sets verified).
+  if (emailEnabled()) {
+    try {
+      await provider.setEmailVerified(result.user.id, false);
+      const token = createEmailVerificationToken(result.user.id);
+      const base = await appUrl();
+      const template = verificationEmail({ link: `${base}/verify-email?token=${encodeURIComponent(token)}` });
+      await sendEmail({ to: email, subject: template.subject, html: template.html });
+    } catch {
+      // ignore — verification is a side effect, not part of the registration contract
+    }
+  }
   return { ok: true };
 }
 
@@ -272,6 +295,7 @@ export async function loginAction(input: {
     isDemo: false,
     name: user.name,
     email: user.email,
+    sessionVersion: user.sessionVersion ?? 0,
   });
   return { ok: true };
 }
@@ -373,17 +397,45 @@ export async function resetPasswordAction(input: {
     : { ok: false, message: "This reset link is invalid, expired, or has already been used." };
 }
 
-/** Explicit demo entry — sessions are flagged isDemo and use seeded data. */
-export async function enterDemoAction(role: SessionRole = "owner") {
-  await createDemoSession(role);
-}
+/**
+ * Explicit demo entry — sessions are flagged isDemo and use seeded data only.
+ *
+ * V16: the role argument arrives from the client, so it is validated against an
+ * explicit allowlist rather than trusted. Demo sessions can never reach real
+ * tenant data (getProviderFor forces the in-memory store for isDemo) and can
+ * never run the production setup surface (which requires a real, non-demo
+ * platform_admin), so the showcase roles are safe to offer — but an unexpected
+ * or malformed role value is rejected outright.
+ */
+const DEMO_ROLES = new Set<SessionRole>([
+  "owner",
+  "manager",
+  "staff",
+  "agency_admin",
+  "platform_admin",
+]);
 
-/** @deprecated kept for compatibility; demo entry only. */
-export async function signInAction(role: SessionRole = "owner") {
-  await createDemoSession(role);
+export async function enterDemoAction(role: SessionRole = "owner") {
+  const safeRole: SessionRole = DEMO_ROLES.has(role) ? role : "owner";
+  await createDemoSession(safeRole);
 }
 
 export async function signOutAction() {
+  await clearSession();
+  redirect("/sign-in");
+}
+
+/**
+ * Sign out of every device (V8). Bumps the user's session-version so all
+ * outstanding JWTs are revoked, then clears this device's cookie. Demo sessions
+ * have no durable user row, so this is a no-op beyond the local cookie clear.
+ */
+export async function signOutEverywhereAction() {
+  const session = await getSession();
+  if (session && !session.isDemo) {
+    const provider = await getRealProvider();
+    await provider.bumpUserSessionVersion(session.userId);
+  }
   await clearSession();
   redirect("/sign-in");
 }
@@ -559,7 +611,33 @@ export async function updateWorkspaceSettingsAction(patch: Partial<WorkspaceSett
 
 export async function updateLocationGoogleAction(patch: GoogleLocationPatch) {
   const { provider, ws } = await scoped("owner", "manager");
-  await provider.updateLocationGoogle(ws, patch);
+  // V12: this patch feeds the PUBLIC widget's displayed "Google" rating/review
+  // count, so it must be validated — an unvalidated patch let a tenant publish a
+  // fabricated 5.0★ / arbitrary review count with no Google data behind it.
+  const placeId = typeof patch.placeId === "string" ? patch.placeId.trim() : "";
+  if (!/^[A-Za-z0-9_-]{1,256}$/.test(placeId)) {
+    throw new Error("A valid Google Place ID is required.");
+  }
+  const clean: GoogleLocationPatch = { placeId };
+  if (patch.name !== undefined) clean.name = String(patch.name).trim().slice(0, 200);
+  if (patch.address !== undefined) clean.address = String(patch.address).trim().slice(0, 300);
+  if (patch.city !== undefined) clean.city = String(patch.city).trim().slice(0, 120);
+  if (patch.category !== undefined) clean.category = String(patch.category).trim().slice(0, 120);
+  if (patch.rating !== undefined) {
+    const rating = Number(patch.rating);
+    if (!Number.isFinite(rating) || rating < 0 || rating > 5) {
+      throw new Error("Rating must be between 0 and 5.");
+    }
+    clean.rating = Math.round(rating * 10) / 10;
+  }
+  if (patch.reviewCount !== undefined) {
+    const count = Number(patch.reviewCount);
+    if (!Number.isInteger(count) || count < 0 || count > 10_000_000) {
+      throw new Error("Review count is out of range.");
+    }
+    clean.reviewCount = count;
+  }
+  await provider.updateLocationGoogle(ws, clean);
   revalidatePath("/", "layout");
 }
 

@@ -75,6 +75,7 @@ interface StoredUser {
   passwordHash?: string;
   googleSub?: string;
   emailVerified: boolean;
+  sessionVersion?: number;
 }
 
 interface MemoryStore {
@@ -167,6 +168,7 @@ function toAuthUser(u: StoredUser, isDemo = false): AuthUser {
     role: u.role,
     workspaceId: u.workspaceId,
     isDemo,
+    sessionVersion: u.sessionVersion ?? 0,
   };
 }
 
@@ -425,10 +427,34 @@ export const memoryProvider: DataProvider = {
     if (!user) return false;
     record.usedAt = consumedAt;
     user.passwordHash = passwordHash;
+    // Revoke every outstanding session on reset (V8).
+    user.sessionVersion = (user.sessionVersion ?? 0) + 1;
     for (const [hash, candidate] of s.passwordResets) {
       if (candidate.userId === user.id && hash !== tokenHash) s.passwordResets.delete(hash);
     }
     return true;
+  },
+
+  async getUserSessionVersion(userId) {
+    const user = [...store().users.values()].find((candidate) => candidate.id === userId);
+    return user ? user.sessionVersion ?? 0 : null;
+  },
+
+  async bumpUserSessionVersion(userId) {
+    const user = [...store().users.values()].find((candidate) => candidate.id === userId);
+    if (user) user.sessionVersion = (user.sessionVersion ?? 0) + 1;
+  },
+
+  async setEmailVerified(userId, verified) {
+    const user = [...store().users.values()].find((candidate) => candidate.id === userId);
+    if (user) user.emailVerified = verified;
+  },
+
+  async isWorkspaceEmailVerified(workspaceId) {
+    const owner = [...store().users.values()].find(
+      (candidate) => candidate.workspaceId === workspaceId && candidate.role === "owner",
+    );
+    return owner ? owner.emailVerified : true; // fail open
   },
 
   async upsertGoogleUser({ googleSub, email, name, referredByWorkspaceId }) {
