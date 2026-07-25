@@ -1,4 +1,4 @@
-import { and, eq, gt, isNotNull, isNull, like, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { nanoid } from "nanoid";
 import { getDb, type FoundlyDb } from "../db/client";
@@ -16,6 +16,12 @@ import {
   PUBLIC_REVIEW_ID_PREFIX,
   GBP_REVIEW_ID_PREFIX,
 } from "@/lib/google/public-sync";
+import { reconcileReviewImport, type ReviewImportPlan } from "@/lib/reviews/durability";
+import {
+  applyReviewMatches,
+  confidentlyPostedRequestIds,
+  matchReviewsToRequests,
+} from "@/lib/reviews/matching";
 import type {
   DataProvider,
   CaptureCustomerInput,
@@ -799,6 +805,130 @@ function buildDraftRow(
     createdAt: d.createdAt,
     seq,
   };
+}
+
+// ── Review import: upsert-with-diff + attribution ───────────
+/**
+ * Apply a durability plan.
+ *
+ * The one rule this function exists to enforce: a review that we imported
+ * before is NEVER deleted just because Google stopped returning it. It is
+ * updated in place and flagged, because the row's continued existence is the
+ * evidence. Only `plan.removed` deletes anything, and the planner only ever
+ * fills that for the rotating public sample, where absence means nothing.
+ */
+async function applyReviewImportPlan(
+  db: FoundlyDb,
+  workspaceId: string,
+  plan: ReviewImportPlan,
+): Promise<void> {
+  if (plan.removed.length) {
+    const ids = plan.removed.map((review) => review.id);
+    await db
+      .delete(t.review)
+      .where(and(eq(t.review.workspaceId, workspaceId), inArray(t.review.id, ids)));
+  }
+  if (plan.inserts.length) {
+    await db
+      .insert(t.review)
+      .values(plan.inserts.map((review, index) => buildReviewRow(review, workspaceId, front() - index)));
+  }
+  for (const review of [...plan.updates, ...plan.vanished]) {
+    await db
+      .update(t.review)
+      .set({
+        author: review.author,
+        rating: review.rating,
+        text: review.text,
+        publishedAt: review.publishedAt,
+        durability: review.durability,
+        vanishedAt: review.vanishedAt ?? null,
+        needsReply: review.needsReply,
+      })
+      .where(and(eq(t.review.id, review.id), eq(t.review.workspaceId, workspaceId)));
+  }
+}
+
+/** Request states a detected match is allowed to advance. */
+const FLIPPABLE_REQUEST_STATUSES = new Set<ReviewRequest["status"]>([
+  "sent",
+  "delivered",
+  "opened",
+  "clicked",
+]);
+
+/**
+ * Re-run review↔request attribution across the whole workspace and persist it.
+ *
+ * Runs over EVERY stored review (not just the ones this sync touched) so the
+ * 1:1 assignment stays globally consistent, and it is idempotent: re-syncing
+ * recomputes the same matches and writes nothing new.
+ */
+async function reconcileReviewAttribution(
+  db: FoundlyDb,
+  workspaceId: string,
+): Promise<{ matched: number; requestsAdvanced: number }> {
+  const [reviewRows, requestRows] = await Promise.all([
+    db.select().from(t.review).where(eq(t.review.workspaceId, workspaceId)),
+    db.select().from(t.reviewRequest).where(eq(t.reviewRequest.workspaceId, workspaceId)),
+  ]);
+  const reviews = reviewRows.map((row) => mapReview(row, undefined));
+  const requests = requestRows.map(mapRequest);
+  const outcome = matchReviewsToRequests({ reviews, requests });
+  const attributed = applyReviewMatches(reviews, outcome);
+
+  for (let index = 0; index < attributed.length; index += 1) {
+    const next = attributed[index];
+    const prior = reviews[index];
+    if (!next || !prior) continue;
+    if (
+      (next.matchedRequestId ?? null) === (prior.matchedRequestId ?? null) &&
+      (next.matchConfidence ?? null) === (prior.matchConfidence ?? null)
+    ) {
+      continue;
+    }
+    await db
+      .update(t.review)
+      .set({
+        matchedRequestId: next.matchedRequestId ?? null,
+        matchConfidence: next.matchConfidence ?? null,
+      })
+      .where(and(eq(t.review.id, next.id), eq(t.review.workspaceId, workspaceId)));
+  }
+
+  // Only a HIGH-confidence match advances the funnel — this writes to the staff
+  // leaderboard and the usage counter, so the bar is deliberately above the one
+  // for showing a "Detected" chip. A request that already reached a terminal
+  // state (posted, private feedback, suppressed) is left alone, which also makes
+  // the counter bumps below safe to re-run on every sync.
+  const byId = new Map(requests.map((request) => [request.id, request]));
+  let requestsAdvanced = 0;
+  for (const requestId of confidentlyPostedRequestIds(outcome)) {
+    const request = byId.get(requestId);
+    if (!request || !FLIPPABLE_REQUEST_STATUSES.has(request.status)) continue;
+    const now = nowIso();
+    await db
+      .update(t.reviewRequest)
+      .set({ status: "posted_google", clickedAt: request.clickedAt ?? now })
+      .where(and(eq(t.reviewRequest.id, request.id), eq(t.reviewRequest.workspaceId, workspaceId)));
+    await db
+      .update(t.customer)
+      .set({ lifecycleStage: "reviewed", sentiment: "happy" })
+      .where(and(eq(t.customer.id, request.customerId), eq(t.customer.workspaceId, workspaceId)));
+    if (request.staffId) {
+      await db
+        .update(t.staffMember)
+        .set({ detectedReviews: sql`${t.staffMember.detectedReviews} + 1` })
+        .where(and(eq(t.staffMember.id, request.staffId), eq(t.staffMember.workspaceId, workspaceId)));
+    }
+    await bumpUsage(db, workspaceId, (usage) => ({
+      ...usage,
+      reviewsCaptured: usage.reviewsCaptured + 1,
+    }));
+    requestsAdvanced += 1;
+  }
+
+  return { matched: outcome.matches.length, requestsAdvanced };
 }
 
 function buildTaskRow(
@@ -3152,15 +3282,31 @@ export const drizzleProvider: DataProvider = {
       .set({ rating: update.rating, reviewCount: update.reviewCount })
       .where(and(eq(t.location.id, ctx.location.id), eq(t.location.workspaceId, workspaceId)));
 
-    // 2) Replace the prior public sample (keep GBP/owner reviews).
-    await db
-      .delete(t.review)
-      .where(and(eq(t.review.workspaceId, workspaceId), like(t.review.id, `${PUBLIC_REVIEW_ID_PREFIX}%`)));
-    if (update.reviews.length) {
-      await db
-        .insert(t.review)
-        .values(update.reviews.map((r, i) => buildReviewRow(r, workspaceId, front() - i)));
-    }
+    // 2) Refresh the public sample (keep GBP/owner reviews).
+    //
+    // Sample mode: Google returns at most 5 public reviews and rotates which
+    // ones, so a review dropping out is NOT evidence it was filtered. Rows that
+    // rotate out are simply dropped, never marked vanished — only the full
+    // Business Profile import below is authoritative enough for that. Ids are
+    // content-derived, so a review that stays in the sample keeps everything we
+    // already learned about it.
+    const existingSample = (await db
+      .select()
+      .from(t.review)
+      .where(and(eq(t.review.workspaceId, workspaceId), like(t.review.id, `${PUBLIC_REVIEW_ID_PREFIX}%`))))
+      .map((row) => mapReview(row, undefined));
+    await applyReviewImportPlan(
+      db,
+      workspaceId,
+      reconcileReviewImport({
+        existing: existingSample,
+        imported: update.reviews,
+        nowIso: update.syncedAt,
+        importOk: true,
+        mode: "sample",
+      }),
+    );
+    await reconcileReviewAttribution(db, workspaceId);
 
     // 3) dataset_meta: today's score snapshot + integration status.
     const meta = one(
@@ -3257,19 +3403,37 @@ export const drizzleProvider: DataProvider = {
         .where(and(eq(t.location.id, ctx.location.id), eq(t.location.workspaceId, workspaceId)));
     }
 
-    // Full history supersedes both the public sample and any prior GBP import.
-    await db
-      .delete(t.review)
-      .where(and(eq(t.review.workspaceId, workspaceId), like(t.review.id, `${PUBLIC_REVIEW_ID_PREFIX}%`)));
-    await db
-      .delete(t.review)
-      .where(and(eq(t.review.workspaceId, workspaceId), like(t.review.id, `${GBP_REVIEW_ID_PREFIX}%`)));
     const imported = outcome.reviews ?? [];
+    // Full history supersedes the public sample — but only once it has actually
+    // returned reviews, so a blocked or empty read never wipes what we have.
     if (imported.length) {
       await db
-        .insert(t.review)
-        .values(imported.map((r, i) => buildReviewRow(r, workspaceId, front() - i)));
+        .delete(t.review)
+        .where(and(eq(t.review.workspaceId, workspaceId), like(t.review.id, `${PUBLIC_REVIEW_ID_PREFIX}%`)));
     }
+    // UPSERT-WITH-DIFF, never delete-and-reinsert. The difference between this
+    // import and the last one is the ONLY evidence that Google filtered a
+    // review, so prior rows have to survive the sync for the watchdog to have
+    // anything to compare against. `reviewsImportOk` is false whenever the
+    // payload was truncated or inconsistent with Google's own total, which
+    // disables vanish-marking for this run (see lib/reviews/durability.ts).
+    const existingGbp = (await db
+      .select()
+      .from(t.review)
+      .where(and(eq(t.review.workspaceId, workspaceId), like(t.review.id, `${GBP_REVIEW_ID_PREFIX}%`))))
+      .map((row) => mapReview(row, undefined));
+    await applyReviewImportPlan(
+      db,
+      workspaceId,
+      reconcileReviewImport({
+        existing: existingGbp,
+        imported,
+        nowIso: nowIso(),
+        importOk: outcome.reviewsImportOk ?? false,
+        mode: "authoritative",
+      }),
+    );
+    await reconcileReviewAttribution(db, workspaceId);
 
     if (outcome.snapshot || outcome.performanceSnapshots?.length) {
       const meta = one(

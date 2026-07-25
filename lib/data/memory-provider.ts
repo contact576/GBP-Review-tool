@@ -31,9 +31,16 @@ import {
   buildGooglePublicUpdate,
   upsertSnapshot,
   isPublicSampleReview,
+  isGbpReview,
   isImportedGoogleReview,
   friendlyPlacesError,
 } from "@/lib/google/public-sync";
+import { reconcileReviewImport } from "@/lib/reviews/durability";
+import {
+  applyReviewMatches,
+  confidentlyPostedRequestIds,
+  matchReviewsToRequests,
+} from "@/lib/reviews/matching";
 import type {
   FoundlyData,
   Customer,
@@ -157,6 +164,47 @@ function nowIso() {
 }
 function id(prefix: string) {
   return `${prefix}_${nanoid()}`;
+}
+
+// ── Review import: upsert-with-diff + attribution ───────────
+/** Request states a detected match is allowed to advance. */
+const FLIPPABLE_REQUEST_STATUSES = new Set<ReviewRequest["status"]>([
+  "sent",
+  "delivered",
+  "opened",
+  "clicked",
+]);
+
+/**
+ * Re-run review↔request attribution across the whole workspace and persist it.
+ * Mirrors `reconcileReviewAttribution` in drizzle-provider.ts exactly, including
+ * its idempotency: a request that already reached a terminal state is never
+ * advanced (and therefore never re-counted) a second time.
+ */
+function reconcileReviewAttribution(data: FoundlyData): {
+  matched: number;
+  requestsAdvanced: number;
+} {
+  const outcome = matchReviewsToRequests({ reviews: data.reviews, requests: data.requests });
+  data.reviews = applyReviewMatches(data.reviews, outcome);
+
+  let requestsAdvanced = 0;
+  for (const requestId of confidentlyPostedRequestIds(outcome)) {
+    const request = data.requests.find((candidate) => candidate.id === requestId);
+    if (!request || !FLIPPABLE_REQUEST_STATUSES.has(request.status)) continue;
+    request.status = "posted_google";
+    request.clickedAt ??= nowIso();
+    const customer = data.customers.find((c) => c.id === request.customerId);
+    if (customer) {
+      customer.lifecycleStage = "reviewed";
+      customer.sentiment = "happy";
+    }
+    const staff = data.staff.find((s) => s.id === request.staffId);
+    if (staff) staff.detectedReviews += 1;
+    data.subscription.usage.reviewsCaptured += 1;
+    requestsAdvanced += 1;
+  }
+  return { matched: outcome.matches.length, requestsAdvanced };
 }
 
 function toAuthUser(u: StoredUser, isDemo = false): AuthUser {
@@ -1050,11 +1098,24 @@ export const memoryProvider: DataProvider = {
     const update = buildGooglePublicUpdate(res.details, data.location, nowIso());
     data.location.rating = update.rating;
     data.location.reviewCount = update.reviewCount;
-    // Replace the prior public sample; keep GBP-imported + owner reviews.
+    // Refresh the public sample; keep GBP-imported + owner reviews.
+    //
+    // Sample mode: Google returns at most 5 public reviews and rotates which
+    // ones, so a review dropping out is NOT evidence it was filtered. Rows that
+    // rotate out are dropped, never marked vanished — only the full Business
+    // Profile import is authoritative enough for that.
+    const samplePlan = reconcileReviewImport({
+      existing: data.reviews.filter((r) => isPublicSampleReview(r.id)),
+      imported: update.reviews,
+      nowIso: update.syncedAt,
+      importOk: true,
+      mode: "sample",
+    });
     data.reviews = [
-      ...update.reviews,
+      ...samplePlan.merged,
       ...data.reviews.filter((r) => !isPublicSampleReview(r.id)),
     ];
+    reconcileReviewAttribution(data);
     data.metrics = upsertSnapshot(data.metrics, update.snapshot);
     const places = data.integrations.find((i) => i.provider === "google_places");
     if (places) {
@@ -1108,11 +1169,26 @@ export const memoryProvider: DataProvider = {
     if (typeof outcome.rating === "number") data.location.rating = outcome.rating;
     if (typeof outcome.reviewCount === "number") data.location.reviewCount = outcome.reviewCount;
     const imported = outcome.reviews ?? [];
-    // Full history supersedes both the public sample and any prior GBP import.
-    data.reviews = [
-      ...imported,
-      ...data.reviews.filter((r) => !isImportedGoogleReview(r.id)),
-    ];
+    // UPSERT-WITH-DIFF, never replace. The difference between this import and
+    // the last one is the ONLY evidence that Google filtered a review, so prior
+    // rows have to survive the sync for the watchdog to have anything to compare
+    // against. `reviewsImportOk` is false whenever the payload was truncated or
+    // inconsistent with Google's own total, which disables vanish-marking for
+    // this run (see lib/reviews/durability.ts).
+    const plan = reconcileReviewImport({
+      existing: data.reviews.filter((r) => isGbpReview(r.id)),
+      imported,
+      nowIso: nowIso(),
+      importOk: outcome.reviewsImportOk ?? false,
+      mode: "authoritative",
+    });
+    // The full history supersedes the public sample — but only once it has
+    // actually returned reviews, so a blocked or empty read never wipes it.
+    const keep = imported.length
+      ? data.reviews.filter((r) => !isImportedGoogleReview(r.id))
+      : data.reviews.filter((r) => !isGbpReview(r.id));
+    data.reviews = [...plan.merged, ...keep];
+    reconcileReviewAttribution(data);
     for (const snapshot of outcome.performanceSnapshots ?? []) {
       data.metrics = upsertSnapshot(data.metrics, snapshot);
     }

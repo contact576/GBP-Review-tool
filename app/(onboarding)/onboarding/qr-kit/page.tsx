@@ -1,6 +1,7 @@
 import { getData } from "@/lib/data";
 import { appUrl } from "@/lib/utils/app-url";
 import { QrFrame } from "@/components/app/QrFrame";
+import { buildSetupChecklist } from "../_components/setup-checklist";
 import { Step } from "../_components/Step";
 import { DownloadPackButton } from "./DownloadPackButton";
 
@@ -9,16 +10,23 @@ export default async function QrKitPage() {
   const { location } = data;
   const base = await appUrl();
   const shortBase = base.replace(/^https?:\/\//, "");
-  const locationQr =
-    data.qrAssets.find((q) => q.scope === "location") ?? data.qrAssets[0];
+  const checklist = buildSetupChecklist(data);
+  // A degraded code is a paused code — it dead-ends on /q-expired, so it is
+  // never presented as a printable kit.
+  const locationQr = data.qrAssets.find((q) => q.scope === "location" && !q.degraded);
 
   return (
     <Step
       current={5}
-      title="Your QR kit is ready"
-      subtitle="Print it for the front desk. Each scan starts a fresh review session — no app, no typing."
+      title={locationQr ? "Your QR kit is ready" : "Your QR kit isn't ready yet"}
+      subtitle={
+        locationQr
+          ? "Print it for the front desk. Each scan starts a fresh review session — no app, no typing."
+          : "No active QR code exists for this location yet, so there's nothing to print."
+      }
       continueHref="/onboarding/test-invite"
       skipHref="/onboarding/test-invite"
+      stepDone={checklist.stepDone}
     >
       <div className="space-y-4">
         {locationQr ? (

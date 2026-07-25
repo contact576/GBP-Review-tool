@@ -41,6 +41,7 @@ import {
   type PerformanceDailyMetric,
 } from "./gbp";
 import { daysSince, GBP_REVIEW_ID_PREFIX } from "./public-sync";
+import { isPlausibleFullImport, PRE_RECONCILE_DURABILITY } from "@/lib/reviews/durability";
 
 /**
  * Google Business Profile (owned-profile) sync — the deeper integration that
@@ -62,6 +63,14 @@ export interface ProfileSyncOutcome {
   rating?: number;
   reviewCount?: number;
   reviews?: Review[];
+  /**
+   * True only when the review import is trustworthy enough to diff against the
+   * stored history — i.e. every page came back AND the payload is consistent
+   * with the total Google itself reports. The providers refuse to mark anything
+   * "vanished" when this is false, so a truncated read can never be mistaken for
+   * a business losing its reviews.
+   */
+  reviewsImportOk?: boolean;
   snapshot?: MetricSnapshot;
   performanceSnapshots?: MetricSnapshot[];
   performanceError?: string;
@@ -252,6 +261,9 @@ export async function fetchGoogleProfile(
     rating,
     reviewCount,
     reviews,
+    // Every page of `listReviews` succeeded (it returns early otherwise), and
+    // the count we got back is consistent with Google's own aggregate.
+    reviewsImportOk: isPlausibleFullImport(reviews.length, page.totalReviewCount),
     snapshot: metricSnapshot,
     performanceSnapshots: performance.snapshots,
     performanceError: performance.error,
@@ -314,6 +326,15 @@ async function resolveLocationResource(
   };
 }
 
+/**
+ * Map one page of GBP reviews onto the app's shape.
+ *
+ * `durability` is deliberately provisional here: a single import in isolation
+ * carries no evidence about whether Google filtered anything. The real value is
+ * assigned by `reconcileReviewImport` (lib/reviews/durability.ts), which the
+ * providers run against the workspace's previously stored reviews on every
+ * sync — that diff is the entire Durability Watchdog.
+ */
 function mapReviews(gbp: GbpReview[], locationId: string, nowIso: string): Review[] {
   return gbp.map((r, i) => ({
     id: `${GBP_REVIEW_ID_PREFIX}${r.reviewId || i}`,
@@ -323,7 +344,7 @@ function mapReviews(gbp: GbpReview[], locationId: string, nowIso: string): Revie
     text: r.text,
     publishedAt: r.createTime ?? nowIso,
     source: "google" as const,
-    durability: "stable" as const,
+    durability: PRE_RECONCILE_DURABILITY,
     needsReply: !r.reply,
   }));
 }

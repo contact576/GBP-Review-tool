@@ -1,11 +1,14 @@
 import { getData } from "@/lib/data";
 import { placesEnabled } from "@/lib/google/config";
+import { buildSetupChecklist } from "../_components/setup-checklist";
 import { Step } from "../_components/Step";
 import { BusinessSearch } from "./BusinessSearch";
 
 export default async function FindBusinessPage() {
-  const { location } = await getData();
+  const data = await getData();
+  const { location } = data;
   const enabled = placesEnabled();
+  const checklist = buildSetupChecklist(data);
 
   return (
     <Step
@@ -18,6 +21,7 @@ export default async function FindBusinessPage() {
       }
       continueHref="/onboarding/business-type"
       skipHref="/onboarding/business-type"
+      stepDone={checklist.stepDone}
     >
       <BusinessSearch
         placesEnabled={enabled}
