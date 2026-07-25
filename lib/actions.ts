@@ -789,6 +789,13 @@ export async function generateContentSuggestionPreviewAction(
       } : {}),
     };
     let preview: ContentSuggestionPreview;
+    // Content kinds (post/reply/qna) publish from the full preview envelope —
+    // content-publishing reads its `googlePayload`, so the preview IS the stored
+    // value. A profile_copy edit instead flows through `prepareProfileMutation`,
+    // which needs the EXACT Google field value (the description text itself), not
+    // the envelope — storing the preview object there makes every approval fail
+    // its exact-value validation. So store the exact text for profile_copy.
+    let proposedValue: unknown;
     if (kind === "local_post") {
       preview = {
         ...common,
@@ -800,17 +807,21 @@ export async function generateContentSuggestionPreviewAction(
           ...(cta ? { callToAction: cta } : {}),
         },
       };
+      proposedValue = preview;
     } else if (kind === "owner_reply" && review) {
       preview = { ...common, kind, googlePayload: { reviewId: review.id, comment: generated.content.body } };
+      proposedValue = preview;
     } else if (kind === "qna" && question?.text) {
       preview = { ...common, kind, googlePayload: { questionResource: question.name, answerText: generated.content.body } };
+      proposedValue = preview;
     } else {
       preview = { ...common, kind: "profile_copy", googlePayload: { description: generated.content.body } };
+      proposedValue = generated.content.body.trim();
     }
 
     await provider.updateProfileSuggestion(ws, suggestionId, {
       status: "ready_for_review",
-      proposedValue: preview,
+      proposedValue,
       exactPreviewReady: true,
       blockers: [],
       nextStep: "Review exact preview",

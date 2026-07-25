@@ -2961,6 +2961,25 @@ export const drizzleProvider: DataProvider = {
     if (patch.currentPeriodEnd !== undefined) set.currentPeriodEnd = patch.currentPeriodEnd;
     if (patch.cancelAtPeriodEnd !== undefined) set.cancelAtPeriodEnd = patch.cancelAtPeriodEnd;
     if (Object.keys(set).length === 0) return;
+    // A tier change must remap entitlement caps to the new plan (mirrors
+    // memory-provider + the creation-time seeding): a downgrade — including
+    // cancel → free — drops paid AI/SMS allotments; an upgrade raises them.
+    // Used counters are preserved.
+    if (patch.tier !== undefined) {
+      const [current] = await db
+        .select({ tier: t.subscription.tier, usage: t.subscription.usage })
+        .from(t.subscription)
+        .where(eq(t.subscription.workspaceId, workspaceId))
+        .limit(1);
+      if (current && current.tier !== patch.tier) {
+        const limits = PLANS[patch.tier].limits;
+        set.usage = {
+          ...current.usage,
+          aiDraftsLimit: limits.aiDraftsPerMonth,
+          smsCreditsTotal: limits.smsCredits,
+        };
+      }
+    }
     await db
       .update(t.subscription)
       .set(set)

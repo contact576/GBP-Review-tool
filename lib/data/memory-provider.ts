@@ -992,6 +992,7 @@ export const memoryProvider: DataProvider = {
   // ── Billing / subscription ────────────────────────────────
   async setSubscription(workspaceId, patch) {
     const data = mustDb(workspaceId);
+    const previousTier = data.subscription.tier;
     if (patch.status !== undefined) data.subscription.status = patch.status;
     if (patch.tier !== undefined) data.subscription.tier = patch.tier;
     if (patch.interval !== undefined) data.subscription.interval = patch.interval;
@@ -1000,6 +1001,15 @@ export const memoryProvider: DataProvider = {
     if (patch.stripePriceId !== undefined) data.subscription.stripePriceId = patch.stripePriceId;
     if (patch.currentPeriodEnd !== undefined) data.subscription.currentPeriodEnd = patch.currentPeriodEnd;
     if (patch.cancelAtPeriodEnd !== undefined) data.subscription.cancelAtPeriodEnd = patch.cancelAtPeriodEnd;
+    // A tier change must remap entitlement caps to the new plan (mirrors the
+    // creation-time seeding above). Without this a downgrade — including
+    // cancel → free — keeps paid AI/SMS allotments, and an upgrade stays capped
+    // at the old plan. Used counters are deliberately left untouched.
+    if (patch.tier !== undefined && patch.tier !== previousTier) {
+      const limits = PLANS[patch.tier].limits;
+      data.subscription.usage.aiDraftsLimit = limits.aiDraftsPerMonth;
+      data.subscription.usage.smsCreditsTotal = limits.smsCredits;
+    }
   },
 
   async setIntegrationStatus(workspaceId, provider, status, detail) {
