@@ -8,6 +8,7 @@ import { DataChip } from "@/components/ds/misc";
 import { Icon } from "@/components/icons";
 import { ProgressMeter } from "@/components/charts";
 import { formatNumber } from "@/lib/utils/format";
+import { qrOpenRate } from "@/lib/qr/status";
 
 /**
  * Split configurator for the location QR: a pinned live preview pane alongside
@@ -49,7 +50,7 @@ export function QrConfigurator({
 }) {
   const [accent, setAccent] = useState<AccentKey>("sage");
   const active = (ACCENTS.find((a) => a.key === accent) ?? ACCENTS[0])!;
-  const openRate = scans > 0 ? Math.round((pageOpens / scans) * 100) : 0;
+  const openRate = qrOpenRate(scans, pageOpens);
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
@@ -59,7 +60,7 @@ export function QrConfigurator({
           <div className="text-[18px] font-bold text-ink">One code, every counter</div>
           <p className="mt-1 text-[14px] text-sub">
             Print it, stand it at reception, and let customers scan straight into your review flow.
-            Every scan opens a fresh session and counts below.
+            Every scan from a real browser opens a fresh session and counts below.
           </p>
         </div>
 
@@ -116,13 +117,13 @@ export function QrConfigurator({
           <div className="kicker mb-3">This code</div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <div className="kicker normal-case">Scans</div>
+              <div className="kicker normal-case">Code scans</div>
               <div className="mt-1 text-[28px] font-extrabold leading-none tabular-nums tracking-tight text-ink">
                 {formatNumber(scans)}
               </div>
             </div>
             <div>
-              <div className="kicker normal-case">Page opens</div>
+              <div className="kicker normal-case">Review pages opened</div>
               <div className="mt-1 text-[28px] font-extrabold leading-none tabular-nums tracking-tight text-ink">
                 {formatNumber(pageOpens)}
               </div>
@@ -130,12 +131,17 @@ export function QrConfigurator({
           </div>
           <div className="mt-4">
             <ProgressMeter
-              value={openRate}
+              value={openRate ?? 0}
               max={100}
               label="Open rate"
-              valueText={`${openRate}%`}
+              valueText={openRate === null ? "No scans yet" : `${openRate}%`}
             />
           </div>
+          <p className="mt-2 text-[11px] leading-relaxed text-faint">
+            Scans count every hit on the short link, including camera previews and link scanners.
+            Opens count only the scans a real browser navigated in with and was handed a live
+            review page.
+          </p>
         </div>
       </div>
 
@@ -145,6 +151,7 @@ export function QrConfigurator({
           <div className={cn("rounded-card p-5 transition-colors duration-250", active.backing)}>
             <QrFrame id={svgId} url={scanUrl} title={title} subtitle={subtitle} shortUrl={shortUrl} />
           </div>
+          <p className="sr-only">{`QR code for ${title}. It encodes the review link ${scanUrl}.`}</p>
           <p className="mt-2 text-center text-[11px] text-faint">Live preview</p>
         </div>
       </div>

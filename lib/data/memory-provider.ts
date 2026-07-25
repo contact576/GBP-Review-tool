@@ -6,6 +6,8 @@ import { canonicalPhone } from "@/lib/sms/phone";
 import { PLANS } from "@/lib/billing/plans";
 import { mergeSuggestionInbox } from "@/lib/suggestions/inbox";
 import { buildAudienceSnapshot } from "@/lib/campaigns/audience";
+import { isAssetEffectivelyDegraded } from "@/lib/qr/degrade";
+import type { QrScanContext } from "@/lib/qr/types";
 import type {
   DataProvider,
   CaptureCustomerInput,
@@ -953,9 +955,22 @@ export const memoryProvider: DataProvider = {
     for (const data of allWorkspaces()) {
       const asset = data.qrAssets.find((q) => q.slug === slug);
       if (!asset) continue;
-      if (asset.degraded) return null;
+
+      // Every resolution of a printed code is a scan — including scans of a
+      // degraded code, which are exactly the signal that tells a returning
+      // owner their print is still in the wild.
       asset.scans += 1;
-      asset.pageOpens += 1;
+
+      // A degraded asset mints nothing; the /q/{slug} route serves the
+      // Google-review grace redirect instead of dead-ending the customer.
+      if (
+        isAssetEffectivelyDegraded({
+          degraded: asset.degraded,
+          subscriptionStatus: data.subscription.status,
+        })
+      ) {
+        return null;
+      }
 
       const customer: Customer = {
         id: id("cus"),
@@ -1002,6 +1017,10 @@ export const memoryProvider: DataProvider = {
     }
     return null;
   },
+
+  // NOTE: the QR *open* counter is not written here. Minting a session is not
+  // proof that a person reached the review page — see `recordQrPageOpen` at
+  // the bottom of this file and lib/qr/scan-signal.ts.
 
   // ── Workspace configuration ───────────────────────────────
   async updateIndustry(workspaceId, industryKey, config?: IndustryConfig) {
@@ -1513,4 +1532,48 @@ function updateMemoryIntegration(
     detail,
     ...(status === "connected" ? { lastSyncAt: nowIso() } : {}),
   });
+}
+
+// ── QR public side door (no session) ────────────────────────
+// Narrow QR-table reads/writes for the public /q/{slug} endpoint. They live
+// outside the DataProvider object because they serve the unauthenticated scan
+// path only — see lib/qr/store.ts for how they are resolved.
+
+/**
+ * Degrade context for a public slug: the asset's own flag, the location's
+ * public Google review URL, and the billing dates the grace window is measured
+ * from. Never loads a whole workspace.
+ */
+export async function readQrScanContext(slug: string): Promise<QrScanContext | null> {
+  for (const data of allWorkspaces()) {
+    const asset = data.qrAssets.find((q) => q.slug === slug);
+    if (!asset) continue;
+    return {
+      slug: asset.slug,
+      assetId: asset.id,
+      locationId: asset.locationId,
+      degraded: asset.degraded,
+      reviewUrl: data.location.reviewUrl || asset.targetUrl,
+      subscription: {
+        status: data.subscription.status,
+        currentPeriodEnd: data.subscription.currentPeriodEnd ?? null,
+        trialEndsAt: data.subscription.trialEndsAt ?? null,
+      },
+    };
+  }
+  return null;
+}
+
+/**
+ * Count a review page actually reached by a real browser. Strictly a subset of
+ * `scans`, so the Studio's open rate is a real ratio rather than a tautology.
+ */
+export async function recordQrPageOpen(slug: string): Promise<boolean> {
+  for (const data of allWorkspaces()) {
+    const asset = data.qrAssets.find((q) => q.slug === slug);
+    if (!asset) continue;
+    asset.pageOpens += 1;
+    return true;
+  }
+  return false;
 }

@@ -17,6 +17,8 @@ import {
   PUBLIC_REVIEW_ID_PREFIX,
   GBP_REVIEW_ID_PREFIX,
 } from "@/lib/google/public-sync";
+import { isAssetEffectivelyDegraded } from "@/lib/qr/degrade";
+import type { QrScanContext } from "@/lib/qr/types";
 import { reconcileReviewImport, type ReviewImportPlan } from "@/lib/reviews/durability";
 import {
   applyReviewMatches,
@@ -2909,19 +2911,31 @@ export const drizzleProvider: DataProvider = {
       .limit(1);
     const asset = assetRows[0];
     if (!asset) return null;
-    if (asset.degraded) return null;
     const ws = asset.workspaceId;
     const now = nowIso();
     const seq = front();
 
-    // Atomic in-database increments — no read-modify-write race.
+    // Every resolution of a printed code is a scan — including scans of a
+    // degraded code, which are exactly the signal that tells a returning owner
+    // their print is still in the wild. Atomic in-database increment — no
+    // read-modify-write race. `pageOpens` is deliberately NOT touched here:
+    // minting is not proof a person reached the review page (see
+    // `recordQrPageOpen` below and lib/qr/scan-signal.ts).
     await db
       .update(t.qrAsset)
-      .set({
-        scans: sql`${t.qrAsset.scans} + 1`,
-        pageOpens: sql`${t.qrAsset.pageOpens} + 1`,
-      })
+      .set({ scans: sql`${t.qrAsset.scans} + 1` })
       .where(and(eq(t.qrAsset.id, asset.id), eq(t.qrAsset.workspaceId, ws)));
+
+    // A degraded asset mints nothing; the /q/{slug} route serves the
+    // Google-review grace redirect instead of dead-ending the customer. The
+    // subscription lookup is skipped when the flag already settles it.
+    const degraded =
+      asset.degraded ||
+      isAssetEffectivelyDegraded({
+        degraded: false,
+        subscriptionStatus: await readSubscriptionStatus(db, ws),
+      });
+    if (degraded) return null;
 
     const locRows = await db
       .select()
@@ -3987,4 +4001,91 @@ async function setProviderIntegration(
     .update(t.datasetMeta)
     .set({ integrations })
     .where(eq(t.datasetMeta.workspaceId, workspaceId));
+}
+
+// ── QR public side door (no session) ────────────────────────
+// Narrow QR-table reads/writes for the public /q/{slug} endpoint. They live
+// outside the DataProvider object because they serve the unauthenticated scan
+// path only — see lib/qr/store.ts for how they are resolved. Slug lookups are
+// global (slugs are unguessable and uniquely indexed); every row they touch is
+// then scoped by the asset's own workspace.
+
+/** Subscription status for a workspace, or null when there is no row. */
+async function readSubscriptionStatus(
+  db: FoundlyDb,
+  workspaceId: string,
+): Promise<string | null> {
+  const rows = await db
+    .select({ status: t.subscription.status })
+    .from(t.subscription)
+    .where(eq(t.subscription.workspaceId, workspaceId))
+    .limit(1);
+  return rows[0]?.status ?? null;
+}
+
+/**
+ * Degrade context for a public slug: the asset's own flag, the location's
+ * public Google review URL, and the billing dates the grace window is measured
+ * from. Three indexed lookups — never a whole-workspace load, because a
+ * churned customer's printed codes can keep taking real traffic for months.
+ */
+export async function readQrScanContext(slug: string): Promise<QrScanContext | null> {
+  const db = getDb();
+  const assetRows = await db
+    .select()
+    .from(t.qrAsset)
+    .where(eq(t.qrAsset.slug, slug))
+    .limit(1);
+  const asset = assetRows[0];
+  if (!asset) return null;
+  const ws = asset.workspaceId;
+
+  const locRows = await db
+    .select({ reviewUrl: t.location.reviewUrl })
+    .from(t.location)
+    .where(and(eq(t.location.id, asset.locationId), eq(t.location.workspaceId, ws)))
+    .limit(1);
+  const subRows = await db
+    .select({
+      status: t.subscription.status,
+      currentPeriodEnd: t.subscription.currentPeriodEnd,
+      trialEndsAt: t.subscription.trialEndsAt,
+    })
+    .from(t.subscription)
+    .where(eq(t.subscription.workspaceId, ws))
+    .limit(1);
+  const sub = subRows[0];
+
+  return {
+    slug: asset.slug,
+    assetId: asset.id,
+    locationId: asset.locationId,
+    degraded: asset.degraded,
+    reviewUrl: locRows[0]?.reviewUrl || asset.targetUrl,
+    subscription: {
+      status: sub?.status ?? null,
+      currentPeriodEnd: sub?.currentPeriodEnd ?? null,
+      trialEndsAt: sub?.trialEndsAt ?? null,
+    },
+  };
+}
+
+/**
+ * Count a review page actually reached by a real browser. Strictly a subset of
+ * `scans`, so the Studio's open rate is a real ratio rather than a tautology.
+ */
+export async function recordQrPageOpen(slug: string): Promise<boolean> {
+  const db = getDb();
+  const rows = await db
+    .select({ id: t.qrAsset.id, workspaceId: t.qrAsset.workspaceId })
+    .from(t.qrAsset)
+    .where(eq(t.qrAsset.slug, slug))
+    .limit(1);
+  const asset = rows[0];
+  if (!asset) return false;
+  await db
+    .update(t.qrAsset)
+    .set({ pageOpens: sql`${t.qrAsset.pageOpens} + 1` })
+    .where(and(eq(t.qrAsset.id, asset.id), eq(t.qrAsset.workspaceId, asset.workspaceId)));
+  return true;
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { getPublicProviders } from "@/lib/data";
 import { appUrl } from "@/lib/utils/app-url";
+import { classifyQrHit } from "@/lib/qr/scan-signal";
+import { resolveQrScan } from "@/lib/qr/resolve";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,29 +9,37 @@ export const dynamic = "force-dynamic";
 /**
  * Public QR scan endpoint — the URL every printed Foundly code encodes.
  *
- * Each scan mints a fresh walk-in review request (incrementing the asset's
- * scan counter) and 302-redirects into the customer flow at /r/{token}.
- * Unknown, paused, or degraded codes land on the calm /q-expired fallback —
- * a scan must never dead-end on an error page.
+ * Three outcomes, and none of them is an error page:
+ *  - active code → mints a fresh walk-in review request and 302s into the
+ *    customer flow at /r/{token};
+ *  - degraded code (explicitly flagged, or the subscription has lapsed) →
+ *    302s to the business's own public Google review page for the 90-day
+ *    grace window, so printed table tents and counter cards keep working;
+ *  - unknown code, or a grace window that has run out → the calm /q-expired
+ *    page, which tells the truth instead of pretending.
+ *
+ * Counting: every hit that resolves a real asset is a SCAN. Only a genuine
+ * browser navigation that is handed a live session is an OPEN — see
+ * lib/qr/scan-signal.ts for why those are not the same event.
  */
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ slug: string }> },
 ) {
   const base = await appUrl();
   try {
     const { slug } = await params;
-    if (slug) {
-      for (const provider of await getPublicProviders()) {
-        try {
-          const result = await provider.mintRequestFromQrSlug(slug);
-          if (result) {
-            return NextResponse.redirect(new URL(`/r/${result.token}`, base), 302);
-          }
-        } catch {
-          // This store couldn't resolve the slug — try the next one.
-        }
-      }
+    const destination = await resolveQrScan({
+      slug,
+      hit: classifyQrHit({ method: req.method, headers: req.headers }),
+    });
+
+    if (destination.kind === "review_session") {
+      return NextResponse.redirect(new URL(`/r/${destination.token}`, base), 302);
+    }
+    if (destination.kind === "google_review") {
+      // Absolute, off-site and already protocol-checked in lib/qr/degrade.
+      return NextResponse.redirect(destination.url, 302);
     }
   } catch {
     // Fall through to the expired page.
