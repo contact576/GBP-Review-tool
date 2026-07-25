@@ -205,6 +205,8 @@ function errorCopy(payload: RunResponse, quota: AeoQuota): string {
       return "AI Visibility checks are included with Pro. Upgrade to run one.";
     case "demo_workspace":
       return "The demo workspace shows a saved sample. Run a live check from a real workspace.";
+    case "provider_unavailable":
+      return "No AI provider is connected on this deployment, so there is nothing to ask. Nothing was recorded and no check was used.";
     case "no_queries":
       return payload.blockers?.join(" ") ?? "There isn't enough profile detail yet to write questions.";
     case "unauthorized":

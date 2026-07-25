@@ -127,7 +127,11 @@ export async function runCampaignSend(
 ): Promise<CampaignSendResult> {
   const now = context.now ?? new Date();
   const { campaign, transport } = context;
-  const isSms = campaign.channel !== "email";
+  // The SNAPSHOT's channel is authoritative, not the campaign row's: a
+  // scheduled send must go out the way it was committed, and the recipient
+  // destinations in the snapshot were resolved for that channel.
+  const channel = context.snapshot.channel;
+  const isSms = channel !== "email";
 
   // 1 ── Content. Incentivised reviews are a Google policy violation; the
   // penalty lands on the customer's profile, so this blocks rather than warns.
@@ -195,7 +199,7 @@ export async function runCampaignSend(
 
   // 5 ── Credits. Refuse rather than overrun the plan's allowance.
   const estimate = estimateCampaignCredits({
-    channel: campaign.channel,
+    channel,
     recipients: context.snapshot.recipients.length,
     body: campaign.body,
     usage: context.usage,
@@ -271,7 +275,9 @@ export async function runCampaignSend(
       continue;
     }
 
-    const statusCallback = `${context.baseUrl}/api/webhooks/twilio/status?workspaceId=${encodeURIComponent(context.workspaceId)}&campaignId=${encodeURIComponent(campaign.id)}`;
+    // Campaign-scoped callback: the review-request endpoint writes to a
+    // different record and would reject (or corrupt) this traffic.
+    const statusCallback = `${context.baseUrl}/api/webhooks/twilio/campaign-status?workspaceId=${encodeURIComponent(context.workspaceId)}&campaignId=${encodeURIComponent(campaign.id)}`;
     const sent = await transport.sendSms({
       to: recipient.destination,
       body: marketingCampaignSms({ body: personalized }),
@@ -352,7 +358,8 @@ export async function runCampaignTestSend(context: TestSendContext): Promise<Tes
     const sent = await transport.sendSms({
       to: context.destination,
       body: marketingCampaignSms({ body: campaign.body, isTest: true }),
-      statusCallback: `${context.baseUrl}/api/webhooks/twilio/status?test=1`,
+      // No campaign to attribute a receipt to — a test is not a campaign send.
+      statusCallback: `${context.baseUrl}/api/webhooks/twilio/campaign-status?test=1`,
     });
     return sent.ok
       ? { ok: true, note: `Test text sent to ${context.destination}. It was not counted as a campaign send.` }

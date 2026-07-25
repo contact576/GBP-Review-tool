@@ -14,10 +14,9 @@ import { hasAiKey } from "@/lib/ai/model";
 import { formatDate } from "@/lib/utils/format";
 import { buildAeoContext, SERVICES_SOURCE_COPY } from "@/lib/aeo/context";
 import { aeoQuota } from "@/lib/aeo/metering";
-import { latestAeoRun } from "@/lib/aeo/persistence";
 import { AEO_DEFAULT_QUERY_COUNT, buildDefaultQueries } from "@/lib/aeo/queries";
 import { NOT_CHECKED_COPY, type AeoCheckedQuery, type AeoQueryOutcome } from "@/lib/aeo/types";
-import { resolveAeoView } from "@/lib/aeo/view";
+import { providerDisplayName, viewFromSnapshot } from "@/lib/aeo/view";
 import { GapToTask } from "./GapToTask";
 import { RunCheck } from "./RunCheck";
 
@@ -29,20 +28,37 @@ export default async function VisibilityPage() {
     data.subscription.status === "trialing",
   );
 
-  // Newest of: a real run recorded by POST /api/aeo/run, or the stored
-  // snapshot. Never a placeholder, never an estimate.
-  const view = resolveAeoView(latestAeoRun(data.auditLog), data.aeo);
+  // The stored snapshot — written by POST /api/aeo/run via
+  // `DataProvider.saveAeoSnapshot`, or seeded for the demo workspace. Never a
+  // placeholder, never an estimate.
+  const view = viewFromSnapshot(data.aeo);
   const results: AeoQueryOutcome[] = view?.results ?? [];
   const checkedResults: AeoCheckedQuery[] = results.filter(
     (result): result is AeoCheckedQuery => result.status === "checked",
   );
-  const notCheckedResults = results.filter((result) => result.status === "not_checked");
 
   const named = view?.headline.named ?? 0;
   const checked = view?.headline.checked ?? 0;
   const namedPct = checked > 0 ? Math.round((named / checked) * 100) : 0;
   const hasSnapshot = view !== null;
   const detected = view ? formatDate(view.ranAt) : null;
+
+  // Attribution — which assistant, which exact model, which day. Rendered
+  // wherever a number from this snapshot is, so no figure floats free of the
+  // one assistant it came from.
+  const attribution =
+    view && detected ? (
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-faint">
+        <span className="inline-flex items-center gap-1">
+          <Icon name="sparkles" size={12} />
+          {view.assistantLabel ?? "Assistant not recorded on this snapshot"}
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <Icon name="clock" size={12} />
+          Asked <span className="tabular-nums">{detected}</span>
+        </span>
+      </div>
+    ) : null;
 
   const context = buildAeoContext(data);
   const plan = buildDefaultQueries(context, AEO_DEFAULT_QUERY_COUNT);
@@ -101,10 +117,13 @@ export default async function VisibilityPage() {
             <span className="tabular-nums">{checked}</span> questions checked
           </div>
           <p className="mt-1 max-w-md text-[14px] text-sub">
-            One AI assistant named you in <span className="tabular-nums">{namedPct}%</span> of the
-            buying questions it was asked{view?.assistantLabel ? ` on ${detected}` : ""}. Asked
-            again, the same assistant can answer differently.
+            {view?.assistantLabel ?? "One AI assistant"} named you in{" "}
+            <span className="tabular-nums">{namedPct}%</span> of the buying questions it was asked
+            {detected ? " on " : ""}
+            {detected ? <span className="tabular-nums">{detected}</span> : null}. Asked again, the
+            same assistant can answer differently.
           </p>
+          {attribution}
         </div>
         <div className="grid grid-cols-2 gap-4 sm:w-[280px] sm:shrink-0 sm:divide-x sm:divide-hairline">
           <StatTile boxless label="Named in answers" value={`${named}/${checked}`} />
@@ -164,6 +183,34 @@ export default async function VisibilityPage() {
                 Questions were written from your category ({plan.basis.category})
                 {plan.basis.city ? `, your city (${plan.basis.city})` : ""} and{" "}
                 {SERVICES_SOURCE_COPY[context.servicesSource]}.
+              </p>
+            ) : null}
+
+            {/* The exact assistant behind every figure on this page. */}
+            <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2 border-t border-hairline pt-3">
+              <div>
+                <dt className="kicker">Assistant</dt>
+                <dd className="text-[13px] font-semibold text-ink">
+                  {view?.provider ? providerDisplayName(view.provider) : "Not recorded"}
+                </dd>
+              </div>
+              <div>
+                <dt className="kicker">Model</dt>
+                <dd className="text-[13px] font-semibold tabular-nums text-ink">
+                  {view?.model ?? "Not recorded"}
+                </dd>
+              </div>
+              <div>
+                <dt className="kicker">Run date</dt>
+                <dd className="text-[13px] font-semibold tabular-nums text-ink">
+                  {detected ?? "Not recorded"}
+                </dd>
+              </div>
+            </dl>
+            {view && !view.model ? (
+              <p className="mt-2 text-[12px] text-faint">
+                This snapshot predates model attribution, so the exact assistant behind it is not
+                recorded. Run a new check to attribute the result to a named model.
               </p>
             ) : null}
           </div>

@@ -202,6 +202,64 @@ export async function scheduleCampaign(input: {
   return { ok: true, note: "Scheduled.", eligible: snapshot.eligible, scheduledAt };
 }
 
+/**
+ * Fold a provider delivery receipt (Twilio status callback) into the campaign.
+ *
+ * The synchronous send only knows the message was ACCEPTED. "Delivered" and
+ * "undelivered" arrive minutes later, so without this the counters would
+ * permanently overstate delivery. Matching is by the provider's own message id,
+ * which is recorded per recipient at send time.
+ */
+export async function applyCampaignDeliveryReceipt(input: {
+  provider: DataProvider;
+  workspaceId: string;
+  campaignId: string;
+  providerId: string;
+  outcome: "sent" | "failed";
+  detail?: string;
+}): Promise<boolean> {
+  const campaign = await input.provider.getCampaign(input.workspaceId, input.campaignId);
+  const delivery = campaign?.delivery;
+  const snapshot = delivery?.snapshot;
+  if (!campaign || !delivery || !snapshot) return false;
+
+  const index = snapshot.recipients.findIndex(
+    (recipient) => recipient.providerId === input.providerId,
+  );
+  const current = snapshot.recipients[index];
+  if (!current || current.outcome === input.outcome) return false;
+
+  const recipients = [...snapshot.recipients];
+  recipients[index] = { ...current, outcome: input.outcome, detail: input.detail };
+
+  const counts = { sent: 0, failed: 0, skipped: 0, held: 0 };
+  for (const recipient of recipients) {
+    if (recipient.outcome === "sent") counts.sent += 1;
+    else if (recipient.outcome === "failed") counts.failed += 1;
+    else if (recipient.outcome === "held") counts.held += 1;
+    else counts.skipped += 1;
+  }
+
+  await input.provider.recordCampaignDelivery(input.workspaceId, input.campaignId, {
+    stats: {
+      sent: counts.sent,
+      failed: counts.failed,
+      skipped: counts.skipped,
+      held: counts.held,
+    },
+    delivery: {
+      ...delivery,
+      state: counts.sent === 0 ? "blocked" : counts.sent === recipients.length ? "delivered" : "partial",
+      note:
+        counts.sent === recipients.length
+          ? `Delivered to all ${counts.sent} recipient${counts.sent === 1 ? "" : "s"}.`
+          : `Delivered to ${counts.sent} of ${recipients.length}. ${counts.failed} failed, ${counts.skipped} skipped.`,
+      snapshot: { ...snapshot, recipients },
+    },
+  });
+  return true;
+}
+
 export interface DrainResult {
   considered: number;
   sent: number;

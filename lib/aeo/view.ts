@@ -1,21 +1,31 @@
 /**
- * One view model for the Visibility page, whichever source the data came from.
+ * One view model for the Visibility page, built from the persisted snapshot.
  *
- * Two sources exist today: a real run recorded by `POST /api/aeo/run`, and the
- * legacy `FoundlyData.aeo` snapshot (which is how the seeded demo workspace is
- * populated). The snapshot shape predates the checked/not-checked distinction,
- * so every snapshot query maps to `checked` — that is exactly what it claims to
- * be, and nothing is upgraded into a stronger claim than it already made.
+ * There is exactly one source now: `FoundlyData.aeo`, written by
+ * `DataProvider.saveAeoSnapshot` after a run (and pre-populated for the seeded
+ * demo workspace). The page never reads the audit log for results.
+ *
+ * Two shapes can be in that column:
+ *   - a snapshot this version wrote, where every query carries an explicit
+ *     `status` and the fraction was computed over checked queries only;
+ *   - a legacy snapshot written before `status` existed, whose queries were all
+ *     real verdicts and whose stored fraction is its own headline claim.
+ *
+ * Nothing is upgraded into a stronger claim than the stored row already made.
  */
 
 import type { AeoSnapshot } from "@/lib/data/types";
-import type { AeoQueryOutcome, AeoRunRecord } from "./types";
+import { outcomesFromSnapshot } from "./persistence";
+import type { AeoQueryOutcome } from "./types";
 
 export interface AeoView {
-  source: "run" | "snapshot";
-  /** ISO timestamp (run) or ISO date (snapshot). */
+  /** ISO timestamp (or ISO date, on a legacy snapshot) of the run. */
   ranAt: string;
-  /** Which assistant answered. Null for a legacy snapshot that never recorded one. */
+  /** Provider id recorded with the run, e.g. "anthropic". Null if unrecorded. */
+  provider: string | null;
+  /** Exact model id that produced these answers. Null if unrecorded. */
+  model: string | null;
+  /** Human label shown beside every claim. Null when nothing was recorded. */
   assistantLabel: string | null;
   results: AeoQueryOutcome[];
   /** Headline fraction. The denominator is only ever questions we really checked. */
@@ -23,50 +33,70 @@ export interface AeoView {
   notChecked: number;
 }
 
-export function viewFromRun(record: AeoRunRecord): AeoView {
-  return {
-    source: "run",
-    ranAt: record.ranAt,
-    assistantLabel: record.assistantLabel,
-    results: record.results,
-    headline: { named: record.named, checked: record.checked },
-    notChecked: record.notChecked,
-  };
+/** Product names for the assistants this app can run against. */
+const PROVIDER_LABELS: Record<string, string> = {
+  anthropic: "Claude",
+  openai: "ChatGPT",
+};
+
+/** Product name for a recorded provider id; the raw id if we don't know it. */
+export function providerDisplayName(provider: string): string {
+  const key = provider.trim();
+  return PROVIDER_LABELS[key] ?? key;
+}
+
+/**
+ * "Claude (claude-haiku-4-5)" — the exact model is part of the label so the
+ * claim stays attributable to one specific assistant. Null when the run never
+ * recorded a provider (legacy snapshot) or ran with none configured.
+ */
+export function assistantLabelFor(
+  provider: string | null | undefined,
+  model: string | null | undefined,
+): string | null {
+  const providerId = provider?.trim();
+  const modelId = model?.trim();
+  if (!providerId || providerId === "none") return null;
+  const name = PROVIDER_LABELS[providerId] ?? providerId;
+  return modelId && modelId !== "none" ? `${name} (${modelId})` : name;
 }
 
 export function viewFromSnapshot(snapshot: AeoSnapshot | undefined | null): AeoView | null {
   if (!snapshot) return null;
-  const queries = snapshot.queries ?? [];
-  const total = snapshot.namedFraction?.total ?? 0;
-  if (queries.length === 0 && total === 0) return null;
+  const results = outcomesFromSnapshot(snapshot);
+  const storedTotal = snapshot.namedFraction?.total ?? 0;
+  if (results.length === 0 && storedTotal === 0) return null;
+
+  const checkedResults = results.filter((result) => result.status === "checked");
+  const derived = {
+    named: checkedResults.filter((result) => result.status === "checked" && result.named).length,
+    checked: checkedResults.length,
+  };
+
+  // A snapshot that carries `status` on any query was written by this version,
+  // which always recomputes the fraction from the rows it stored — so the rows
+  // are authoritative. A legacy snapshot may list only a sample of its queries,
+  // so its own stored fraction is the honest headline for it.
+  const carriesStatus = (snapshot.queries ?? []).some((query) => query.status !== undefined);
+  const headline =
+    carriesStatus || storedTotal === 0
+      ? derived
+      : { named: snapshot.namedFraction?.named ?? 0, checked: storedTotal };
+
+  const provider = nonEmpty(snapshot.provider);
+  const model = nonEmpty(snapshot.model);
   return {
-    source: "snapshot",
     ranAt: snapshot.date,
-    assistantLabel: null,
-    results: queries.map<AeoQueryOutcome>((query) => ({
-      status: "checked",
-      query: query.query,
-      named: query.named,
-      position: query.position,
-      competitorsNamed: query.competitorsNamed,
-      answerExcerpt: query.answerExcerpt,
-    })),
-    headline: {
-      named: snapshot.namedFraction?.named ?? 0,
-      checked: total || queries.length,
-    },
-    notChecked: 0,
+    provider,
+    model,
+    assistantLabel: assistantLabelFor(provider, model),
+    results,
+    headline,
+    notChecked: results.length - checkedResults.length,
   };
 }
 
-/** Newest wins. A real run always supersedes a stale seeded snapshot. */
-export function resolveAeoView(
-  run: AeoRunRecord | null,
-  snapshot: AeoSnapshot | undefined | null,
-): AeoView | null {
-  const fromRun = run ? viewFromRun(run) : null;
-  const fromSnapshot = viewFromSnapshot(snapshot);
-  if (!fromRun) return fromSnapshot;
-  if (!fromSnapshot) return fromRun;
-  return Date.parse(fromRun.ranAt) >= Date.parse(fromSnapshot.ranAt) ? fromRun : fromSnapshot;
+function nonEmpty(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed && trimmed !== "none" ? trimmed : null;
 }

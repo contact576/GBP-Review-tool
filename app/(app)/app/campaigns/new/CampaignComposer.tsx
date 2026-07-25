@@ -101,6 +101,13 @@ export function CampaignComposer({
   const hasBody = body.trim().length > 0;
   const canSend = consented > 0 && hasBody && lint.ok && estimate.withinAllowance && channelReady;
 
+  // The test destination follows the channel: an email address in the "send a
+  // test text" box would just produce a confusing E.164 error.
+  function pickChannel(next: Channel) {
+    setChannel(next);
+    setTestTo(next === "email" ? ownerEmail : "");
+  }
+
   function pickType(t: CampaignType) {
     setType(t);
     const def = TYPES.find((x) => x.key === t);
@@ -279,10 +286,10 @@ export function CampaignComposer({
         <div>
           <span className="mb-1.5 block text-[14px] font-semibold text-ink">Channel</span>
           <div className="flex flex-wrap gap-2">
-            <Chip selected={channel === "email"} onClick={() => setChannel("email")} icon="mail">
+            <Chip selected={channel === "email"} onClick={() => pickChannel("email")} icon="mail">
               Email
             </Chip>
-            <Chip selected={channel === "sms"} onClick={() => setChannel("sms")} icon="message">
+            <Chip selected={channel === "sms"} onClick={() => pickChannel("sms")} icon="message">
               SMS
             </Chip>
           </div>

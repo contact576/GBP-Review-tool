@@ -8,6 +8,7 @@ import { Icon, type IconName } from "@/components/icons";
 import { formatNumber, formatDate, maskEmail, maskPhone } from "@/lib/utils/format";
 import { emailEnabled } from "@/lib/email";
 import { smsEnabled } from "@/lib/sms/twilio";
+import { previewCampaign } from "@/lib/campaigns/runner";
 import type {
   CampaignDeliveryState,
   CampaignRecipient,
@@ -91,6 +92,21 @@ export default async function CampaignDetailPage({
     held: campaign.stats.held ?? 0,
   };
   const attempted = counts.sent + counts.failed + counts.skipped + counts.held > 0;
+
+  // For anything not yet sent, recompute against TODAY's consent and quota —
+  // a draft saved last week may have a different eligible audience now.
+  const live =
+    campaign.status === "sent"
+      ? null
+      : previewCampaign({
+          data,
+          draft: {
+            channel: campaign.channel,
+            consentBasis: campaign.consentBasis,
+            subject: campaign.subject,
+            body: campaign.body,
+          },
+        });
 
   return (
     <div className="space-y-5">
@@ -251,11 +267,32 @@ export default async function CampaignDetailPage({
       </Card>
 
       {/* Send / retry */}
-      {campaign.status !== "sent" ? (
-        <Card className="space-y-2">
+      {live ? (
+        <Card className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="kicker">If you send now</span>
+            <span className="data-chip tabular-nums text-ink">
+              {formatNumber(live.eligible)} eligible · {formatNumber(live.estimate.creditsRequired)}{" "}
+              credit{live.estimate.creditsRequired === 1 ? "" : "s"}
+            </span>
+          </div>
+          <p className={live.estimate.withinAllowance ? "text-[13px] text-sub" : "text-[13px] font-semibold text-danger"}>
+            {live.estimate.message}
+          </p>
+
+          {live.blocking.map((message) => (
+            <p key={message} className="flex items-start gap-2 rounded-btn border border-danger/40 bg-danger-tint px-3 py-2.5 text-[13px] text-ink">
+              <Icon name="alert" size={16} className="mt-0.5 shrink-0 text-danger" />
+              <span>
+                <span className="font-bold text-danger">Blocked. </span>
+                {message}
+              </span>
+            </p>
+          ))}
+
           <CampaignSendButton
             campaignId={campaign.id}
-            label={attempted ? "Try sending again" : `Send to ${formatNumber(campaign.audienceConsented)}`}
+            label={attempted ? "Try sending again" : `Send to ${formatNumber(live.eligible)}`}
             size="lg"
             fullWidth
           />

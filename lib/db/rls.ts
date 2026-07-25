@@ -184,7 +184,6 @@ function assertSafeWorkspaceId(id: string): void {
         "widen the tenant scope.",
     );
   }
-  // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f\u007f]/.test(id)) {
     throw new WorkspaceScopeError(
       "Workspace id contains control characters; refusing to set scope.",

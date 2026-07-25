@@ -6,7 +6,7 @@ import { guardAuthenticatedApi } from "@/lib/security/api";
 import { buildAeoContext } from "@/lib/aeo/context";
 import { aeoQuota } from "@/lib/aeo/metering";
 import { getAeoModelClient } from "@/lib/aeo/model-client";
-import { buildAeoRunAuditEntry } from "@/lib/aeo/persistence";
+import { buildAeoRunAuditEntry, toAeoSnapshot } from "@/lib/aeo/persistence";
 import { AEO_DEFAULT_QUERY_COUNT, AEO_MAX_QUERIES_PER_RUN, buildDefaultQueries } from "@/lib/aeo/queries";
 import { runAeoCheck } from "@/lib/aeo/runner";
 
@@ -23,7 +23,7 @@ export const maxDuration = 60;
  * that benefits from explicit HTTP status codes the client can act on.
  *
  * Gates, in order: session + role, short-window abuse guard, Pro entitlement,
- * durable monthly quota, then the run itself.
+ * demo workspace, a configured provider, durable monthly quota, then the run.
  */
 export async function POST(req: Request) {
   const guard = await guardAuthenticatedApi(req, {
@@ -50,11 +50,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "demo_workspace" }, { status: 403 });
   }
 
+  // No provider configured means every question would come back "not checked".
+  // That is a real, honest outcome — but writing it would overwrite the stored
+  // snapshot with a run that learned nothing, and spend a quota slot doing it.
+  // Refuse instead; the UI already disables the button in this state.
+  const client = getAeoModelClient();
+  if (!client) {
+    return NextResponse.json({ error: "provider_unavailable" }, { status: 503 });
+  }
+
   // Durable monthly ceiling, counted from this workspace's own audit log so a
   // restart or a second tab cannot reset it. It is check-then-write rather than
   // atomic: two simultaneous requests could both pass, and a run whose audit
-  // write fails is not counted. The 3-per-minute guard above bounds both cases,
-  // and an atomic counter arrives with a real `saveAeoSnapshot` provider method.
+  // write fails is not counted. The 3-per-minute guard above bounds both cases.
   const quota = aeoQuota(data.auditLog, data.subscription.tier);
   if (quota.remaining <= 0) {
     return NextResponse.json({ error: "quota_exceeded", quota }, { status: 429 });
@@ -75,14 +83,17 @@ export async function POST(req: Request) {
   const record = await runAeoCheck({
     context,
     queries,
-    client: getAeoModelClient(),
+    client,
     runId: `aeo_${randomBytes(12).toString("hex")}`,
   });
 
-  // Persist through the one durable write this module can reach. See the
-  // header comment in lib/aeo/persistence.ts — a `saveAeoSnapshot` provider
-  // method is the proper home for this.
-  let persisted = true;
+  // Two writes, in this order and for different reasons.
+  //
+  // 1. The audit row is the run EVENT — who ran it, when, against which model —
+  //    and it is what the monthly quota is counted from. It goes first so a run
+  //    that happened is always metered, even if step 2 fails. Over-metering a
+  //    failed save is the safe direction; under-metering is not.
+  let metered = true;
   try {
     await provider.appendAuditLog(session.workspaceId, buildAeoRunAuditEntry({
       id: `audit_${randomBytes(12).toString("hex")}`,
@@ -91,6 +102,16 @@ export async function POST(req: Request) {
       record,
     }));
   } catch {
+    metered = false;
+  }
+
+  // 2. The results themselves, into `dataset_meta.aeo` via the real provider
+  //    method. `toAeoSnapshot` carries the checked/not-checked distinction
+  //    across intact — see lib/aeo/persistence.ts.
+  let persisted = true;
+  try {
+    await provider.saveAeoSnapshot(session.workspaceId, toAeoSnapshot(record, context.locationId));
+  } catch {
     persisted = false;
   }
 
@@ -98,7 +119,9 @@ export async function POST(req: Request) {
     ok: true,
     persisted,
     run: record,
-    quota: { ...quota, used: quota.used + 1, remaining: Math.max(0, quota.remaining - 1) },
+    quota: metered
+      ? { ...quota, used: quota.used + 1, remaining: Math.max(0, quota.remaining - 1) }
+      : quota,
     blockers: plan.blockers,
   });
 }

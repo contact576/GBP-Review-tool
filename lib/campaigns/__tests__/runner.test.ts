@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEMO_WORKSPACE_ID, memoryProvider } from "@/lib/data/memory-provider";
 import {
+  applyCampaignDeliveryReceipt,
   commitCampaignSend,
   drainDueCampaigns,
   previewCampaign,
@@ -134,6 +135,82 @@ describe("commitCampaignSend — persisted outcome", () => {
     expect(stored?.status).toBe("draft");
     // The attempt is on the record even though nothing was sent.
     expect(stored?.delivery?.attemptedAt).toBe(DAYTIME.toISOString());
+  });
+});
+
+describe("provider delivery receipts", () => {
+  it("moves a recipient from sent to failed when Twilio reports undelivered", async () => {
+    const campaign = await newCampaign({
+      locationId: "loc_harbourview",
+      name: "Text check-in",
+      type: "reminder",
+      consentBasis: "marketing",
+      channel: "sms",
+      body: "Quick hello from the clinic.",
+    });
+
+    let sid = 0;
+    await commitCampaignSend({
+      provider: memoryProvider,
+      workspaceId: DEMO_WORKSPACE_ID,
+      campaignId: campaign.id,
+      baseUrl: BASE,
+      now: DAYTIME,
+      transport: transport({
+        sendSms: vi.fn(async () => ({ ok: true as const, sid: `SM${++sid}`, status: "queued" })),
+      }),
+    });
+
+    const beforeReceipt = await memoryProvider.getCampaign(DEMO_WORKSPACE_ID, campaign.id);
+    const sentBefore = beforeReceipt?.stats.sent ?? 0;
+    expect(sentBefore).toBeGreaterThan(1);
+
+    const applied = await applyCampaignDeliveryReceipt({
+      provider: memoryProvider,
+      workspaceId: DEMO_WORKSPACE_ID,
+      campaignId: campaign.id,
+      providerId: "SM1",
+      outcome: "failed",
+      detail: "Twilio could not deliver this message (30006).",
+    });
+    expect(applied).toBe(true);
+
+    const after = await memoryProvider.getCampaign(DEMO_WORKSPACE_ID, campaign.id);
+    expect(after?.stats.sent).toBe(sentBefore - 1);
+    expect(after?.stats.failed).toBe(1);
+    expect(after?.delivery?.state).toBe("partial");
+    const recipient = after?.delivery?.snapshot?.recipients.find((r) => r.providerId === "SM1");
+    expect(recipient?.outcome).toBe("failed");
+    expect(recipient?.detail).toMatch(/30006/);
+  });
+
+  it("ignores a receipt for an unknown message id", async () => {
+    const campaign = await newCampaign({
+      locationId: "loc_harbourview",
+      name: "Text check-in",
+      type: "reminder",
+      consentBasis: "marketing",
+      channel: "sms",
+      body: "Quick hello.",
+    });
+    await commitCampaignSend({
+      provider: memoryProvider,
+      workspaceId: DEMO_WORKSPACE_ID,
+      campaignId: campaign.id,
+      baseUrl: BASE,
+      now: DAYTIME,
+      transport: transport(),
+    });
+
+    expect(
+      await applyCampaignDeliveryReceipt({
+        provider: memoryProvider,
+        workspaceId: DEMO_WORKSPACE_ID,
+        campaignId: campaign.id,
+        providerId: "SM_not_ours",
+        outcome: "failed",
+      }),
+    ).toBe(false);
   });
 });
 

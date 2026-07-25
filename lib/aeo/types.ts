@@ -3,10 +3,10 @@
  *
  * The single most important distinction in this module: a query that was
  * CHECKED and came back without the business named is NOT the same thing as a
- * query we never managed to check. `lib/data/types.ts#AeoQueryResult` cannot
- * express the difference (its `named` is a bare boolean), so the runner speaks
- * in this richer discriminated union and only ever narrows down to the legacy
- * snapshot shape for queries whose verdict is real.
+ * query we never managed to check. The runner speaks in this discriminated
+ * union so the two can never be confused in code, and
+ * `lib/aeo/persistence.ts` maps it onto `lib/data/types.ts#AeoQueryResult`
+ * (which carries `status` + `notCheckedReason`) without collapsing them.
  *
  * Nothing in this file is ever defaulted to a verdict. If we don't know, we say
  * "not checked" and carry the reason.
@@ -18,7 +18,8 @@ export type AeoNotCheckedReason =
   | "model_unavailable"
   | "invalid_output"
   | "refused"
-  | "empty_answer";
+  | "empty_answer"
+  | "unreadable_record";
 
 /** Plain-language copy for each reason — shown verbatim in the UI. */
 export const NOT_CHECKED_COPY: Record<AeoNotCheckedReason, string> = {
@@ -27,6 +28,11 @@ export const NOT_CHECKED_COPY: Record<AeoNotCheckedReason, string> = {
   invalid_output: "The assistant's reply could not be read reliably, so no verdict was recorded.",
   refused: "The assistant declined to answer this question, so there is nothing to score.",
   empty_answer: "The assistant returned no answer text, so there is nothing to score.",
+  // Only ever produced when READING storage back: a stored row whose status or
+  // verdict fields are not what this version writes. We report it as unchecked
+  // rather than guess at what it meant.
+  unreadable_record:
+    "The stored result for this question could not be read, so no verdict is shown for it.",
 };
 
 /** A query we actually asked, with a verdict derived from the real answer. */
