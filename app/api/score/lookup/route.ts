@@ -10,7 +10,7 @@ import {
   searchNearbyCompetitors,
   summarizeNearby,
 } from "@/lib/google/places";
-import { boundedString, guardPublicApi, readJsonObject } from "@/lib/security/api";
+import { boundedString, guardPublicApiAsync, readJsonObject } from "@/lib/security/api";
 
 export const runtime = "nodejs";
 
@@ -41,7 +41,7 @@ function unavailable(status: Unavailable, extra?: Record<string, unknown>) {
 }
 
 export async function POST(req: Request) {
-  const limited = guardPublicApi(req, "score-lookup", 30, 60_000);
+  const limited = await guardPublicApiAsync(req, "score-lookup", 30, 60_000);
   if (limited) return limited;
 
   let body: Record<string, unknown>;
