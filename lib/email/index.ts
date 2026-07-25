@@ -23,6 +23,12 @@ export interface SendEmailInput {
   /** Override the From address (defaults to EMAIL_FROM or Resend's sandbox). */
   from?: string;
   replyTo?: string;
+  /**
+   * Adds RFC 8058 one-click unsubscribe headers. Gmail and Yahoo require these
+   * on bulk mail, and without them marketing sends land in spam regardless of
+   * the in-body link. Set this for every commercial message.
+   */
+  listUnsubscribeUrl?: string;
 }
 
 export type SendEmailResult =
@@ -38,6 +44,12 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
   if (!apiKey) return { ok: false, reason: "not_configured" };
 
   const from = input.from ?? process.env.EMAIL_FROM ?? DEFAULT_FROM;
+  const listHeaders = input.listUnsubscribeUrl
+    ? {
+        "List-Unsubscribe": `<${input.listUnsubscribeUrl}>`,
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      }
+    : undefined;
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -52,6 +64,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
         html: input.html,
         text: input.text,
         reply_to: input.replyTo,
+        headers: listHeaders,
       }),
       cache: "no-store",
     });

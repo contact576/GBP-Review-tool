@@ -129,6 +129,13 @@ export class WorkspaceScopeError extends Error {
   }
 }
 
+/**
+ * Just the shape this module needs from the environment. Deliberately looser
+ * than NodeJS.ProcessEnv so tests can pass a plain object literal and prove the
+ * default-off behaviour without mutating global state.
+ */
+export type RlsEnv = Readonly<Record<string, string | undefined>>;
+
 const TRUTHY = new Set(["1", "true", "on", "yes", "enabled"]);
 
 /**
@@ -143,9 +150,7 @@ const TRUTHY = new Set(["1", "true", "on", "yes", "enabled"]);
  * itself enforce anything — enforcement starts when RLS_FORCE_STATEMENTS is
  * applied to the database (rollout step 4).
  */
-export function isRlsEnabled(
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
+export function isRlsEnabled(env: RlsEnv = process.env): boolean {
   const raw = env[RLS_FLAG_ENV];
   if (typeof raw !== "string") return false;
   return TRUTHY.has(raw.trim().toLowerCase());
@@ -264,7 +269,7 @@ export function bypassScopeStatement(): ScopedStatement {
 export function planScopedStatements(
   workspaceIds: readonly string[],
   statements: readonly ScopedStatement[],
-  env: NodeJS.ProcessEnv = process.env,
+  env: RlsEnv = process.env,
 ): readonly ScopedStatement[] {
   const scope = workspaceScopeStatement(workspaceIds);
   if (!isRlsEnabled(env)) return statements;

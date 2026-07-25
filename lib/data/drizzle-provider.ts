@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, like, lte, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { nanoid } from "nanoid";
 import { getDb, type FoundlyDb } from "../db/client";
@@ -9,6 +9,7 @@ import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { canonicalPhone } from "@/lib/sms/phone";
 import { PLANS } from "@/lib/billing/plans";
 import { mergeSuggestionInbox } from "@/lib/suggestions/inbox";
+import { buildAudienceSnapshot } from "@/lib/campaigns/audience";
 import {
   buildGooglePublicUpdate,
   upsertSnapshot,
@@ -62,6 +63,7 @@ import type {
   ReviewDraft,
   GbpTask,
   Campaign,
+  CampaignStats,
   Subscription,
   PrivateFeedback,
   Notification,
@@ -444,7 +446,14 @@ function mapTask(row: TaskRow): GbpTask {
   };
 }
 
+/**
+ * The delivery record lives INSIDE the `stats` jsonb column rather than in
+ * columns of its own, so campaigns gained a frozen audience and per-recipient
+ * outcomes without a schema migration. This pair of functions is the only
+ * place that knows: everything above `Campaign.delivery` sees a normal field.
+ */
 function mapCampaign(row: CampaignRow): Campaign {
+  const { delivery, ...stats } = row.stats;
   return {
     id: row.id,
     locationId: row.locationId,
@@ -460,9 +469,16 @@ function mapCampaign(row: CampaignRow): Campaign {
     audienceTotal: row.audienceTotal,
     audienceConsented: row.audienceConsented,
     excluded: row.excluded,
-    stats: row.stats,
+    stats,
+    delivery,
     createdAt: row.createdAt,
   };
+}
+
+function campaignStatsColumn(campaign: Campaign): CampaignStats {
+  return campaign.delivery
+    ? { ...campaign.stats, delivery: campaign.delivery }
+    : { ...campaign.stats };
 }
 
 function mapSubscription(row: SubscriptionRow): Subscription {
@@ -974,7 +990,7 @@ function buildCampaignRow(
     audienceTotal: c.audienceTotal,
     audienceConsented: c.audienceConsented,
     excluded: c.excluded,
-    stats: c.stats,
+    stats: campaignStatsColumn(c),
     createdAt: c.createdAt,
     seq,
   };
@@ -2689,27 +2705,16 @@ export const drizzleProvider: DataProvider = {
     const ctx = await loadContext(db, workspaceId);
     const now = nowIso();
 
-    const customerRows = await db
-      .select()
-      .from(t.customer)
-      .where(eq(t.customer.workspaceId, workspaceId));
-    const consentRows = await db
-      .select()
-      .from(t.customerConsent)
-      .where(eq(t.customerConsent.workspaceId, workspaceId));
-    const consentByCustomer = new Map<string, ConsentRow>(
-      consentRows.map((c) => [c.customerId, c]),
-    );
-
-    const pool = customerRows.filter((c) => {
-      const cons = consentByCustomer.get(c.id);
-      if (!cons) return false;
-      return input.consentBasis === "marketing"
-        ? cons.marketingConsent && !cons.withdrawnAt
-        : cons.serviceConsent;
+    // Resolved by the same pure function the send path uses, so the number the
+    // composer shows is the number that will actually be contacted — channel,
+    // suppression and withdrawal included, not raw consent flags.
+    const data = await drizzleProvider.getData(workspaceId);
+    const snapshot = buildAudienceSnapshot({
+      customers: data?.customers ?? [],
+      suppression: data?.suppression ?? [],
+      consentBasis: input.consentBasis,
+      channel: input.channel,
     });
-    const total = customerRows.length;
-    const consented = pool.length;
 
     const campaign: Campaign = {
       id: id("camp"),
@@ -2721,19 +2726,11 @@ export const drizzleProvider: DataProvider = {
       channel: input.channel,
       subject: input.subject,
       body: input.body,
-      status: "draft",
+      status: input.scheduledAt ? "scheduled" : "draft",
       scheduledAt: input.scheduledAt,
-      audienceTotal: total,
-      audienceConsented: consented,
-      excluded: [
-        {
-          reason:
-            input.consentBasis === "marketing"
-              ? "Not opted in to marketing"
-              : "No service consent",
-          count: total - consented,
-        },
-      ],
+      audienceTotal: snapshot.total,
+      audienceConsented: snapshot.eligible,
+      excluded: snapshot.excluded,
       stats: { sent: 0, opened: 0, clicked: 0 },
       createdAt: now,
     };
@@ -2750,6 +2747,87 @@ export const drizzleProvider: DataProvider = {
       .where(
         and(eq(t.campaign.id, campaignId), eq(t.campaign.workspaceId, workspaceId)),
       );
+  },
+
+  async getCampaign(workspaceId, campaignId) {
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(t.campaign)
+      .where(and(eq(t.campaign.id, campaignId), eq(t.campaign.workspaceId, workspaceId)))
+      .limit(1);
+    const row = rows[0];
+    return row ? mapCampaign(row) : null;
+  },
+
+  async recordCampaignDelivery(workspaceId, campaignId, patch) {
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(t.campaign)
+      .where(and(eq(t.campaign.id, campaignId), eq(t.campaign.workspaceId, workspaceId)))
+      .limit(1);
+    const row = rows[0];
+    if (!row) return null;
+
+    const current = mapCampaign(row);
+    const next: Campaign = {
+      ...current,
+      status: patch.status ?? current.status,
+      scheduledAt:
+        patch.scheduledAt === undefined
+          ? current.scheduledAt
+          : (patch.scheduledAt ?? undefined),
+      stats: patch.stats ? { ...current.stats, ...patch.stats } : current.stats,
+      delivery: patch.delivery ?? current.delivery,
+      audienceTotal: patch.audienceTotal ?? current.audienceTotal,
+      audienceConsented: patch.audienceConsented ?? current.audienceConsented,
+      excluded: patch.excluded ?? current.excluded,
+    };
+
+    await db
+      .update(t.campaign)
+      .set({
+        status: next.status,
+        scheduledAt: next.scheduledAt ?? null,
+        stats: campaignStatsColumn(next),
+        audienceTotal: next.audienceTotal,
+        audienceConsented: next.audienceConsented,
+        excluded: next.excluded,
+      })
+      .where(and(eq(t.campaign.id, campaignId), eq(t.campaign.workspaceId, workspaceId)));
+
+    // Credits are consumed in the same call as the outcome so a crash can
+    // never leave "40 sent" next to an untouched allowance.
+    if (patch.consumeSmsCredits) {
+      const subRows = await db
+        .select({ usage: t.subscription.usage })
+        .from(t.subscription)
+        .where(eq(t.subscription.workspaceId, workspaceId))
+        .limit(1);
+      const usage = subRows[0]?.usage;
+      if (usage) {
+        await db
+          .update(t.subscription)
+          .set({
+            usage: { ...usage, smsCreditsUsed: usage.smsCreditsUsed + patch.consumeSmsCredits },
+          })
+          .where(eq(t.subscription.workspaceId, workspaceId));
+      }
+    }
+
+    return next;
+  },
+
+  async listDueCampaigns(nowIso, limit = 50) {
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(t.campaign)
+      .where(and(eq(t.campaign.status, "scheduled"), lte(t.campaign.scheduledAt, nowIso)))
+      .orderBy(t.campaign.scheduledAt)
+      .limit(limit);
+    return rows.map((row) => ({ workspaceId: row.workspaceId, campaign: mapCampaign(row) }));
   },
 
   async updateConsent(workspaceId, customerId, consent) {

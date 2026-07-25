@@ -1,5 +1,5 @@
-import { getData } from "@/lib/data";
-import type { AeoQueryResult, Location } from "@/lib/data/types";
+import { getSessionAndData } from "@/lib/data";
+import type { Location } from "@/lib/data/types";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge, EmptyState } from "@/components/ds/misc";
 import { PageHeader } from "@/components/app/PageHeader";
@@ -10,75 +10,124 @@ import { ProgressMeter } from "@/components/charts/ProgressMeter";
 import { Donut, type DonutSegment } from "@/components/charts/Donut";
 import { NEUTRAL_SEG } from "@/components/charts/tokens";
 import { hasFeature } from "@/lib/billing/plans";
+import { hasAiKey } from "@/lib/ai/model";
 import { formatDate } from "@/lib/utils/format";
+import { buildAeoContext, SERVICES_SOURCE_COPY } from "@/lib/aeo/context";
+import { aeoQuota } from "@/lib/aeo/metering";
+import { latestAeoRun } from "@/lib/aeo/persistence";
+import { AEO_DEFAULT_QUERY_COUNT, buildDefaultQueries } from "@/lib/aeo/queries";
+import { NOT_CHECKED_COPY, type AeoCheckedQuery, type AeoQueryOutcome } from "@/lib/aeo/types";
+import { resolveAeoView } from "@/lib/aeo/view";
 import { GapToTask } from "./GapToTask";
+import { RunCheck } from "./RunCheck";
 
 export default async function VisibilityPage() {
-  const data = await getData();
+  const { session, data } = await getSessionAndData();
   const entitled = hasFeature(
     data.subscription.tier,
     "ai_visibility",
     data.subscription.status === "trialing",
   );
-  const aeo = data.aeo;
-  const queries = aeo?.queries ?? [];
-  const named = aeo?.namedFraction.named ?? 0;
-  const total = aeo?.namedFraction.total ?? 0;
-  const namedPct = total > 0 ? Math.round((named / total) * 100) : 0;
-  /** A snapshot exists only when a check has actually tested questions. */
-  const hasSnapshot = total > 0 || queries.length > 0;
-  const detected = aeo ? formatDate(aeo.date) : null;
 
-  // Positioning breakdown across the questions we actually detail below —
+  // Newest of: a real run recorded by POST /api/aeo/run, or the stored
+  // snapshot. Never a placeholder, never an estimate.
+  const view = resolveAeoView(latestAeoRun(data.auditLog), data.aeo);
+  const results: AeoQueryOutcome[] = view?.results ?? [];
+  const checkedResults: AeoCheckedQuery[] = results.filter(
+    (result): result is AeoCheckedQuery => result.status === "checked",
+  );
+  const notCheckedResults = results.filter((result) => result.status === "not_checked");
+
+  const named = view?.headline.named ?? 0;
+  const checked = view?.headline.checked ?? 0;
+  const namedPct = checked > 0 ? Math.round((named / checked) * 100) : 0;
+  const hasSnapshot = view !== null;
+  const detected = view ? formatDate(view.ranAt) : null;
+
+  const context = buildAeoContext(data);
+  const plan = buildDefaultQueries(context, AEO_DEFAULT_QUERY_COUNT);
+  const quota = aeoQuota(data.auditLog, data.subscription.tier);
+
+  // Positioning breakdown across the questions we actually got a verdict for —
   // a genuine ≥3-slice part-of-whole (a 2-slice named/not donut is chartjunk,
   // DESIGN §3), with "Not named" painted neutral, never blended into a ramp.
-  const namedDetailed = queries.filter((q) => q.named).length;
-  const topSpot = queries.filter((q) => q.named && q.position === 1).length;
-  const listed = queries.filter((q) => q.named && q.position !== 1).length;
-  const notNamed = queries.filter((q) => !q.named).length;
+  // Unchecked questions are excluded: they are not part of this whole.
+  const namedDetailed = checkedResults.filter((q) => q.named).length;
+  const topSpot = checkedResults.filter((q) => q.named && q.position === 1).length;
+  const listed = checkedResults.filter((q) => q.named && q.position !== 1).length;
+  const notNamed = checkedResults.filter((q) => !q.named).length;
   const positionSegments: DonutSegment[] = [
     { label: "Named — top spot", value: topSpot },
     { label: "Named — listed", value: listed },
     { label: "Not named", value: notNamed, color: NEUTRAL_SEG },
   ].filter((s) => s.value > 0);
 
-  const signals = profileSignals(data.location, queries);
+  const signals = profileSignals(data.location, checkedResults);
+
+  const runner = (
+    <RunCheck
+      queries={plan.queries}
+      blockers={plan.blockers}
+      quota={quota}
+      providerConfigured={hasAiKey()}
+      demoWorkspace={session.isDemo}
+    />
+  );
 
   // Free teaser — the headline snapshot stays visible on every plan.
-  const summary = hasSnapshot ? (
-    <Card raised>
-      <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <div className="kicker mb-1">This snapshot</div>
-          <div className="text-[20px] font-extrabold text-ink">
-            Named in <span className="tabular-nums">{named}</span> of{" "}
-            <span className="tabular-nums">{total}</span> questions
-          </div>
-          <p className="mt-1 max-w-md text-[14px] text-sub">
-            You appear in AI answers for {namedPct}% of the buying questions we tested nearby.
-          </p>
-        </div>
-        <div className="grid grid-cols-2 gap-4 sm:w-[280px] sm:shrink-0 sm:divide-x sm:divide-hairline">
-          <StatTile boxless label="Named in answers" value={`${named}/${total}`} />
-          <StatTile boxless label="Answer share" value={`${namedPct}%`} className="sm:pl-5" />
-        </div>
-      </div>
-      <div className="mt-5">
-        <ProgressMeter
-          value={named}
-          max={total}
-          label="Questions where an AI named you"
-          valueText={`${named} of ${total} tested`}
-        />
-      </div>
-    </Card>
-  ) : (
+  const summary = !hasSnapshot ? (
     <Card raised>
       <EmptyState
         icon="sparkles"
         title="No AI Visibility check has run yet"
         description="Your answer share appears here once we test the buying questions people ask AI assistants near you. We never estimate a score in the meantime."
       />
+    </Card>
+  ) : checked === 0 ? (
+    <Card raised>
+      <EmptyState
+        icon="alert"
+        title="The last check produced no verdicts"
+        description="Every question in the last run came back unchecked, so there is no answer share to report. An unchecked question is not the same as being left out of the answer — the per-question reasons are below."
+      />
+    </Card>
+  ) : (
+    <Card raised>
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <div className="kicker mb-1">This snapshot</div>
+          <div className="text-[20px] font-extrabold text-ink">
+            Named in <span className="tabular-nums">{named}</span> of{" "}
+            <span className="tabular-nums">{checked}</span> questions checked
+          </div>
+          <p className="mt-1 max-w-md text-[14px] text-sub">
+            One AI assistant named you in <span className="tabular-nums">{namedPct}%</span> of the
+            buying questions it was asked{view?.assistantLabel ? ` on ${detected}` : ""}. Asked
+            again, the same assistant can answer differently.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-4 sm:w-[280px] sm:shrink-0 sm:divide-x sm:divide-hairline">
+          <StatTile boxless label="Named in answers" value={`${named}/${checked}`} />
+          <StatTile boxless label="Answer share" value={`${namedPct}%`} className="sm:pl-5" />
+        </div>
+      </div>
+      <div className="mt-5">
+        <ProgressMeter
+          value={named}
+          max={checked}
+          label="Questions where an AI named you"
+          valueText={`${named} of ${checked} checked`}
+        />
+      </div>
+      {view && view.notChecked > 0 ? (
+        <p className="mt-3 flex items-start gap-1.5 border-t border-hairline pt-3 text-[12px] text-faint">
+          <Icon name="alert" size={13} className="mt-0.5 shrink-0" />
+          <span className="tabular-nums">{view.notChecked}</span> further{" "}
+          {view.notChecked === 1 ? "question was" : "questions were"} asked but could not be checked,
+          so {view.notChecked === 1 ? "it is" : "they are"} left out of this fraction rather than
+          counted against you.
+        </p>
+      ) : null}
     </Card>
   );
 
@@ -93,24 +142,57 @@ export default async function VisibilityPage() {
     </Card>
   ) : (
     <div className="space-y-5">
+      {/* How this was measured — stated before any of the numbers are read. */}
+      <Card className="border-hairline bg-primary-wash/40">
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-btn bg-card text-primary">
+            <Icon name="eye" size={17} />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[14px] font-bold text-ink">How this was measured</div>
+            <p className="mt-1 text-[13px] text-sub">
+              {view?.assistantLabel
+                ? `We asked ${view.assistantLabel} ${results.length} ${results.length === 1 ? "question" : "questions"} on ${detected} and read its own answers for your business name.`
+                : `This is a stored snapshot from ${detected}.`}{" "}
+              It is a point-in-time sample of one assistant&apos;s answer — not a ranking, not a
+              guarantee, and not a claim about what other AI assistants say. A model&apos;s answer
+              is non-deterministic: the same question asked a minute later can name a different set
+              of businesses.
+            </p>
+            {plan.basis.category ? (
+              <p className="mt-2 text-[12px] text-faint">
+                Questions were written from your category ({plan.basis.category})
+                {plan.basis.city ? `, your city (${plan.basis.city})` : ""} and{" "}
+                {SERVICES_SOURCE_COPY[context.servicesSource]}.
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </Card>
+
       {/* Positioning breakdown */}
-      {queries.length > 0 ? (
+      {checkedResults.length > 0 ? (
         <Card>
           <CardHeader
             kicker="Positioning"
             title="Where you place"
-            action={<Badge tone="neutral" icon="sparkles">{queries.length} questions</Badge>}
+            action={
+              <Badge tone="neutral" icon="sparkles">
+                {checkedResults.length} checked
+              </Badge>
+            }
           />
           <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-around">
             <Donut
               segments={positionSegments}
-              centerValue={`${namedDetailed}/${queries.length}`}
+              centerValue={`${namedDetailed}/${checkedResults.length}`}
               centerLabel="named"
               title="Where you place"
             />
             <p className="max-w-xs text-[13px] text-sub">
-              Across the {queries.length} buying questions detailed below. &ldquo;Not named&rdquo; is
-              shown as a neutral slice — never blended into a ranking colour.
+              Across the {checkedResults.length} questions that returned a readable answer.
+              &ldquo;Not named&rdquo; is shown as a neutral slice — never blended into a ranking
+              colour. Questions we could not check are excluded entirely.
             </p>
           </div>
         </Card>
@@ -118,25 +200,33 @@ export default async function VisibilityPage() {
 
       {/* Per-query results */}
       <div className="space-y-3">
-        {queries.length === 0 ? (
+        {results.length === 0 ? (
           <Card>
             <EmptyState
               icon="sparkles"
-              title="No AI Visibility snapshot yet"
-              description="Once we test buying questions nearby, your results will appear here."
+              title="No per-question detail in this snapshot"
+              description="Run a check to see each question, the assistant's own words, and which businesses it named."
             />
           </Card>
         ) : (
-          queries.map((q) => (
-            <Card key={q.query}>
+          results.map((result) => (
+            <Card key={result.query}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="kicker mb-0.5">Question asked</div>
-                  <div className="text-[15px] font-bold text-ink">&ldquo;{q.query}&rdquo;</div>
+                  <div className="text-[15px] font-bold text-ink">&ldquo;{result.query}&rdquo;</div>
                 </div>
-                {q.named ? (
-                  <Badge tone="primary" icon="check-circle" className="shrink-0 px-2 py-1 text-[12px]">
-                    Named{typeof q.position === "number" ? ` · #${q.position}` : ""}
+                {result.status === "not_checked" ? (
+                  <Badge tone="sub" icon="alert" className="shrink-0 px-2 py-1 text-[12px]">
+                    Not checked
+                  </Badge>
+                ) : result.named ? (
+                  <Badge
+                    tone="primary"
+                    icon="check-circle"
+                    className="shrink-0 px-2 py-1 text-[12px]"
+                  >
+                    Named{typeof result.position === "number" ? ` · #${result.position}` : ""}
                   </Badge>
                 ) : (
                   <Badge tone="danger" icon="x" className="shrink-0 px-2 py-1 text-[12px]">
@@ -145,30 +235,57 @@ export default async function VisibilityPage() {
                 )}
               </div>
 
-              <div className="mt-3 rounded-btn border border-hairline bg-primary-wash/40 p-3">
-                <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
-                  <Icon name="chat" size={13} /> Answer excerpt
-                </div>
-                <p className="text-[13px] italic text-sub">&ldquo;{q.answerExcerpt}&rdquo;</p>
-              </div>
-
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                {q.competitorsNamed.length > 0 ? (
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-[12px] text-faint">Competitors named:</span>
-                    {q.competitorsNamed.map((c) => (
-                      <Badge key={c} tone="sub">{c}</Badge>
-                    ))}
+              {result.status === "not_checked" ? (
+                <>
+                  <div className="mt-3 rounded-btn border border-hairline bg-hairline/30 p-3">
+                    <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                      <Icon name="alert" size={13} /> No verdict recorded
+                    </div>
+                    <p className="text-[13px] text-sub">{NOT_CHECKED_COPY[result.reason]}</p>
                   </div>
-                ) : (
-                  <span className="text-[12px] text-faint">No competitors named here.</span>
-                )}
-                {!q.named ? <div className="ml-auto"><GapToTask query={q.query} /></div> : null}
-              </div>
+                  <p className="mt-2 text-[12px] text-faint">
+                    This is not a &ldquo;not named&rdquo; result. We do not know what the assistant
+                    would have answered, so nothing is recorded either way.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="mt-3 rounded-btn border border-hairline bg-primary-wash/40 p-3">
+                    <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                      <Icon name="chat" size={13} /> The assistant&apos;s own words
+                    </div>
+                    <p className="text-[13px] italic text-sub">
+                      &ldquo;{result.answerExcerpt}&rdquo;
+                    </p>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {result.competitorsNamed.length > 0 ? (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[12px] text-faint">Also named in this answer:</span>
+                        {result.competitorsNamed.map((competitor) => (
+                          <Badge key={competitor} tone="sub">
+                            {competitor}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-[12px] text-faint">
+                        No other business was named in this answer.
+                      </span>
+                    )}
+                    {!result.named ? (
+                      <div className="ml-auto">
+                        <GapToTask query={result.query} />
+                      </div>
+                    ) : null}
+                  </div>
+                </>
+              )}
 
               {detected ? (
                 <p className="mt-2 flex items-center gap-1 text-[11px] text-faint">
-                  <Icon name="clock" size={12} /> Detected {detected}
+                  <Icon name="clock" size={12} /> Asked {detected}
                 </p>
               ) : null}
             </Card>
@@ -180,7 +297,7 @@ export default async function VisibilityPage() {
           and snapshot data; nothing here is written per-vertical. */}
       {signals.length > 0 ? (
         <Card>
-          <CardHeader kicker="Signals" title="What drives whether you're named" />
+          <CardHeader kicker="Signals" title="What an assistant can read about you" />
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {signals.map((signal) => (
               <FactorRow
@@ -193,7 +310,8 @@ export default async function VisibilityPage() {
           </div>
           <p className="mt-3 border-t border-hairline pt-3 text-[12px] text-faint">
             Read from your Google profile and this snapshot — an assistant&apos;s ranking formula is
-            not published, so these are the signals we can actually see, not a guaranteed cause.
+            not published, so these are the signals we can actually see. None of them is shown here
+            as a cause of being named.
           </p>
         </Card>
       ) : null}
@@ -202,7 +320,8 @@ export default async function VisibilityPage() {
         <div className="flex items-start gap-2 rounded-card border border-gold/40 bg-gold-tint/50 p-3">
           <Icon name="alert" size={16} className="mt-0.5 shrink-0 text-gold-deep" />
           <p className="text-[12px] text-gold-deep">
-            AI answers change often — this is a detected snapshot from {detected}, not a live guarantee.
+            AI answers change often — this is one assistant&apos;s answer on {detected}, not a live
+            guarantee and not a ranking you hold.
           </p>
         </div>
       ) : null}
@@ -215,11 +334,15 @@ export default async function VisibilityPage() {
         title={
           <span className="inline-flex items-center gap-2">
             AI Visibility
-            <Badge tone="gold" icon="sparkles">Pro</Badge>
+            <Badge tone="gold" icon="sparkles">
+              Pro
+            </Badge>
           </span>
         }
-        sub={`Whether AI assistants name ${data.location.name || "your business"} when people ask — answer-engine optimization (AEO).`}
+        sub={`Whether one AI assistant names ${data.location.name || "your business"} when people ask — answer-engine optimization (AEO).`}
       />
+
+      {entitled ? runner : null}
 
       {summary}
 
@@ -244,12 +367,16 @@ interface ProfileSignal {
  * The signal rows, derived entirely from this workspace's own Google profile
  * state and its detected AEO snapshot. No vertical-specific copy: every string
  * is assembled from numbers the workspace actually has.
+ *
+ * These rows describe what an assistant can READ. None of them asserts that a
+ * signal causes the business to be named — that link is not published by any
+ * assistant and is not something this product can measure.
  */
-function profileSignals(location: Location, queries: AeoQueryResult[]): ProfileSignal[] {
+function profileSignals(location: Location, queries: AeoCheckedQuery[]): ProfileSignal[] {
   const profile = location.profile;
   const signals: ProfileSignal[] = [];
 
-  // Reviews — assistants quote rating and volume.
+  // Reviews — the rating and volume that exist as quotable text.
   signals.push(
     location.reviewCount > 0
       ? {
@@ -260,7 +387,7 @@ function profileSignals(location: Location, queries: AeoQueryResult[]): ProfileS
       : {
           good: false,
           title: "No reviews detected",
-          detail: "Assistants lean on rating and review volume; none have been detected for your profile yet.",
+          detail: "There is no rating or review volume on your profile for an assistant to quote.",
         },
   );
 
@@ -278,7 +405,7 @@ function profileSignals(location: Location, queries: AeoQueryResult[]): ProfileS
       ? {
           good: profile.servicesWithDescriptions >= profile.servicesTotal,
           title: "Service descriptions",
-          detail: `${profile.servicesWithDescriptions} of ${profile.servicesTotal} listed services carry a description. Undescribed services are hard for an assistant to match to a question.`,
+          detail: `${profile.servicesWithDescriptions} of ${profile.servicesTotal} listed services carry a description. A service with no description gives an assistant no text to read.`,
         }
       : {
           good: false,
@@ -293,9 +420,9 @@ function profileSignals(location: Location, queries: AeoQueryResult[]): ProfileS
     title: profile.hoursSet ? "Opening hours" : "Missing opening hours",
     detail: profile.hoursSet
       ? profile.holidayHoursSet
-        ? "Regular and holiday hours are both published, so time-based questions can resolve to you."
-        : "Regular hours are published; holiday hours are not, so date-specific questions can skip you."
-      : "Hours aren't published, so “open now” style questions can't resolve to you.",
+        ? "Regular and holiday hours are both published, so time-based questions have something to read."
+        : "Regular hours are published; holiday hours are not, so date-specific questions have nothing to read."
+      : "Hours aren't published, so “open now” style questions have nothing to read.",
   });
 
   // Profile description.
@@ -305,16 +432,16 @@ function profileSignals(location: Location, queries: AeoQueryResult[]): ProfileS
       ? {
           good: descriptionWords >= 25,
           title: "Profile description",
-          detail: `${descriptionWords} words describing the business. This is the text assistants paraphrase most.`,
+          detail: `${descriptionWords} words describing the business. This is the profile text an assistant has to work from.`,
         }
       : {
           good: false,
           title: "No profile description",
-          detail: "There is no business description on your profile for an assistant to paraphrase.",
+          detail: "There is no business description on your profile for an assistant to read.",
         },
   );
 
-  // Where the answers went instead — straight from the snapshot.
+  // Where the answers went instead — straight from the checked results only.
   const missed = queries.filter((q) => !q.named).length;
   if (queries.length > 0) {
     const tally = new Map<string, number>();
@@ -328,8 +455,8 @@ function profileSignals(location: Location, queries: AeoQueryResult[]): ProfileS
       title: missed === 0 ? "No missed questions" : "Questions going elsewhere",
       detail:
         missed === 0
-          ? `An AI named you in all ${queries.length} questions we tested.`
-          : `You went unnamed in ${missed} of ${queries.length} tested questions${namedInsteadClause(rivals)}.`,
+          ? `An AI named you in all ${queries.length} questions it answered.`
+          : `You went unnamed in ${missed} of ${queries.length} checked questions${namedInsteadClause(rivals)}.`,
     });
   }
 

@@ -49,6 +49,7 @@ import type {
   CreateOrganizationWorkspaceInput,
 } from "@/lib/data/provider";
 import type {
+  CampaignDeliveryState,
   CustomerConsent,
   ReplyTone,
   Channel,
@@ -69,6 +70,11 @@ import { prepareProfileMutation, stableStringify } from "@/lib/google/profile-mu
 import { executeProfileMutation } from "@/lib/google/mutation-runner";
 import { runLints } from "@/lib/compliance/lints";
 import { checkQuietHours } from "@/lib/compliance/quiet-hours";
+import {
+  commitCampaignSend,
+  scheduleCampaign,
+  sendCampaignTest,
+} from "@/lib/campaigns/runner";
 import {
   suggestionToGenerationKind,
   type ContentSuggestionPreview,
@@ -649,17 +655,148 @@ export async function postReplyAction(
 }
 
 // ── Campaigns ───────────────────────────────────────────────
+
+/**
+ * Campaign delivery.
+ *
+ * Every action below returns a truthful outcome rather than throwing on a
+ * refusal, because the honest answers here ("we did not send — email is not
+ * connected", "this would use 480 of your 182 remaining credits") are results
+ * the owner needs to read, not errors to swallow. The one thing none of these
+ * may ever do is report a send that did not happen.
+ */
+export interface CampaignSendActionResult {
+  ok: boolean;
+  campaignId: string;
+  state: CampaignDeliveryState;
+  note: string;
+  missing?: string[];
+  counts: { sent: number; failed: number; skipped: number; held: number };
+  eligible: number;
+}
+
+function revalidateCampaigns(campaignId?: string): void {
+  revalidatePath("/app/campaigns");
+  if (campaignId) revalidatePath(`/app/campaigns/${campaignId}`);
+}
+
 export async function createCampaignAction(input: CreateCampaignInput) {
   const { provider, ws } = await scoped("owner", "manager");
   const c = await provider.createCampaign(ws, input);
-  revalidatePath("/app/campaigns");
+  revalidateCampaigns(c.id);
   return { id: c.id, consented: c.audienceConsented, total: c.audienceTotal };
 }
 
 export async function setCampaignStatusAction(campaignId: string, status: "active" | "paused") {
   const { provider, ws } = await scoped("owner", "manager");
   await provider.setCampaignStatus(ws, campaignId, status);
-  revalidatePath("/app/campaigns");
+  revalidateCampaigns(campaignId);
+}
+
+/** Freeze the audience and deliver now, over Resend/Twilio. */
+export async function sendCampaignAction(campaignId: string): Promise<CampaignSendActionResult> {
+  const { provider, ws } = await scoped("owner", "manager");
+  const result = await commitCampaignSend({
+    provider,
+    workspaceId: ws,
+    campaignId,
+    baseUrl: await appUrl(),
+  });
+  revalidateCampaigns(campaignId);
+  revalidatePath("/app/settings/billing");
+  return {
+    ok: result.ok,
+    campaignId,
+    state: result.state,
+    note: result.note,
+    missing: result.missing,
+    counts: result.counts,
+    eligible: result.eligible,
+  };
+}
+
+/** Save the draft, then immediately attempt delivery in the same round trip. */
+export async function createAndSendCampaignAction(
+  input: CreateCampaignInput,
+): Promise<CampaignSendActionResult> {
+  const { provider, ws } = await scoped("owner", "manager");
+  const campaign = await provider.createCampaign(ws, input);
+  const result = await commitCampaignSend({
+    provider,
+    workspaceId: ws,
+    campaignId: campaign.id,
+    baseUrl: await appUrl(),
+  });
+  revalidateCampaigns(campaign.id);
+  revalidatePath("/app/settings/billing");
+  return {
+    ok: result.ok,
+    campaignId: campaign.id,
+    state: result.state,
+    note: result.note,
+    missing: result.missing,
+    counts: result.counts,
+    eligible: result.eligible,
+  };
+}
+
+export async function scheduleCampaignAction(input: {
+  campaignId: string;
+  scheduledAt: string;
+}): Promise<{ ok: boolean; note: string; eligible: number; scheduledAt?: string }> {
+  const { provider, ws } = await scoped("owner", "manager");
+  const result = await scheduleCampaign({
+    provider,
+    workspaceId: ws,
+    campaignId: input.campaignId,
+    scheduledAt: input.scheduledAt,
+  });
+  revalidateCampaigns(input.campaignId);
+  return result;
+}
+
+/** Save a draft and schedule it in one step, from the composer. */
+export async function createAndScheduleCampaignAction(
+  input: CreateCampaignInput & { scheduledAt: string },
+): Promise<{ ok: boolean; note: string; eligible: number; campaignId?: string; scheduledAt?: string }> {
+  const { provider, ws } = await scoped("owner", "manager");
+  const campaign = await provider.createCampaign(ws, { ...input, scheduledAt: undefined });
+  const result = await scheduleCampaign({
+    provider,
+    workspaceId: ws,
+    campaignId: campaign.id,
+    scheduledAt: input.scheduledAt,
+  });
+  revalidateCampaigns(campaign.id);
+  return { ...result, campaignId: campaign.id };
+}
+
+/**
+ * One copy to the owner. Never counted as a campaign send, never charged to
+ * the SMS allowance, and never delivered to a customer.
+ */
+export async function testSendCampaignAction(input: {
+  name: string;
+  channel: Channel;
+  subject?: string;
+  body: string;
+  destination?: string;
+}): Promise<{ ok: boolean; note: string; missing?: string[] }> {
+  const { provider, ws } = await scoped("owner", "manager");
+  const body = typeof input.body === "string" ? input.body.trim() : "";
+  if (!body) return { ok: false, note: "Write a message before sending a test." };
+  return sendCampaignTest({
+    provider,
+    workspaceId: ws,
+    draft: {
+      name: input.name?.trim() || "Test campaign",
+      channel: input.channel,
+      subject: input.subject?.trim(),
+      body,
+    },
+    destination: input.destination?.trim(),
+    baseUrl: await appUrl(),
+  });
 }
 
 // ── Consent ─────────────────────────────────────────────────

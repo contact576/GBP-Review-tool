@@ -97,6 +97,59 @@ export function genericCampaignEmail(input: {
   };
 }
 
+/**
+ * A marketing campaign message.
+ *
+ * Differs from `genericCampaignEmail` in two ways that matter legally:
+ *  - `unsubscribeUrl` is REQUIRED, not optional. CAN-SPAM §7704(a)(3) and CASL
+ *    both require a working opt-out in every commercial message, so the type
+ *    system refuses to build one without it.
+ *  - the footer names the sender's postal identity and states why the person is
+ *    receiving it, which is the other half of the same requirement.
+ *
+ * The body is escaped: it is owner-authored free text, and unescaped it would
+ * let campaign copy inject markup into every recipient's inbox.
+ */
+export function marketingCampaignEmail(input: {
+  subject: string;
+  body: string;
+  unsubscribeUrl: string;
+  business: string;
+  /** Postal address shown in the footer, when the workspace has one. */
+  postalAddress?: string;
+  brand?: string;
+  /** Renders an unmistakable test banner and never counts as a campaign send. */
+  isTest?: boolean;
+}): { subject: string; html: string; text: string } {
+  const business = escapeHtml(input.business);
+  const banner = input.isTest
+    ? `<div style="background:${PAPER};border:1px dashed ${PRIMARY};border-radius:12px;padding:10px 14px;margin-bottom:16px;font-size:12px;font-weight:700;color:${PRIMARY}">TEST SEND — this went only to you. No customer received it.</div>`
+    : "";
+  const address = input.postalAddress
+    ? `<div style="margin-top:4px">${escapeHtml(input.postalAddress)}</div>`
+    : "";
+  const footer = `<div style="border-top:1px solid ${HAIRLINE};margin-top:20px;padding-top:14px;color:${SUB};font-size:12px;line-height:1.6">
+      You are receiving this because you opted in to marketing from ${business}.
+      <a href="${input.unsubscribeUrl}" style="color:${SUB};font-weight:700">Unsubscribe</a> at any time.
+      ${address}
+    </div>`;
+
+  const bodyHtml = escapeHtml(input.body).replace(/\n/g, "<br/>");
+  const subject = input.isTest ? `[TEST] ${input.subject}` : input.subject;
+
+  return {
+    subject,
+    html: wrap(banner + p(bodyHtml) + footer, { brand: input.brand }),
+    text: `${input.isTest ? "TEST SEND — this went only to you.\n\n" : ""}${input.body}\n\n—\nYou are receiving this because you opted in to marketing from ${input.business}. Unsubscribe: ${input.unsubscribeUrl}${input.postalAddress ? `\n${input.postalAddress}` : ""}`,
+  };
+}
+
+/** Plain-text campaign body for SMS, with the required STOP instruction. */
+export function marketingCampaignSms(input: { body: string; isTest?: boolean }): string {
+  const prefix = input.isTest ? "[TEST] " : "";
+  return `${prefix}${input.body.trim()}\nReply STOP to opt out.`;
+}
+
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => {
     const entities: Record<string, string> = {

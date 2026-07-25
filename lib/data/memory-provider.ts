@@ -5,6 +5,7 @@ import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { canonicalPhone } from "@/lib/sms/phone";
 import { PLANS } from "@/lib/billing/plans";
 import { mergeSuggestionInbox } from "@/lib/suggestions/inbox";
+import { buildAudienceSnapshot } from "@/lib/campaigns/audience";
 import type {
   DataProvider,
   CaptureCustomerInput,
@@ -858,13 +859,15 @@ export const memoryProvider: DataProvider = {
 
   async createCampaign(workspaceId, input: CreateCampaignInput) {
     const data = mustDb(workspaceId);
-    const pool = data.customers.filter((c) =>
-      input.consentBasis === "marketing"
-        ? c.consent.marketingConsent && !c.consent.withdrawnAt
-        : c.consent.serviceConsent,
-    );
-    const total = data.customers.length;
-    const consented = pool.length;
+    // Eligibility is resolved by the same pure function the send path uses, so
+    // the number on the composer is the number that will actually be contacted
+    // — it accounts for channel, suppression and withdrawal, not consent alone.
+    const snapshot = buildAudienceSnapshot({
+      customers: data.customers,
+      suppression: data.suppression,
+      consentBasis: input.consentBasis,
+      channel: input.channel,
+    });
     const campaign: Campaign = {
       id: id("camp"),
       locationId: data.location.id,
@@ -875,16 +878,11 @@ export const memoryProvider: DataProvider = {
       channel: input.channel,
       subject: input.subject,
       body: input.body,
-      status: "draft",
+      status: input.scheduledAt ? "scheduled" : "draft",
       scheduledAt: input.scheduledAt,
-      audienceTotal: total,
-      audienceConsented: consented,
-      excluded: [
-        {
-          reason: input.consentBasis === "marketing" ? "Not opted in to marketing" : "No service consent",
-          count: total - consented,
-        },
-      ],
+      audienceTotal: snapshot.total,
+      audienceConsented: snapshot.eligible,
+      excluded: snapshot.excluded,
       stats: { sent: 0, opened: 0, clicked: 0 },
       createdAt: nowIso(),
     };
@@ -896,6 +894,43 @@ export const memoryProvider: DataProvider = {
     const data = mustDb(workspaceId);
     const campaign = data.campaigns.find((c) => c.id === campaignId);
     if (campaign) campaign.status = status;
+  },
+
+  async getCampaign(workspaceId, campaignId) {
+    const data = db(workspaceId);
+    return data?.campaigns.find((c) => c.id === campaignId) ?? null;
+  },
+
+  async recordCampaignDelivery(workspaceId, campaignId, patch) {
+    const data = mustDb(workspaceId);
+    const campaign = data.campaigns.find((c) => c.id === campaignId);
+    if (!campaign) return null;
+
+    if (patch.status !== undefined) campaign.status = patch.status;
+    if (patch.scheduledAt !== undefined) {
+      campaign.scheduledAt = patch.scheduledAt ?? undefined;
+    }
+    if (patch.stats) campaign.stats = { ...campaign.stats, ...patch.stats };
+    if (patch.delivery) campaign.delivery = patch.delivery;
+    if (patch.audienceTotal !== undefined) campaign.audienceTotal = patch.audienceTotal;
+    if (patch.audienceConsented !== undefined) campaign.audienceConsented = patch.audienceConsented;
+    if (patch.excluded !== undefined) campaign.excluded = patch.excluded;
+    if (patch.consumeSmsCredits) {
+      data.subscription.usage.smsCreditsUsed += patch.consumeSmsCredits;
+    }
+    return campaign;
+  },
+
+  async listDueCampaigns(nowIso, limit = 50) {
+    const due: { workspaceId: string; campaign: Campaign }[] = [];
+    for (const data of allWorkspaces()) {
+      for (const campaign of data.campaigns) {
+        if (campaign.status !== "scheduled" || !campaign.scheduledAt) continue;
+        if (campaign.scheduledAt > nowIso) continue;
+        due.push({ workspaceId: data.workspace.id, campaign });
+      }
+    }
+    return due.sort((a, b) => (a.campaign.scheduledAt ?? "").localeCompare(b.campaign.scheduledAt ?? "")).slice(0, limit);
   },
 
   async updateConsent(workspaceId, customerId, consent) {

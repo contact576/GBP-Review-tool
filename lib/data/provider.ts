@@ -8,6 +8,8 @@ import type {
   ReviewDraft,
   GbpTask,
   Campaign,
+  CampaignDelivery,
+  CampaignStats,
   Channel,
   ReplyTone,
   DraftVariant,
@@ -157,6 +159,33 @@ export interface CreateCampaignInput {
   subject?: string;
   body: string;
   scheduledAt?: string;
+}
+
+/**
+ * One write of everything a delivery attempt produced.
+ *
+ * It is a single call rather than several because the outcome counters, the
+ * frozen audience and the SMS credits consumed all describe the same event —
+ * splitting them would let a crash leave a campaign that says it sent 40
+ * messages while the plan shows zero credits spent.
+ */
+export interface CampaignDeliveryPatch {
+  status?: Campaign["status"];
+  /** `null` clears a schedule (used when a scheduled send is drained). */
+  scheduledAt?: string | null;
+  stats?: Partial<CampaignStats>;
+  delivery?: CampaignDelivery;
+  audienceTotal?: number;
+  audienceConsented?: number;
+  excluded?: Campaign["excluded"];
+  /** SMS credits actually consumed, added to `subscription.usage`. */
+  consumeSmsCredits?: number;
+}
+
+/** A scheduled campaign whose time has come, with the tenant it belongs to. */
+export interface DueCampaign {
+  workspaceId: string;
+  campaign: Campaign;
 }
 
 export interface SubmitPrivateFeedbackInput {
@@ -375,6 +404,23 @@ export interface DataProvider {
     campaignId: string,
     status: "active" | "paused",
   ): Promise<void>;
+  /** One campaign by id, scoped to its workspace. */
+  getCampaign(workspaceId: string, campaignId: string): Promise<Campaign | null>;
+  /**
+   * Commit a delivery attempt: status, counters, frozen audience and credit
+   * consumption in one write. Returns the updated campaign, or null if it is
+   * gone.
+   */
+  recordCampaignDelivery(
+    workspaceId: string,
+    campaignId: string,
+    patch: CampaignDeliveryPatch,
+  ): Promise<Campaign | null>;
+  /**
+   * Scheduled campaigns due at or before `nowIso`, across every tenant. Used
+   * only by the cron drain, which has no session to scope by.
+   */
+  listDueCampaigns(nowIso: string, limit?: number): Promise<DueCampaign[]>;
   updateConsent(
     workspaceId: string,
     id: CustomerId,
