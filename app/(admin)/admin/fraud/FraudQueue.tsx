@@ -1,13 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { Button } from "@/components/ds/Button";
 import { Badge } from "@/components/ds/misc";
 import { Table, type Column } from "@/components/ds/Table";
-import { useToast } from "@/components/ds/Toast";
 import { formatRelative } from "@/lib/utils/format";
 import type { FraudFlag } from "@/lib/data/types";
 import { SeverityBadge } from "../../_components/Severity";
+import { HonestNote } from "../../_components/telemetry";
 
 const KIND_LABEL: Record<FraudFlag["kind"], string> = {
   same_device: "Same device",
@@ -15,15 +13,15 @@ const KIND_LABEL: Record<FraudFlag["kind"], string> = {
   velocity_anomaly: "Velocity anomaly",
 };
 
+/**
+ * Read-only queue.
+ *
+ * The old "Review" button only set local state and fired a success toast — it
+ * marked flags as actioned without actioning anything, and the state vanished
+ * on reload. The affordance is gone rather than faked: triage is not wired, so
+ * the column says exactly that and nothing here mutates tenant data.
+ */
 export function FraudQueue({ flags }: { flags: FraudFlag[] }) {
-  const { toast } = useToast();
-  const [reviewed, setReviewed] = useState<Record<string, boolean>>({});
-
-  function act(f: FraudFlag) {
-    setReviewed((r) => ({ ...r, [f.id]: true }));
-    toast(`${KIND_LABEL[f.kind]} flag on ${f.tenant} actioned`, "success", "check-circle");
-  }
-
   const columns: Column<FraudFlag>[] = [
     {
       key: "tenant",
@@ -51,29 +49,34 @@ export function FraudQueue({ flags }: { flags: FraudFlag[] }) {
       render: (f) => <span className="text-[13px] tabular-nums text-sub">{formatRelative(f.at)}</span>,
     },
     {
-      key: "action",
-      header: "",
+      key: "triage",
+      header: "Triage",
       align: "right",
-      render: (f) =>
-        reviewed[f.id] ? (
-          <Badge tone="primary" icon="check-circle">Actioned</Badge>
-        ) : (
-          <Button variant="secondary" size="sm" icon="shield" onClick={() => act(f)}>
-            Review
-          </Button>
-        ),
+      render: () => (
+        <span title="Triage actions are not wired in this deployment." className="inline-block">
+          <Badge tone="sub" icon="lock">Not wired</Badge>
+        </span>
+      ),
     },
   ];
 
   return (
-    <Table
-      columns={columns}
-      data={flags}
-      rowKey={(f) => f.id}
-      caption="Fraud queue — suspicious capture signals"
-      emptyIcon="shield"
-      emptyTitle="Queue clear"
-      emptyDescription="No suspicious capture signals are awaiting triage."
-    />
+    <div className="space-y-3">
+      <Table
+        columns={columns}
+        data={flags}
+        rowKey={(f) => f.id}
+        caption="Fraud queue — suspicious capture signals (read-only)"
+        emptyIcon="shield"
+        emptyTitle="No flags in this queue"
+        emptyDescription="No suspicious capture signals are recorded for the accounts this console can see."
+      />
+
+      <HonestNote>
+        Triage is not wired: there is no action on this screen that resolves, dismisses, or escalates a flag, and nothing
+        here changes tenant data. Flags must be actioned in the source system until the triage writer and its audit-log
+        entry exist.
+      </HonestNote>
+    </div>
   );
 }

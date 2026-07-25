@@ -1,4 +1,5 @@
 import { getData } from "@/lib/data";
+import type { AeoQueryResult, Location } from "@/lib/data/types";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge, EmptyState } from "@/components/ds/misc";
 import { PageHeader } from "@/components/app/PageHeader";
@@ -24,7 +25,9 @@ export default async function VisibilityPage() {
   const named = aeo?.namedFraction.named ?? 0;
   const total = aeo?.namedFraction.total ?? 0;
   const namedPct = total > 0 ? Math.round((named / total) * 100) : 0;
-  const detected = aeo ? formatDate(aeo.date) : formatDate(new Date().toISOString());
+  /** A snapshot exists only when a check has actually tested questions. */
+  const hasSnapshot = total > 0 || queries.length > 0;
+  const detected = aeo ? formatDate(aeo.date) : null;
 
   // Positioning breakdown across the questions we actually detail below —
   // a genuine ≥3-slice part-of-whole (a 2-slice named/not donut is chartjunk,
@@ -39,14 +42,17 @@ export default async function VisibilityPage() {
     { label: "Not named", value: notNamed, color: NEUTRAL_SEG },
   ].filter((s) => s.value > 0);
 
+  const signals = profileSignals(data.location, queries);
+
   // Free teaser — the headline snapshot stays visible on every plan.
-  const summary = (
+  const summary = hasSnapshot ? (
     <Card raised>
       <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="kicker mb-1">This snapshot</div>
           <div className="text-[20px] font-extrabold text-ink">
-            Named in {named} of {total} questions
+            Named in <span className="tabular-nums">{named}</span> of{" "}
+            <span className="tabular-nums">{total}</span> questions
           </div>
           <p className="mt-1 max-w-md text-[14px] text-sub">
             You appear in AI answers for {namedPct}% of the buying questions we tested nearby.
@@ -66,10 +72,26 @@ export default async function VisibilityPage() {
         />
       </div>
     </Card>
+  ) : (
+    <Card raised>
+      <EmptyState
+        icon="sparkles"
+        title="No AI Visibility check has run yet"
+        description="Your answer share appears here once we test the buying questions people ask AI assistants near you. We never estimate a score in the meantime."
+      />
+    </Card>
   );
 
   // The full report — per-query breakdown + what drives being named. Pro-gated.
-  const details = (
+  const details = !hasSnapshot ? (
+    <Card>
+      <EmptyState
+        icon="chat"
+        title="Your full report appears after the first check"
+        description="Every question we test, whether an AI named you, which competitors it named instead, and the profile signals behind the answer — all from a real detected snapshot, nothing invented."
+      />
+    </Card>
+  ) : (
     <div className="space-y-5">
       {/* Positioning breakdown */}
       {queries.length > 0 ? (
@@ -144,31 +166,46 @@ export default async function VisibilityPage() {
                 {!q.named ? <div className="ml-auto"><GapToTask query={q.query} /></div> : null}
               </div>
 
-              <p className="mt-2 flex items-center gap-1 text-[11px] text-faint">
-                <Icon name="clock" size={12} /> Detected {detected}
-              </p>
+              {detected ? (
+                <p className="mt-2 flex items-center gap-1 text-[11px] text-faint">
+                  <Icon name="clock" size={12} /> Detected {detected}
+                </p>
+              ) : null}
             </Card>
           ))
         )}
       </div>
 
-      {/* Factor panel */}
-      <Card>
-        <CardHeader kicker="Signals" title="What drives whether you're named" />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <FactorRow good title="Strong, recent reviews" detail="4.7★ with fresh reviews makes you a safe recommendation." />
-          <FactorRow good title="Clear service descriptions" detail="Direct billing and dry needling are well described — you win those." />
-          <FactorRow title="Missing service depth" detail="Concussion / vestibular rehab isn't detailed, so AI names others there." />
-          <FactorRow title="Incomplete hours" detail="Saturday hours aren't listed, so 'open Saturday' questions skip you." />
-        </div>
-      </Card>
+      {/* Signal panel — every row is read from this workspace's own profile
+          and snapshot data; nothing here is written per-vertical. */}
+      {signals.length > 0 ? (
+        <Card>
+          <CardHeader kicker="Signals" title="What drives whether you're named" />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {signals.map((signal) => (
+              <FactorRow
+                key={signal.title}
+                good={signal.good}
+                title={signal.title}
+                detail={signal.detail}
+              />
+            ))}
+          </div>
+          <p className="mt-3 border-t border-hairline pt-3 text-[12px] text-faint">
+            Read from your Google profile and this snapshot — an assistant&apos;s ranking formula is
+            not published, so these are the signals we can actually see, not a guaranteed cause.
+          </p>
+        </Card>
+      ) : null}
 
-      <div className="flex items-start gap-2 rounded-card border border-gold/40 bg-gold-tint/50 p-3">
-        <Icon name="alert" size={16} className="mt-0.5 shrink-0 text-gold-deep" />
-        <p className="text-[12px] text-gold-deep">
-          AI answers change often — this is a detected snapshot from {detected}, not a live guarantee.
-        </p>
-      </div>
+      {detected ? (
+        <div className="flex items-start gap-2 rounded-card border border-gold/40 bg-gold-tint/50 p-3">
+          <Icon name="alert" size={16} className="mt-0.5 shrink-0 text-gold-deep" />
+          <p className="text-[12px] text-gold-deep">
+            AI answers change often — this is a detected snapshot from {detected}, not a live guarantee.
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 
@@ -181,7 +218,7 @@ export default async function VisibilityPage() {
             <Badge tone="gold" icon="sparkles">Pro</Badge>
           </span>
         }
-        sub="Whether AI assistants name your clinic when people ask — answer-engine optimization (AEO)."
+        sub={`Whether AI assistants name ${data.location.name || "your business"} when people ask — answer-engine optimization (AEO).`}
       />
 
       {summary}
@@ -195,6 +232,117 @@ export default async function VisibilityPage() {
       )}
     </div>
   );
+}
+
+interface ProfileSignal {
+  title: string;
+  detail: string;
+  good: boolean;
+}
+
+/**
+ * The signal rows, derived entirely from this workspace's own Google profile
+ * state and its detected AEO snapshot. No vertical-specific copy: every string
+ * is assembled from numbers the workspace actually has.
+ */
+function profileSignals(location: Location, queries: AeoQueryResult[]): ProfileSignal[] {
+  const profile = location.profile;
+  const signals: ProfileSignal[] = [];
+
+  // Reviews — assistants quote rating and volume.
+  signals.push(
+    location.reviewCount > 0
+      ? {
+          good: location.rating >= 4.5,
+          title: "Review strength",
+          detail: `${location.rating.toFixed(1)}★ across ${location.reviewCount} Google reviews — the rating and volume an assistant can quote back.`,
+        }
+      : {
+          good: false,
+          title: "No reviews detected",
+          detail: "Assistants lean on rating and review volume; none have been detected for your profile yet.",
+        },
+  );
+
+  // Review replies.
+  const replyPct = Math.round(profile.responseRate * 100);
+  signals.push({
+    good: profile.responseRate >= 0.8,
+    title: "Review replies",
+    detail: `You reply to ${replyPct}% of reviews. Replies add fresh, ownable text about what you do.`,
+  });
+
+  // Service descriptions.
+  signals.push(
+    profile.servicesTotal > 0
+      ? {
+          good: profile.servicesWithDescriptions >= profile.servicesTotal,
+          title: "Service descriptions",
+          detail: `${profile.servicesWithDescriptions} of ${profile.servicesTotal} listed services carry a description. Undescribed services are hard for an assistant to match to a question.`,
+        }
+      : {
+          good: false,
+          title: "No services listed",
+          detail: "Your profile lists no services yet, so question-level matches have nothing to attach to.",
+        },
+  );
+
+  // Hours.
+  signals.push({
+    good: profile.hoursSet && profile.holidayHoursSet,
+    title: profile.hoursSet ? "Opening hours" : "Missing opening hours",
+    detail: profile.hoursSet
+      ? profile.holidayHoursSet
+        ? "Regular and holiday hours are both published, so time-based questions can resolve to you."
+        : "Regular hours are published; holiday hours are not, so date-specific questions can skip you."
+      : "Hours aren't published, so “open now” style questions can't resolve to you.",
+  });
+
+  // Profile description.
+  const descriptionWords = profile.description.trim().split(/\s+/).filter(Boolean).length;
+  signals.push(
+    descriptionWords > 0
+      ? {
+          good: descriptionWords >= 25,
+          title: "Profile description",
+          detail: `${descriptionWords} words describing the business. This is the text assistants paraphrase most.`,
+        }
+      : {
+          good: false,
+          title: "No profile description",
+          detail: "There is no business description on your profile for an assistant to paraphrase.",
+        },
+  );
+
+  // Where the answers went instead — straight from the snapshot.
+  const missed = queries.filter((q) => !q.named).length;
+  if (queries.length > 0) {
+    const tally = new Map<string, number>();
+    for (const q of queries) {
+      if (q.named) continue;
+      for (const name of q.competitorsNamed) tally.set(name, (tally.get(name) ?? 0) + 1);
+    }
+    const rivals = [...tally.entries()].sort((a, b) => b[1] - a[1]).map(([name]) => name);
+    signals.push({
+      good: missed === 0,
+      title: missed === 0 ? "No missed questions" : "Questions going elsewhere",
+      detail:
+        missed === 0
+          ? `An AI named you in all ${queries.length} questions we tested.`
+          : `You went unnamed in ${missed} of ${queries.length} tested questions${namedInsteadClause(rivals)}.`,
+    });
+  }
+
+  return signals;
+}
+
+/** " , where A and B were named instead" — built from detected names only. */
+function namedInsteadClause(rivals: string[]): string {
+  const [first, second] = rivals;
+  if (first === undefined) return "";
+  if (second === undefined) return `, where ${first} was named instead`;
+  if (rivals.length === 2) return `, where ${first} and ${second} were named instead`;
+  return `, where ${first}, ${second} and ${rivals.length - 2} others were named instead`;
 }
 
 function FactorRow({ title, detail, good }: { title: string; detail: string; good?: boolean }) {

@@ -188,6 +188,10 @@ export function emptyFoundlyData(input: NewWorkspaceInput): FoundlyData {
         contrastValid: true,
       },
     },
+    // PLACEHOLDERS — NOT TELEMETRY. See `hasNoPlatformTelemetry` below.
+    // Nothing in this deployment aggregates platform-wide numbers: this blob is
+    // written once, at workspace creation, and never recomputed. The zeros are
+    // "we have not measured", not "we measured and it is zero".
     platform: {
       tenants: [],
       deliveryIncidents: [],
@@ -204,6 +208,32 @@ export function emptyFoundlyData(input: NewWorkspaceInput): FoundlyData {
       },
     },
   };
+}
+
+/**
+ * True when a workspace's `platform` blob carries no measurement at all — an
+ * empty roster AND every KPI at zero.
+ *
+ * This is the single source of truth for the admin console's third state.
+ * Because no aggregation job ever writes this blob for a real deployment, an
+ * all-empty/all-zero blob is indistinguishable from "monitoring was never
+ * connected". Rendering it as a zero (or as a green severity chip) would claim
+ * a healthy platform we cannot actually observe, so every admin panel must
+ * route this through an explicit "Not measured" state instead.
+ *
+ * Forward-compatible: the moment any real aggregate lands — one tenant, one
+ * incident, one non-zero KPI — this returns false and the console shows the
+ * measured values, including honest zeros for the sub-signals that are
+ * genuinely clear.
+ */
+export function hasNoPlatformTelemetry(platform: FoundlyData["platform"]): boolean {
+  const rosterEmpty =
+    platform.tenants.length === 0 &&
+    platform.deliveryIncidents.length === 0 &&
+    platform.fraudFlags.length === 0 &&
+    platform.durability.length === 0;
+  const kpisZeroed = Object.values(platform.kpis).every((n) => n === 0);
+  return rosterEmpty && kpisZeroed;
 }
 
 function initialsOf(name: string): string {

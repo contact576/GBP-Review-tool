@@ -169,14 +169,84 @@ export function runLints(text: string, ctx: LintContext): LintResult {
   return { ok: flags.length === 0, flags };
 }
 
+// ── Business-name protection (hard block, never a warning) ──
+
+/**
+ * The one message shown whenever an automated change tries to touch the
+ * Google business name. Plain language, and it says what to do instead.
+ */
+export const NAME_EDIT_BLOCKED_MESSAGE =
+  "The Google business name is never changed automatically. Google requires the name to match the real-world name on your signage, and adding keywords to it can get the profile suspended. If the name on Google is wrong, please correct it yourself in Google Business Profile.";
+
+/** Compare field identifiers without punctuation or casing noise. */
+function normalizeFieldKey(field: string): string {
+  return field.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Every identifier that resolves to the Google business name (`location.title`).
+ * Targets, field names and update-mask paths are all checked against this.
+ */
+const NAME_FIELD_IDENTIFIERS = new Set([
+  "name",
+  "businessname",
+  "businesstitle",
+  "title",
+  "locationtitle",
+  "profiletitle",
+  "displaytitle",
+]);
+
+/**
+ * Payload keys that would write the name. Deliberately narrower than
+ * `NAME_FIELD_IDENTIFIERS`: Google uses a bare `name` key as the resource id on
+ * categories and attributes, so only title-shaped keys count here.
+ */
+const NAME_PAYLOAD_KEYS = new Set([
+  "title",
+  "businesstitle",
+  "businessname",
+  "locationtitle",
+  "profiletitle",
+]);
+
+/** True when this field/target/update-mask path resolves to the business name. */
+export function isNameField(field: string): boolean {
+  const segments = field.split(/[./]/).filter(Boolean);
+  const candidates = [field, ...segments].map(normalizeFieldKey);
+  return candidates.some((candidate) => NAME_FIELD_IDENTIFIERS.has(candidate));
+}
+
 /**
  * The business NAME field can never be a Co-Pilot edit target.
  * Callers that build GBP task payloads must assert this.
  */
 export function assertNotNameField(field: string): void {
-  if (field.toLowerCase() === "name" || field.toLowerCase() === "business_name") {
-    throw new Error(
-      "GBP name field is never editable — keyword-stuffing the name risks profile suspension.",
-    );
+  if (isNameField(field)) {
+    throw new Error(NAME_EDIT_BLOCKED_MESSAGE);
+  }
+}
+
+/**
+ * Backstop for the same rule at the payload level: a name change smuggled
+ * inside another target's body (nested or not) is rejected the same way.
+ */
+export function assertPayloadWritesNoNameField(payload: unknown): void {
+  walkForNameWrite(payload, new Set<object>());
+}
+
+function walkForNameWrite(value: unknown, seen: Set<object>): void {
+  if (!value || typeof value !== "object") return;
+  if (seen.has(value)) return;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (const entry of value) walkForNameWrite(entry, seen);
+    return;
+  }
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (NAME_PAYLOAD_KEYS.has(normalizeFieldKey(key))) {
+      throw new Error(NAME_EDIT_BLOCKED_MESSAGE);
+    }
+    walkForNameWrite(entry, seen);
   }
 }

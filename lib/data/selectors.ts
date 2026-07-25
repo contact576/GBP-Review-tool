@@ -132,24 +132,64 @@ export function sparklinePoints(metrics: MetricSnapshot[], key: keyof MetricSnap
   return metrics.slice(-n).map((m) => m[key] as number);
 }
 
-/** Compute a public Local Growth Score from public-ish signals (free tool). */
+/**
+ * Sub-score weights. Each sums to 1 when every signal is present; when a signal
+ * is genuinely unknowable the remaining weights are renormalised (see below).
+ */
+const REVIEW_WEIGHTS = { rating: 0.4, count: 0.3, recency: 0.3 } as const;
+const PROFILE_WEIGHTS = { photos: 0.3, responseRate: 0.3, completeness: 0.4 } as const;
+
+/**
+ * Compute a public Local Growth Score from real signals.
+ *
+ * Every input must be MEASURED — this function is the last stop before a number
+ * reaches a user, and it must never be fed an estimate.
+ *
+ * Two inputs are OPTIONAL because they are not always knowable:
+ *
+ *  · `responseRate` — whether an owner replied is never exposed by Google's
+ *    public APIs. Business Profile sync has it; the public free-score tool
+ *    does not.
+ *  · `daysSinceLastReview` — derivable only when Google returns at least one
+ *    timestamped review. (A business with zero reviews is a KNOWN fact, not an
+ *    unknown one: callers pass a large number for it.)
+ *
+ * When either is omitted its sub-score is renormalised across the signals that
+ * remain, preserving their relative weights (e.g. photos 0.3/0.7 and
+ * completeness 0.4/0.7) rather than scoring a missing signal as zero — which
+ * would fabricate a penalty the business never earned.
+ */
 export function computePublicScore(input: {
   rating: number;
   reviewCount: number;
-  daysSinceLastReview: number;
+  /** Days since the newest known review. Omit when no timestamp is knowable. */
+  daysSinceLastReview?: number;
   photoCount: number;
-  responseRate: number;
+  /** Share of reviews the owner replied to (0..1). Omit when not knowable. */
+  responseRate?: number;
   profileCompleteness: number;
 }): { growth: number; reviews: number; profile: number } {
   const ratingScore = Math.min(100, (input.rating / 5) * 100);
   const countScore = Math.min(100, (input.reviewCount / 60) * 100);
-  const recencyScore = Math.max(0, 100 - input.daysSinceLastReview * 2);
-  const reviews = Math.round(ratingScore * 0.4 + countScore * 0.3 + recencyScore * 0.3);
-  const profile = Math.round(
-    Math.min(100, (input.photoCount / 20) * 100) * 0.3 +
-      input.responseRate * 100 * 0.3 +
-      input.profileCompleteness * 0.4,
+  const weightedReviews =
+    ratingScore * REVIEW_WEIGHTS.rating + countScore * REVIEW_WEIGHTS.count;
+  const reviews = Math.round(
+    input.daysSinceLastReview === undefined
+      ? weightedReviews / (REVIEW_WEIGHTS.rating + REVIEW_WEIGHTS.count)
+      : weightedReviews +
+          Math.max(0, 100 - input.daysSinceLastReview * 2) * REVIEW_WEIGHTS.recency,
   );
+
+  const photoScore = Math.min(100, (input.photoCount / 20) * 100);
+  const completenessScore = Math.min(100, Math.max(0, input.profileCompleteness));
+  const weighted =
+    photoScore * PROFILE_WEIGHTS.photos + completenessScore * PROFILE_WEIGHTS.completeness;
+  const profile = Math.round(
+    input.responseRate === undefined
+      ? weighted / (PROFILE_WEIGHTS.photos + PROFILE_WEIGHTS.completeness)
+      : weighted + input.responseRate * 100 * PROFILE_WEIGHTS.responseRate,
+  );
+
   const growth = Math.round(reviews * 0.6 + profile * 0.4);
   return { growth, reviews, profile };
 }

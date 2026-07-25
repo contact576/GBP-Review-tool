@@ -204,7 +204,7 @@ export default function HomePage() {
       <CtaBand
         eyebrow="Free · 30 seconds"
         title="See your Growth Score in 30 seconds"
-        lede="No signup, no card. Enter your business and watch Foundly scan your profile, count your reviews, and draft a real sample review on the spot."
+        lede="No signup, no card. Enter your business and watch Foundly read your public Google profile, count your reviews, and compare you to nearby businesses on the spot."
         actions={
           <>
             <LinkButton href="/score" size="lg" icon="sparkles">Get my free Growth Score</LinkButton>

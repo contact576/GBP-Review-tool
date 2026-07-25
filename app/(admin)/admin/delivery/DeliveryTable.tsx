@@ -51,7 +51,7 @@ export function DeliveryTable({ incidents }: { incidents: DeliveryIncident[] }) 
       caption="Delivery failure incidents"
       emptyIcon="check-circle"
       emptyTitle="No active incidents"
-      emptyDescription="Email and SMS are delivering cleanly across every tenant right now."
+      emptyDescription="Delivery monitoring is reporting, and no email or SMS incident is open across the tenants it covers."
     />
   );
 }
