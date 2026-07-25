@@ -28,6 +28,7 @@ import type {
   Integration,
   Subscription,
   RankGridScan,
+  AeoSnapshot,
   AgencyClient,
   ProfileSuggestion,
   ProfileMutationJob,
@@ -446,6 +447,8 @@ export interface DataProvider {
   ): Promise<void>;
   updateLocationGoogle(workspaceId: string, patch: GoogleLocationPatch): Promise<void>;
   saveRankGridScan(workspaceId: string, scan: RankGridScan): Promise<void>;
+  /** Persist the latest AI-visibility (AEO) run for the workspace. */
+  saveAeoSnapshot(workspaceId: string, snapshot: AeoSnapshot): Promise<void>;
   markAgencyReportsSent(workspaceId: string, locationIds: string[], sentAt: string): Promise<void>;
   updateWhiteLabel(workspaceId: string, config: WhiteLabelConfig): Promise<void>;
 

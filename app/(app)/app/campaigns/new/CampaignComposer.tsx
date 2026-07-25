@@ -8,11 +8,24 @@ import { Chip, Badge } from "@/components/ds/misc";
 import { Field, Input, Textarea } from "@/components/ds/form";
 import { useToast } from "@/components/ds/Toast";
 import { Icon } from "@/components/icons";
-import { filterAudience } from "@/lib/compliance/consent";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
 import { formatNumber } from "@/lib/utils/format";
-import { createCampaignAction } from "@/lib/actions";
-import type { Customer, CampaignType, Channel } from "@/lib/data/types";
+import { buildAudienceSnapshot } from "@/lib/campaigns/audience";
+import { estimateCampaignCredits } from "@/lib/campaigns/credits";
+import { checkCampaignContent } from "@/lib/campaigns/content";
+import {
+  createAndScheduleCampaignAction,
+  createAndSendCampaignAction,
+  createCampaignAction,
+  testSendCampaignAction,
+} from "@/lib/actions";
+import type {
+  CampaignType,
+  Channel,
+  Customer,
+  Subscription,
+  SuppressionEntry,
+} from "@/lib/data/types";
 
 const TYPES: { key: CampaignType; label: string; icon: "gift" | "refresh" | "clock" | "sparkles"; defaultName: string }[] = [
   { key: "promo", label: "Promo", icon: "gift", defaultName: "Seasonal promo" },
@@ -21,18 +34,36 @@ const TYPES: { key: CampaignType; label: string; icon: "gift" | "refresh" | "clo
   { key: "festival", label: "Festival", icon: "sparkles", defaultName: "Holiday hello" },
 ];
 
+/** `datetime-local` wants a local wall-clock string with no zone suffix. */
+function toLocalInputValue(date: Date): string {
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
 export function CampaignComposer({
   customers,
+  suppression,
+  usage,
   business,
   locationId,
+  ownerEmail,
+  emailReady,
+  smsReady,
 }: {
   customers: Customer[];
+  suppression: SuppressionEntry[];
+  usage: Subscription["usage"];
   business: string;
   locationId: string;
+  ownerEmail: string;
+  /** Resolved server-side from the provider keys — never guessed in the client. */
+  emailReady: boolean;
+  smsReady: boolean;
 }) {
   const { toast } = useToast();
   const router = useRouter();
   const [pending, start] = useTransition();
+  const [testing, setTesting] = useState(false);
 
   const [type, setType] = useState<CampaignType>("promo");
   const [name, setName] = useState("Seasonal promo");
@@ -42,12 +73,33 @@ export function CampaignComposer({
   const [body, setBody] = useState("");
   const [drafting, setDrafting] = useState(false);
   const [showExcluded, setShowExcluded] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
+  const [sendAt, setSendAt] = useState(() => toLocalInputValue(new Date(Date.now() + 86_400_000)));
+  const [testTo, setTestTo] = useState(ownerEmail);
 
-  // LAW-CRITICAL: recompute the eligible marketing audience live.
-  const audience = useMemo(() => filterAudience(customers, "marketing"), [customers]);
-  const consented = audience.eligible.length;
-  const total = customers.length;
-  const canSend = consented > 0 && body.trim().length > 0;
+  // LAW-CRITICAL: resolved by the same function the send path uses, so this
+  // count is who will actually be contacted — consent, withdrawal, suppression
+  // and channel reachability all included, not consent alone.
+  const snapshot = useMemo(
+    () => buildAudienceSnapshot({ customers, suppression, consentBasis: "marketing", channel }),
+    [customers, suppression, channel],
+  );
+  const consented = snapshot.eligible;
+  const total = snapshot.total;
+
+  const estimate = useMemo(
+    () => estimateCampaignCredits({ channel, recipients: consented, body, usage }),
+    [channel, consented, body, usage],
+  );
+
+  const lint = useMemo(
+    () => checkCampaignContent({ subject, body, businessName: business }),
+    [subject, body, business],
+  );
+
+  const channelReady = channel === "email" ? emailReady : smsReady;
+  const hasBody = body.trim().length > 0;
+  const canSend = consented > 0 && hasBody && lint.ok && estimate.withinAllowance && channelReady;
 
   function pickType(t: CampaignType) {
     setType(t);
@@ -73,20 +125,78 @@ export function CampaignComposer({
     }
   }
 
-  function send() {
-    if (!canSend) return;
-    start(async () => {
-      const result = await createCampaignAction({
-        locationId,
+  function draftInput() {
+    return {
+      locationId,
+      name: name.trim() || "Untitled campaign",
+      type,
+      consentBasis: "marketing" as const,
+      channel,
+      subject: channel === "email" ? subject.trim() || undefined : undefined,
+      body: body.trim(),
+    };
+  }
+
+  async function sendTest() {
+    if (!hasBody) return;
+    setTesting(true);
+    try {
+      const result = await testSendCampaignAction({
         name: name.trim() || "Untitled campaign",
-        type,
-        consentBasis: "marketing",
         channel,
         subject: channel === "email" ? subject.trim() || undefined : undefined,
         body: body.trim(),
+        destination: testTo.trim() || undefined,
       });
-      toast(`Draft saved for ${formatNumber(result.consented)} opted-in customers — nothing was sent`, "success", "check-circle");
+      toast(result.note, result.ok ? "success" : "warning", result.ok ? "check-circle" : "alert");
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  function saveDraft() {
+    start(async () => {
+      const result = await createCampaignAction(draftInput());
+      toast(
+        `Draft saved for ${formatNumber(result.consented)} opted-in customers — nothing was sent`,
+        "info",
+        "file",
+      );
       router.push("/app/campaigns");
+    });
+  }
+
+  function sendNow() {
+    if (!canSend) return;
+    start(async () => {
+      const result = await createAndSendCampaignAction(draftInput());
+      // The action reports what actually happened. A refusal shows as a
+      // refusal — there is no success toast for a send that did not send.
+      toast(result.note, result.ok ? "success" : "warning", result.ok ? "send" : "alert");
+      router.push(`/app/campaigns/${result.campaignId}`);
+    });
+  }
+
+  function schedule() {
+    if (!canSend) return;
+    const when = new Date(sendAt);
+    if (Number.isNaN(when.getTime())) {
+      toast("Pick a valid date and time", "warning", "alert");
+      return;
+    }
+    start(async () => {
+      const result = await createAndScheduleCampaignAction({
+        ...draftInput(),
+        scheduledAt: when.toISOString(),
+      });
+      toast(
+        result.ok
+          ? `Scheduled for ${formatNumber(result.eligible)} customers — the audience is locked in now`
+          : result.note,
+        result.ok ? "success" : "warning",
+        result.ok ? "clock" : "alert",
+      );
+      if (result.ok && result.campaignId) router.push(`/app/campaigns/${result.campaignId}`);
     });
   }
 
@@ -126,12 +236,14 @@ export function CampaignComposer({
           <div className="min-w-0 flex-1">
             <Badge tone="primary" icon="shield">Marketing consent required</Badge>
             <p className="mt-1.5 text-[14px] text-sub">
-              We only include customers with explicit marketing consent. This count updates before every send.
+              Only customers with explicit marketing consent, a usable{" "}
+              {channel === "email" ? "email address" : "mobile number"} and no opt-out on record. This
+              list is frozen the moment you send.
             </p>
           </div>
         </div>
         <div className="mt-3 min-w-0">
-            {audience.excluded.length ? (
+            {snapshot.excluded.length ? (
               <button
                 type="button"
                 onClick={() => setShowExcluded((v) => !v)}
@@ -143,10 +255,10 @@ export function CampaignComposer({
             ) : null}
             {showExcluded ? (
               <ul className="mt-2 space-y-1">
-                {audience.excluded.map((e) => (
+                {snapshot.excluded.map((e) => (
                   <li key={e.reason} className="flex items-center justify-between rounded-btn bg-card px-3 py-1.5 text-[12px]">
                     <span className="text-sub">{e.reason}</span>
-                    <span className="data-chip text-ink">{e.count}</span>
+                    <span className="data-chip tabular-nums text-ink">{formatNumber(e.count)}</span>
                   </li>
                 ))}
               </ul>
@@ -170,10 +282,18 @@ export function CampaignComposer({
             <Chip selected={channel === "email"} onClick={() => setChannel("email")} icon="mail">
               Email
             </Chip>
-            <Chip disabled icon="message">
-              SMS · pending A2P
+            <Chip selected={channel === "sms"} onClick={() => setChannel("sms")} icon="message">
+              SMS
             </Chip>
           </div>
+          {!channelReady ? (
+            <p className="mt-2 flex items-start gap-1.5 text-[13px] text-danger">
+              <Icon name="alert" size={14} className="mt-0.5 shrink-0" />
+              {channel === "email"
+                ? "Email delivery is not connected, so this cannot send yet. Add RESEND_API_KEY to activate it — you can still save the draft."
+                : "SMS delivery is not connected, so this cannot send yet. Add your Twilio credentials to activate it — you can still save the draft."}
+            </p>
+          ) : null}
         </div>
       </Card>
 
@@ -198,6 +318,45 @@ export function CampaignComposer({
             className="min-h-[140px]"
           />
         </Field>
+
+        {/* Compliance lints — incentive language blocks; the rest advise. */}
+        {lint.blocking.map((flag) => (
+          <div
+            key={flag.code}
+            className="flex items-start gap-2 rounded-btn border border-danger/40 bg-danger-tint px-3 py-2.5"
+          >
+            <Icon name="alert" size={16} className="mt-0.5 shrink-0 text-danger" />
+            <p className="text-[13px] text-ink">
+              <span className="font-bold text-danger">Blocked. </span>
+              {flag.message}
+            </p>
+          </div>
+        ))}
+        {lint.warnings.map((flag) => (
+          <div
+            key={flag.code}
+            className="flex items-start gap-2 rounded-btn border border-gold/40 bg-gold-tint px-3 py-2.5"
+          >
+            <Icon name="flag" size={16} className="mt-0.5 shrink-0 text-gold-deep" />
+            <p className="text-[13px] text-ink">{flag.message}</p>
+          </div>
+        ))}
+      </Card>
+
+      {/* Cost / quota — shown before the send, not after the bill. */}
+      <Card className="space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Icon name="credit-card" size={16} className="text-primary" />
+            <span className="text-[13px] font-bold text-sub">What this send costs</span>
+          </div>
+          <span className="data-chip tabular-nums text-ink">
+            {formatNumber(estimate.creditsRequired)} credit{estimate.creditsRequired === 1 ? "" : "s"}
+          </span>
+        </div>
+        <p className={estimate.withinAllowance ? "text-[13px] text-sub" : "text-[13px] font-semibold text-danger"}>
+          {estimate.message}
+        </p>
       </Card>
 
       {/* Device preview */}
@@ -220,32 +379,105 @@ export function CampaignComposer({
               {body || "Your message preview appears here."}
             </p>
             <div className="mt-4 border-t border-hairline pt-3 text-[11px] text-faint">
-              You&apos;re receiving this because you opted in to marketing from {business}.{" "}
-              <span className="underline">Unsubscribe</span> anytime.
+              {channel === "email" ? (
+                <>
+                  You&apos;re receiving this because you opted in to marketing from {business}.{" "}
+                  <span className="underline">Unsubscribe</span> anytime.
+                </>
+              ) : (
+                <>Reply STOP to opt out.</>
+              )}
             </div>
           </div>
         </div>
       </div>
 
+      {/* Test send — to the owner only, never counted as a campaign send. */}
+      <Card className="space-y-3">
+        <div className="flex items-center gap-2">
+          <Icon name="eye" size={16} className="text-primary" />
+          <span className="text-[13px] font-bold text-sub">Send yourself a test first</span>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input
+            value={testTo}
+            onChange={(e) => setTestTo(e.target.value)}
+            placeholder={channel === "email" ? "you@yourbusiness.com" : "+14155550123"}
+            iconLeft={channel === "email" ? "mail" : "phone"}
+            className="sm:flex-1"
+          />
+          <Button
+            variant="secondary"
+            icon="send"
+            onClick={sendTest}
+            loading={testing}
+            disabled={!hasBody || !lint.ok}
+          >
+            Send test
+          </Button>
+        </div>
+        <p className="text-[12px] text-faint">
+          A test goes only to you, is labelled as a test, and never counts against this campaign or your SMS credits.
+        </p>
+      </Card>
+
       {/* Compliance guard */}
       <div className="flex items-start gap-2 rounded-btn border border-hairline bg-paper px-3 py-2.5">
         <Icon name="shield" size={16} className="mt-0.5 shrink-0 text-primary" />
         <p className="text-[13px] text-sub">
-          {MICROCOPY.noIncentive} Campaign delivery stays disabled until provider delivery and a working unsubscribe are connected.
+          {MICROCOPY.noIncentive} Every email carries a working unsubscribe link, and texts only send
+          between 8 AM and 9 PM in your customers&apos; local time.
         </p>
       </div>
 
       {/* Send */}
-      <div className="space-y-2">
-        <Button onClick={send} loading={pending} disabled={!canSend} icon="check" size="lg" fullWidth>
-          Save draft for {formatNumber(consented)} customers
+      <div className="space-y-3">
+        <Button onClick={sendNow} loading={pending} disabled={!canSend} icon="send" size="lg" fullWidth>
+          Send now to {formatNumber(consented)} {consented === 1 ? "customer" : "customers"}
         </Button>
+
+        {scheduling ? (
+          <Card className="space-y-3">
+            <Field
+              label="Send at"
+              hint="Scheduled campaigns go out on the next daily send run after this time."
+            >
+              <Input type="datetime-local" value={sendAt} onChange={(e) => setSendAt(e.target.value)} />
+            </Field>
+            <div className="flex gap-2">
+              <Button onClick={schedule} loading={pending} disabled={!canSend} icon="clock" fullWidth>
+                Schedule
+              </Button>
+              <Button variant="ghost" onClick={() => setScheduling(false)}>
+                Cancel
+              </Button>
+            </div>
+          </Card>
+        ) : (
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button variant="secondary" icon="clock" onClick={() => setScheduling(true)} fullWidth>
+              Schedule for later
+            </Button>
+            <Button variant="ghost" icon="file" onClick={saveDraft} loading={pending} disabled={!hasBody} fullWidth>
+              Save as draft
+            </Button>
+          </div>
+        )}
+
         {consented === 0 ? (
           <p className="text-center text-[13px] text-danger">
-            No customers have opted in to marketing — this audience is empty.
+            No customers are eligible — nobody has opted in to marketing on this channel.
           </p>
-        ) : body.trim().length === 0 ? (
-          <p className="text-center text-[13px] text-faint">Add a message to save the draft.</p>
+        ) : !hasBody ? (
+          <p className="text-center text-[13px] text-faint">Add a message to send this campaign.</p>
+        ) : !lint.ok ? (
+          <p className="text-center text-[13px] text-danger">Fix the blocked wording above before sending.</p>
+        ) : !estimate.withinAllowance ? (
+          <p className="text-center text-[13px] text-danger">This send exceeds your remaining SMS credits.</p>
+        ) : !channelReady ? (
+          <p className="text-center text-[13px] text-danger">
+            Delivery is not connected for this channel — save the draft and send once it is.
+          </p>
         ) : null}
       </div>
     </div>

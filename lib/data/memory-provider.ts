@@ -1051,6 +1051,11 @@ export const memoryProvider: DataProvider = {
     data.rankScans = [scan, ...data.rankScans.filter((item) => item.id !== scan.id)].slice(0, 24);
   },
 
+  async saveAeoSnapshot(workspaceId, snapshot) {
+    const data = mustDb(workspaceId);
+    data.aeo = snapshot;
+  },
+
   async markAgencyReportsSent(workspaceId, locationIds, sentAt) {
     const data = mustDb(workspaceId);
     const selected = new Set(locationIds);

@@ -3084,6 +3084,14 @@ export const drizzleProvider: DataProvider = {
       .where(eq(t.datasetMeta.workspaceId, workspaceId));
   },
 
+  async saveAeoSnapshot(workspaceId, snapshot) {
+    const db = getDb();
+    await db
+      .update(t.datasetMeta)
+      .set({ aeo: snapshot })
+      .where(eq(t.datasetMeta.workspaceId, workspaceId));
+  },
+
   async markAgencyReportsSent(workspaceId, locationIds, sentAt) {
     const db = getDb();
     const rows = await db

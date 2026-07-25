@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getProviderFor } from "@/lib/data";
 import { hasFeature } from "@/lib/billing/plans";
-import { boundedStrings, guardAuthenticatedApi, readJsonObject } from "@/lib/security/api";
+import { guardAuthenticatedApi } from "@/lib/security/api";
 import { buildAeoContext } from "@/lib/aeo/context";
 import { aeoQuota } from "@/lib/aeo/metering";
 import { getAeoModelClient } from "@/lib/aeo/model-client";
@@ -12,8 +12,8 @@ import { runAeoCheck } from "@/lib/aeo/runner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-/** Up to 8 model calls at concurrency 3 — well inside a minute in practice. */
-export const maxDuration = 120;
+/** Up to 8 model calls at concurrency 3 — three short batches. */
+export const maxDuration = 60;
 
 /**
  * The server entry point for "run an AI-Visibility check".
@@ -50,22 +50,23 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "demo_workspace" }, { status: 403 });
   }
 
+  // Durable monthly ceiling, counted from this workspace's own audit log so a
+  // restart or a second tab cannot reset it. It is check-then-write rather than
+  // atomic: two simultaneous requests could both pass, and a run whose audit
+  // write fails is not counted. The 3-per-minute guard above bounds both cases,
+  // and an atomic counter arrives with a real `saveAeoSnapshot` provider method.
   const quota = aeoQuota(data.auditLog, data.subscription.tier);
   if (quota.remaining <= 0) {
     return NextResponse.json({ error: "quota_exceeded", quota }, { status: 429 });
   }
 
-  let body: Record<string, unknown> = {};
-  try {
-    body = await readJsonObject(req, 8_192);
-  } catch {
-    body = {};
-  }
-
+  // The query set is derived server-side from the workspace's own profile. The
+  // client cannot supply prompt text: it has no product need to, and accepting
+  // free text here would turn a metered visibility check into an open relay to
+  // the model.
   const context = buildAeoContext(data);
   const plan = buildDefaultQueries(context, AEO_DEFAULT_QUERY_COUNT);
-  const requested = boundedStrings(body.queries, AEO_MAX_QUERIES_PER_RUN, 140);
-  const queries = (requested.length > 0 ? requested : plan.queries).slice(0, AEO_MAX_QUERIES_PER_RUN);
+  const queries = plan.queries.slice(0, AEO_MAX_QUERIES_PER_RUN);
 
   if (queries.length === 0) {
     return NextResponse.json({ error: "no_queries", blockers: plan.blockers }, { status: 422 });

@@ -958,17 +958,40 @@ export type MetricSource =
 
 export interface AeoQueryResult {
   query: string;
+  /**
+   * Whether the assistant named this business. ONLY meaningful when `status`
+   * is "checked" (or absent, for legacy snapshots, which are all checked).
+   * When `status` is "not_checked" this field is not a verdict and must never
+   * be rendered as "not named".
+   */
   named: boolean;
   position: number | null;
   competitorsNamed: string[];
   answerExcerpt: string;
+  /**
+   * "checked"     — the assistant answered and the verdict was derived from
+   *                 its literal words.
+   * "not_checked" — we could not ask or could not use the reply (no API key,
+   *                 transport error, refusal, unusable output). Absent on
+   *                 legacy snapshots written before this field existed.
+   */
+  status?: "checked" | "not_checked";
+  /** Why the query could not be checked. Present only when not_checked. */
+  notCheckedReason?: string;
 }
 
 export interface AeoSnapshot {
   locationId: LocationId;
   date: string;
+  /**
+   * Denominator counts CHECKED queries only — never the total asked, so a run
+   * where half the queries failed cannot read as "named in 3 of 10".
+   */
   namedFraction: { named: number; total: number };
   queries: AeoQueryResult[];
+  /** Which assistant produced this sample, so the claim stays attributable. */
+  provider?: string;
+  model?: string;
 }
 
 export interface RankGridPoint {
