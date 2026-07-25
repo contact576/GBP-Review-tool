@@ -9,7 +9,6 @@ import { formatNumber, formatDate, maskEmail, maskPhone } from "@/lib/utils/form
 import { emailEnabled } from "@/lib/email";
 import { smsEnabled } from "@/lib/sms/twilio";
 import type {
-  Campaign,
   CampaignDeliveryState,
   CampaignRecipient,
   CampaignRecipientOutcome,
@@ -300,5 +299,3 @@ function OutcomeTile({
     </div>
   );
 }
-
-export type { Campaign };
