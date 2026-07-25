@@ -62,18 +62,27 @@ import type {
   RankGridScan,
   ProfileMutationJob,
   ContentPublishingJob,
+  ProfileSuggestionStatus,
   AiContentAsset,
 } from "@/lib/data/types";
 import { prepareProfileMutation, stableStringify } from "@/lib/google/profile-mutation";
 import { executeProfileMutation } from "@/lib/google/mutation-runner";
 import { runLints } from "@/lib/compliance/lints";
+import { checkQuietHours } from "@/lib/compliance/quiet-hours";
 import {
   suggestionToGenerationKind,
   type ContentSuggestionPreview,
   type GroundedContentInput,
 } from "@/lib/ai/content-studio";
 import { generateGroundedContentText, generateLocalPostImage } from "@/lib/ai/openai-content";
-import { prepareContentPublication } from "@/lib/google/content-publishing";
+import {
+  prepareContentPublication,
+  prepareOwnerReplyPublication,
+  decideOwnerReplyPublication,
+  resolveReplyPublishOutcome,
+  type PreparedContentPublication,
+  type ReplyPublishOutcome,
+} from "@/lib/google/content-publishing";
 import { executeContentPublication } from "@/lib/google/content-publish-runner";
 import { createSignedContentAssetUrl } from "@/lib/security/content-asset-signature";
 
@@ -106,8 +115,8 @@ async function deliverReviewRequest(
   request: { id: string; token: string; channel: Channel; customerName: string },
   customer?: Pick<Customer, "email" | "phone" | "consent" | "suppressedReason">,
   simulate = false,
-): Promise<"sent" | "failed" | "suppressed"> {
-  let status: "sent" | "failed" | "suppressed" = "failed";
+): Promise<"sent" | "failed" | "suppressed" | "held"> {
+  let status: "sent" | "failed" | "suppressed" | "held" = "failed";
   let reason: string | undefined;
   if (simulate) {
     status = "sent";
@@ -136,7 +145,18 @@ async function deliverReviewRequest(
         status = "failed";
       }
     } else if (request.channel === "sms" && customer.phone && smsEnabled() && data) {
-      if (!isE164(customer.phone)) {
+      // Quiet hours (TCPA/CASL) are measured in the RECIPIENT's local time —
+      // the location's timezone, not the server's. Checked before spending a
+      // credit or touching Twilio.
+      const quiet = checkQuietHours({
+        enabled: data.workspace.settings?.quietHours !== false,
+        timezone: data.location.timezone || data.workspace.timezone,
+        at: new Date(),
+      });
+      if (!quiet.allowed) {
+        status = "held";
+        reason = quiet.reason;
+      } else if (!isE164(customer.phone)) {
         reason = "SMS phone number must use E.164 format, such as +14155550123.";
       } else if (
         data.subscription.usage.smsCreditsTotal >= 0 &&
@@ -159,7 +179,12 @@ async function deliverReviewRequest(
       }
     }
   }
-  await provider.setRequestDeliveryStatus(ws, request.id, status, reason);
+  // A held request keeps the queued state it was created with: nothing was
+  // delivered, so there is no delivery outcome to record. It goes out on the
+  // next send attempt that falls inside the recipient's local window.
+  if (status !== "held") {
+    await provider.setRequestDeliveryStatus(ws, request.id, status, reason);
+  }
   return status;
 }
 
@@ -513,11 +538,114 @@ export async function createTaskAction(input: CreateTaskInput) {
 }
 
 // ── Reviews ─────────────────────────────────────────────────
-export async function postReplyAction(input: PostReplyInput & { tone: ReplyTone }) {
-  const { provider, ws } = await scoped("owner", "manager");
-  await provider.postReply(ws, input);
+export interface PostReplyActionResult extends ReplyPublishOutcome {
+  /** The reply was durably saved in Foundly (independent of Google). */
+  saved: boolean;
+}
+
+/**
+ * Save an owner reply and — when the workspace genuinely can — publish it to
+ * Google Business Profile.
+ *
+ * Order matters: the owner's words are persisted FIRST, so a pending API
+ * approval, a missing credential or a Google outage can never lose them. Only
+ * then does {@link decideOwnerReplyPublication} decide whether a real write is
+ * even possible; when it is, the reply goes through the exact same prepared
+ * plan, idempotency ledger, read-after-write verification and audit rows the
+ * governed suggestion-inbox approval uses.
+ *
+ * The returned message is the literal truth in every branch — a reply is only
+ * ever described as posted when Google returned it on a fresh read-back.
+ */
+export async function postReplyAction(
+  input: PostReplyInput & { tone: ReplyTone },
+): Promise<PostReplyActionResult> {
+  const { provider, ws, session } = await scoped("owner", "manager");
+  const text = typeof input.text === "string" ? input.text.trim() : "";
+  if (!text) {
+    return {
+      saved: false,
+      state: "failed",
+      publishedToGoogle: false,
+      message: "Write a reply before saving it.",
+    };
+  }
+
+  // 1 — durable local save, always.
+  await provider.postReply(ws, { ...input, text });
   revalidatePath("/app/reviews");
   revalidatePath("/app");
+
+  // 2 — may we write to Google at all? Demo workspaces are refused outright.
+  const data = await provider.getData(ws);
+  const snapshot = data?.location.gbpSnapshot ?? null;
+  const credential = session.isDemo ? null : await provider.getGoogleCredential(ws);
+  const decision = decideOwnerReplyPublication({
+    isDemo: session.isDemo,
+    hasGoogleCredential: Boolean(credential),
+    snapshot,
+    reviewId: input.reviewId,
+  });
+  if (!decision.publish) {
+    return { saved: true, ...resolveReplyPublishOutcome({ kind: "blocked", block: decision.block }) };
+  }
+  // A publishable decision implies both of these; the guard keeps it provable.
+  if (!data || !snapshot) {
+    return { saved: true, ...resolveReplyPublishOutcome({ kind: "blocked", block: "profile_not_synced" }) };
+  }
+  const limited = consumeRateLimit("owner-reply-publishing", session.userId, 30, 60 * 60_000);
+  if (!limited.allowed) {
+    return { saved: true, ...resolveReplyPublishOutcome({ kind: "blocked", block: "rate_limited" }) };
+  }
+
+  // 3 — same request builder as the governed approval path.
+  let plan: PreparedContentPublication;
+  try {
+    plan = prepareOwnerReplyPublication({ snapshot, reviewId: input.reviewId, comment: text });
+  } catch (error) {
+    return {
+      saved: true,
+      ...resolveReplyPublishOutcome({
+        kind: "executed",
+        ok: false,
+        verified: false,
+        error: error instanceof Error ? error.message : "The exact reply payload is invalid.",
+      }),
+    };
+  }
+
+  // 4 — same ledger, execution, verification and audit rows.
+  const approvedAt = new Date().toISOString();
+  const run = await runContentPublication({
+    provider,
+    ws,
+    locationId: data.location.id,
+    actor: session.name,
+    publicationRef: input.reviewId,
+    plan,
+    idempotencyKey: createHash("sha256")
+      .update(`${ws}:owner_reply:${input.reviewId}:${stableStringify(text)}`)
+      .digest("hex"),
+    approvedAt,
+    approvalAudit: {
+      action: "content.publication_approved",
+      targetType: "review",
+      targetId: input.reviewId,
+      meta: { kind: "owner_reply", tone: input.tone, surface: "reviews_inbox" },
+    },
+    resultMeta: { kind: "owner_reply", reviewId: input.reviewId },
+  });
+
+  revalidatePath("/app/reviews");
+  revalidatePath("/app");
+  const outcome = run.kind === "already_published"
+    ? resolveReplyPublishOutcome({ kind: "already_published" })
+    : run.kind === "in_flight"
+      ? resolveReplyPublishOutcome({ kind: "in_flight" })
+      : run.kind === "previous_failure"
+        ? resolveReplyPublishOutcome({ kind: "executed", ok: false, verified: false, error: run.error })
+        : resolveReplyPublishOutcome({ kind: "executed", ok: run.ok, verified: run.verified, error: run.error });
+  return { saved: true, ...outcome };
 }
 
 // ── Campaigns ───────────────────────────────────────────────
@@ -1028,6 +1156,166 @@ export async function approveProfileSuggestionAction(
 }
 
 /**
+ * What the shared content-publication runner observed. Callers map this to
+ * their own surface copy; none of them re-implement the ledger or the
+ * read-after-write handling.
+ */
+type ContentPublicationRun =
+  | { kind: "already_published"; job: ContentPublishingJob }
+  | { kind: "previous_failure"; job: ContentPublishingJob; error?: string }
+  | { kind: "in_flight"; job: ContentPublishingJob }
+  | { kind: "executed"; job: ContentPublishingJob; ok: boolean; verified: boolean; error?: string };
+
+/**
+ * THE Google content-publication sequence — one implementation, shared by the
+ * governed suggestion approval and the reviews-inbox reply drawer:
+ *
+ *  1. write the idempotency ledger row BEFORE Google is called (a repeat of the
+ *     exact same payload short-circuits instead of double-posting),
+ *  2. audit-log the approval,
+ *  3. execute the prepared plan, which read-after-write verifies the value,
+ *  4. persist `published` / `verification_pending` / `failed` / `rejected` and
+ *     audit-log the result — never swallowing an error.
+ */
+async function runContentPublication(args: {
+  provider: DataProvider;
+  ws: string;
+  locationId: string;
+  actor: string;
+  /** Ledger reference: a suggestion id for the inbox path, a review id for a reply. */
+  publicationRef: string;
+  plan: PreparedContentPublication;
+  idempotencyKey: string;
+  approvedAt: string;
+  approvalAudit: {
+    action: string;
+    targetType: string;
+    targetId: string;
+    meta: Record<string, string | number | boolean>;
+  };
+  resultMeta: Record<string, string | number | boolean>;
+  /** Mirrors the job state onto a suggestion row, when the surface has one. */
+  onStatus?: (status: ProfileSuggestionStatus, at: string) => Promise<void>;
+}): Promise<ContentPublicationRun> {
+  const { provider, ws, plan } = args;
+  const now = new Date().toISOString();
+  const proposedJob: ContentPublishingJob = {
+    id: `pub_${randomBytes(12).toString("hex")}`,
+    workspaceId: ws,
+    locationId: args.locationId,
+    suggestionId: args.publicationRef,
+    assetId: plan.assetId,
+    idempotencyKey: args.idempotencyKey,
+    kind: plan.kind,
+    status: "queued",
+    exactPayload: plan.body,
+    attempts: 0,
+    approvedAt: args.approvedAt,
+    approvedBy: args.actor,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const created = await provider.createContentPublishingJob(ws, proposedJob);
+  if (!created.created) {
+    if (created.job.status === "published") return { kind: "already_published", job: created.job };
+    if (created.job.status === "failed" || created.job.status === "rejected") {
+      return { kind: "previous_failure", job: created.job, error: created.job.lastError };
+    }
+    return { kind: "in_flight", job: created.job };
+  }
+
+  await args.onStatus?.("queued", now);
+  await provider.appendAuditLog(ws, {
+    id: `audit_${randomBytes(12).toString("hex")}`,
+    workspaceId: ws,
+    actor: args.actor,
+    action: args.approvalAudit.action,
+    targetType: args.approvalAudit.targetType,
+    targetId: args.approvalAudit.targetId,
+    at: now,
+    meta: { publishingJobId: created.job.id, ...args.approvalAudit.meta },
+  });
+
+  const startedAt = new Date().toISOString();
+  await provider.updateContentPublishingJob(ws, created.job.id, {
+    status: "executing",
+    attempts: 1,
+    startedAt,
+    updatedAt: startedAt,
+  });
+  await args.onStatus?.("executing", startedAt);
+
+  let execution;
+  try {
+    execution = await executeContentPublication(plan, await provider.getGoogleCredential(ws));
+  } catch (error) {
+    execution = {
+      ok: false,
+      verified: false,
+      error: error instanceof Error ? error.message : "Google publication failed.",
+    };
+  }
+  const finishedAt = new Date().toISOString();
+  if (!execution.ok) {
+    const rejected = "rejected" in execution && Boolean(execution.rejected);
+    const message = execution.error ?? "Google rejected this publication.";
+    await provider.updateContentPublishingJob(ws, created.job.id, {
+      status: rejected ? "rejected" : "failed",
+      providerResponse: "providerResponse" in execution ? execution.providerResponse : undefined,
+      providerResourceName: "providerResourceName" in execution ? execution.providerResourceName : undefined,
+      verifiedValue: "verifiedValue" in execution ? execution.verifiedValue : undefined,
+      failedAt: finishedAt,
+      lastError: message,
+      updatedAt: finishedAt,
+    });
+    await args.onStatus?.("failed", finishedAt);
+    await provider.appendAuditLog(ws, {
+      id: `audit_${randomBytes(12).toString("hex")}`,
+      workspaceId: ws,
+      actor: "Foundly",
+      action: rejected ? "content.publication_rejected" : "content.publication_failed",
+      targetType: "content_publishing_job",
+      targetId: created.job.id,
+      at: finishedAt,
+      meta: { ...args.resultMeta, error: message.slice(0, 180) },
+    });
+    return { kind: "executed", job: created.job, ok: false, verified: false, error: message };
+  }
+
+  await provider.updateContentPublishingJob(ws, created.job.id, {
+    status: execution.verified ? "published" : "verification_pending",
+    providerResponse: "providerResponse" in execution ? execution.providerResponse : undefined,
+    providerResourceName: "providerResourceName" in execution ? execution.providerResourceName : undefined,
+    verifiedValue: "verifiedValue" in execution ? execution.verifiedValue : undefined,
+    ...(execution.verified ? { publishedAt: finishedAt } : {}),
+    ...(execution.error ? { lastError: execution.error } : {}),
+    updatedAt: finishedAt,
+  });
+  await args.onStatus?.(execution.verified ? "applied" : "verification_pending", finishedAt);
+  const providerResourceName = "providerResourceName" in execution ? execution.providerResourceName : undefined;
+  await provider.appendAuditLog(ws, {
+    id: `audit_${randomBytes(12).toString("hex")}`,
+    workspaceId: ws,
+    actor: "Foundly",
+    action: execution.verified ? "content.publication_verified" : "content.publication_verification_pending",
+    targetType: "content_publishing_job",
+    targetId: created.job.id,
+    at: finishedAt,
+    meta: {
+      ...args.resultMeta,
+      ...(providerResourceName ? { providerResourceName } : {}),
+    },
+  });
+  return {
+    kind: "executed",
+    job: created.job,
+    ok: true,
+    verified: execution.verified,
+    ...(execution.error ? { error: execution.error } : {}),
+  };
+}
+
+/**
  * Publish one exact, owner-approved post, reply, or Q&A answer. The durable
  * idempotency ledger is written before Google is called, and every successful
  * write is independently read back before Foundly marks it published.
@@ -1084,134 +1372,67 @@ export async function approveContentSuggestionAction(
   const idempotencyKey = createHash("sha256")
     .update(`${ws}:${suggestionId}:${existing.kind}:${stableStringify(existing.proposedValue)}`)
     .digest("hex");
-  const now = new Date().toISOString();
-  const proposedJob: ContentPublishingJob = {
-    id: `pub_${randomBytes(12).toString("hex")}`,
-    workspaceId: ws,
+  const run = await runContentPublication({
+    provider,
+    ws,
     locationId: data.location.id,
-    suggestionId,
-    assetId: plan.assetId,
+    actor: session.name,
+    publicationRef: suggestionId,
+    plan,
     idempotencyKey,
-    kind: plan.kind,
-    status: "queued",
-    exactPayload: plan.body,
-    attempts: 0,
     approvedAt,
-    approvedBy: session.name,
-    createdAt: now,
-    updatedAt: now,
-  };
-  const created = await provider.createContentPublishingJob(ws, proposedJob);
-  if (!created.created) {
-    if (created.job.status === "published") {
-      await provider.updateProfileSuggestion(ws, suggestionId, { status: "applied", updatedAt: now });
-      return { ok: true, status: "applied", message: "This exact content was already published and verified." };
-    }
-    if (["failed", "rejected"].includes(created.job.status)) {
-      return { ok: false, status: "failed", message: created.job.lastError ?? "The previous publication failed. Regenerate or review it before retrying." };
-    }
+    approvalAudit: {
+      action: "content.publication_approved",
+      targetType: "profile_suggestion",
+      targetId: suggestionId,
+      meta: { kind: existing.kind, exactPreviewGeneratedAt: approvedAt },
+    },
+    resultMeta: { kind: existing.kind },
+    onStatus: async (status, at) => {
+      await provider.updateProfileSuggestion(ws, suggestionId, {
+        status,
+        ...(status === "queued" ? { approvedAt, approvedBy: session.name } : {}),
+        updatedAt: at,
+      });
+    },
+  });
+
+  if (run.kind === "already_published") {
+    await provider.updateProfileSuggestion(ws, suggestionId, {
+      status: "applied",
+      updatedAt: new Date().toISOString(),
+    });
+    return { ok: true, status: "applied", message: "This exact content was already published and verified." };
+  }
+  if (run.kind === "previous_failure") {
+    return {
+      ok: false,
+      status: "failed",
+      message: run.error ?? "The previous publication failed. Regenerate or review it before retrying.",
+    };
+  }
+  if (run.kind === "in_flight") {
     return {
       ok: true,
-      status: created.job.status === "verification_pending" ? "verification_pending" : created.job.status === "executing" ? "executing" : "queued",
+      status: run.job.status === "verification_pending" ? "verification_pending" : run.job.status === "executing" ? "executing" : "queued",
       message: "This exact content is already queued; it was not submitted twice.",
     };
   }
-
-  await provider.updateProfileSuggestion(ws, suggestionId, {
-    status: "queued",
-    approvedAt,
-    approvedBy: session.name,
-    updatedAt: now,
-  });
-  await provider.appendAuditLog(ws, {
-    id: `audit_${randomBytes(12).toString("hex")}`,
-    workspaceId: ws,
-    actor: session.name,
-    action: "content.publication_approved",
-    targetType: "profile_suggestion",
-    targetId: suggestionId,
-    at: now,
-    meta: { publishingJobId: created.job.id, kind: existing.kind, exactPreviewGeneratedAt: approvedAt },
-  });
-
-  const startedAt = new Date().toISOString();
-  await provider.updateContentPublishingJob(ws, created.job.id, {
-    status: "executing",
-    attempts: 1,
-    startedAt,
-    updatedAt: startedAt,
-  });
-  await provider.updateProfileSuggestion(ws, suggestionId, { status: "executing", updatedAt: startedAt });
-
-  let execution;
-  try {
-    execution = await executeContentPublication(plan, await provider.getGoogleCredential(ws));
-  } catch (error) {
-    execution = { ok: false, verified: false, error: error instanceof Error ? error.message : "Google publication failed." };
-  }
-  const finishedAt = new Date().toISOString();
-  if (!execution.ok) {
-    const status = execution.rejected ? "rejected" : "failed";
-    const message = execution.error ?? "Google rejected this publication.";
-    await provider.updateContentPublishingJob(ws, created.job.id, {
-      status,
-      providerResponse: execution.providerResponse,
-      providerResourceName: execution.providerResourceName,
-      verifiedValue: execution.verifiedValue,
-      failedAt: finishedAt,
-      lastError: message,
-      updatedAt: finishedAt,
-    });
-    await provider.updateProfileSuggestion(ws, suggestionId, { status: "failed", updatedAt: finishedAt });
-    await provider.appendAuditLog(ws, {
-      id: `audit_${randomBytes(12).toString("hex")}`,
-      workspaceId: ws,
-      actor: "Foundly",
-      action: execution.rejected ? "content.publication_rejected" : "content.publication_failed",
-      targetType: "content_publishing_job",
-      targetId: created.job.id,
-      at: finishedAt,
-      meta: { kind: existing.kind, error: message.slice(0, 180) },
-    });
+  if (!run.ok) {
     revalidatePath("/app/this-week");
-    return { ok: false, status: "failed", message };
+    return { ok: false, status: "failed", message: run.error ?? "Google rejected this publication." };
   }
 
-  const jobStatus = execution.verified ? "published" : "verification_pending";
-  const suggestionStatus = execution.verified ? "applied" : "verification_pending";
-  await provider.updateContentPublishingJob(ws, created.job.id, {
-    status: jobStatus,
-    providerResponse: execution.providerResponse,
-    providerResourceName: execution.providerResourceName,
-    verifiedValue: execution.verifiedValue,
-    ...(execution.verified ? { publishedAt: finishedAt } : {}),
-    ...(execution.error ? { lastError: execution.error } : {}),
-    updatedAt: finishedAt,
-  });
-  await provider.updateProfileSuggestion(ws, suggestionId, { status: suggestionStatus, updatedAt: finishedAt });
-  await provider.appendAuditLog(ws, {
-    id: `audit_${randomBytes(12).toString("hex")}`,
-    workspaceId: ws,
-    actor: "Foundly",
-    action: execution.verified ? "content.publication_verified" : "content.publication_verification_pending",
-    targetType: "content_publishing_job",
-    targetId: created.job.id,
-    at: finishedAt,
-    meta: {
-      kind: existing.kind,
-      ...(execution.providerResourceName ? { providerResourceName: execution.providerResourceName } : {}),
-    },
-  });
   revalidatePath("/app");
   revalidatePath("/app/studio");
   revalidatePath("/app/this-week");
   revalidatePath("/app/reviews");
   return {
     ok: true,
-    status: suggestionStatus,
-    message: execution.verified
+    status: run.verified ? "applied" : "verification_pending",
+    message: run.verified
       ? "Google published the exact approved content and Foundly verified it."
-      : execution.error ?? "Google accepted the exact content; Foundly is waiting for verification.",
+      : run.error ?? "Google accepted the exact content; Foundly is waiting for verification.",
   };
 }
 
