@@ -83,7 +83,9 @@ export function SignInForm({
         </div>
       ) : null}
 
-      <form className="mt-6 space-y-4" onSubmit={submit}>
+      {/* method="post" so a pre-hydration submit cannot fall back to a GET that
+          places the password in the URL (history, logs, Referer). */}
+      <form className="mt-6 space-y-4" method="post" onSubmit={submit}>
         <Field label="Email">
           <Input
             type="email"

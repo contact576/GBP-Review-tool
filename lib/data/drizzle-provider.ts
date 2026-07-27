@@ -1,5 +1,4 @@
 import { and, eq, gt, isNotNull, isNull, like, or, sql } from "drizzle-orm";
-import type { BatchItem } from "drizzle-orm/batch";
 import { nanoid } from "nanoid";
 import { getDb, type FoundlyDb } from "../db/client";
 import { ensureSchema } from "../db/ensure";
@@ -965,8 +964,10 @@ function buildMetaRow(data: FoundlyData): typeof t.datasetMeta.$inferInsert {
 }
 
 // ── Atomic workspace creation (register / Google sign-up) ────
-// neon-http has no interactive transactions; db.batch() executes all
-// statements in a single atomic request.
+// A real interactive transaction: either the whole tenant (org, workspace,
+// location, owner, subscription, meta) lands or none of it does. A partial
+// failure here would otherwise leave an account that can authenticate but has
+// no workspace to read.
 async function createWorkspaceWithOwner(
   db: FoundlyDb,
   data: FoundlyData,
@@ -974,28 +975,31 @@ async function createWorkspaceWithOwner(
 ): Promise<void> {
   const ws = data.workspace.id;
   const now = nowIso();
-  const statements: BatchItem<"pg">[] = [
-    db.insert(t.organization).values(buildOrgRow(data.organization, ws)),
-    db.insert(t.workspace).values(buildWorkspaceRow(data.workspace)),
-    db.insert(t.location).values(buildLocationRow(data.location)),
-    db.insert(t.appUser).values(
+  await db.transaction(async (tx) => {
+    await tx.insert(t.organization).values(buildOrgRow(data.organization, ws));
+    await tx.insert(t.workspace).values(buildWorkspaceRow(data.workspace));
+    await tx.insert(t.location).values(buildLocationRow(data.location));
+    await tx.insert(t.appUser).values(
       buildUserRow(data.owner, {
         passwordHash: auth.passwordHash ?? null,
         googleSub: auth.googleSub ?? null,
         emailVerified: true, // auto-verified until email sending is configured
         createdAt: now,
       }),
-    ),
-    db.insert(t.subscription).values(buildSubscriptionRow(data.subscription)),
-    db.insert(t.datasetMeta).values(buildMetaRow(data)),
-  ];
-  data.qrAssets.forEach((q, i) => {
-    statements.push(db.insert(t.qrAsset).values(buildQrRow(q, ws, i)));
+    );
+    await tx.insert(t.subscription).values(buildSubscriptionRow(data.subscription));
+    await tx.insert(t.datasetMeta).values(buildMetaRow(data));
+    if (data.qrAssets.length > 0) {
+      await tx
+        .insert(t.qrAsset)
+        .values(data.qrAssets.map((q, i) => buildQrRow(q, ws, i)));
+    }
+    if (data.notifications.length > 0) {
+      await tx
+        .insert(t.notification)
+        .values(data.notifications.map((n, i) => buildNotificationRow(n, ws, i)));
+    }
   });
-  data.notifications.forEach((n, i) => {
-    statements.push(db.insert(t.notification).values(buildNotificationRow(n, ws, i)));
-  });
-  await db.batch(statements as [BatchItem<"pg">, ...BatchItem<"pg">[]]);
 }
 
 function mapMutationJob(row: MutationJobRow): ProfileMutationJob {
@@ -1121,29 +1125,34 @@ async function createOrganizationLocation(
   data: FoundlyData,
 ): Promise<void> {
   const ws = data.workspace.id;
-  const statements: BatchItem<"pg">[] = [
-    db.insert(t.workspace).values(buildWorkspaceRow(data.workspace)),
-    db.insert(t.location).values(buildLocationRow(data.location)),
-    db.insert(t.appUser).values(
+  await db.transaction(async (tx) => {
+    await tx.insert(t.workspace).values(buildWorkspaceRow(data.workspace));
+    await tx.insert(t.location).values(buildLocationRow(data.location));
+    await tx.insert(t.appUser).values(
       buildUserRow(data.owner, {
         passwordHash: null,
         googleSub: null,
         emailVerified: true,
         createdAt: data.workspace.createdAt,
       }),
-    ),
-    db.insert(t.subscription).values(buildSubscriptionRow(data.subscription)),
-    db.insert(t.datasetMeta).values(buildMetaRow(data)),
-  ];
-  data.qrAssets.forEach((qr, index) => {
-    statements.push(db.insert(t.qrAsset).values(buildQrRow(qr, ws, index)));
-  });
-  data.notifications.forEach((notification, index) => {
-    statements.push(
-      db.insert(t.notification).values(buildNotificationRow(notification, ws, index)),
     );
+    await tx.insert(t.subscription).values(buildSubscriptionRow(data.subscription));
+    await tx.insert(t.datasetMeta).values(buildMetaRow(data));
+    if (data.qrAssets.length > 0) {
+      await tx
+        .insert(t.qrAsset)
+        .values(data.qrAssets.map((qr, index) => buildQrRow(qr, ws, index)));
+    }
+    if (data.notifications.length > 0) {
+      await tx
+        .insert(t.notification)
+        .values(
+          data.notifications.map((notification, index) =>
+            buildNotificationRow(notification, ws, index),
+          ),
+        );
+    }
   });
-  await db.batch(statements as [BatchItem<"pg">, ...BatchItem<"pg">[]]);
 }
 
 // ── Clear + seed (shared with the seed-runner) ──────────────

@@ -42,8 +42,11 @@ export function ResetPasswordForm({ token }: { token: string }) {
         <h1 className="text-[24px] font-extrabold tracking-tight text-ink">Choose a new password</h1>
         <p className="mt-1 text-[14px] text-sub">Use at least eight characters with a letter and a number.</p>
       </div>
+      {/* method="post" so a pre-hydration submit cannot fall back to a GET that
+          places the new password — and the reset token — in the URL. */}
       <form
         className="mt-6 space-y-4"
+        method="post"
         onSubmit={(event) => {
           event.preventDefault();
           if (password !== confirm) {

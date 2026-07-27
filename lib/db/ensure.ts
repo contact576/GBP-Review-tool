@@ -11,7 +11,7 @@ const globalRef = globalThis as unknown as {
   __foundlyAdditiveReady?: boolean;
 };
 
-type Sql = (statement: string) => Promise<unknown>;
+type Sql = { unsafe: (statement: string) => Promise<unknown> };
 
 /**
  * Run additive migrations (new tables/columns) even when the core schema
@@ -21,7 +21,7 @@ type Sql = (statement: string) => Promise<unknown>;
 async function runAdditive(sql: Sql): Promise<void> {
   if (globalRef.__foundlyAdditiveReady) return;
   for (const statement of ADDITIVE_STATEMENTS) {
-    await sql(statement);
+    await sql.unsafe(statement);
   }
   globalRef.__foundlyAdditiveReady = true;
 }
@@ -39,8 +39,8 @@ export async function ensureSchema(): Promise<EnsureResult> {
   if (globalRef.__foundlySchemaReady) return { ok: true, ran: false };
 
   try {
-    const { neon } = await import("@neondatabase/serverless");
-    const sql = neon(process.env.DATABASE_URL);
+    const { getSql } = await import("./client");
+    const sql = getSql();
 
     // Fast path: newest core table already present → schema is current. Still
     // run additive migrations so pre-existing tenants pick up new tables.
@@ -54,10 +54,17 @@ export async function ensureSchema(): Promise<EnsureResult> {
     }
 
     for (const statement of SCHEMA_STATEMENTS) {
-      // Ordinary function-call form executes a raw SQL string.
-      await sql(statement);
+      // `unsafe` runs a raw (non-parameterized) DDL string. The statements are
+      // compile-time constants from schema-sql.ts — no user input reaches here.
+      await sql.unsafe(statement);
     }
-    globalRef.__foundlyAdditiveReady = true; // full init already includes them
+    // SCHEMA_STATEMENTS does NOT subsume ADDITIVE_STATEMENTS: columns added
+    // after the base DDL was generated (app_user.session_version,
+    // subscription.stripe_*, workspace.referral_*, location.gbp_*) exist only as
+    // ALTERs here. Skipping them on first init left every fresh database without
+    // session_version, which made all auth queries fail. Every additive
+    // statement is IF NOT EXISTS, so running them after a full init is safe.
+    await runAdditive(sql);
     globalRef.__foundlySchemaReady = true;
     return { ok: true, ran: true };
   } catch (err) {
@@ -80,8 +87,8 @@ export async function checkDatabase(): Promise<{
     return { configured: false, reachable: false, schemaReady: false };
   }
   try {
-    const { neon } = await import("@neondatabase/serverless");
-    const sql = neon(process.env.DATABASE_URL);
+    const { getSql } = await import("./client");
+    const sql = getSql();
     const probe = await sql`
       SELECT 1 FROM information_schema.tables
       WHERE table_name = 'qr_asset' LIMIT 1`;

@@ -170,7 +170,11 @@ export function SignUpForm({
         </div>
       ) : null}
 
-      <form className="space-y-3.5" onSubmit={submit}>
+      {/* method="post" is deliberate even though submission is handled in JS:
+          before hydration completes, a submit falls back to the browser's native
+          behaviour, and the default (GET) would put the password in the URL —
+          and therefore in history, logs, and Referer headers. */}
+      <form className="space-y-3.5" method="post" onSubmit={submit}>
         <Field label="Your name">
           <Input
             name="name"
