@@ -107,12 +107,11 @@ export async function GET(req: NextRequest) {
       );
     }
   } else if (probe.reason === "not_approved") {
-    await provider.setIntegrationStatus(
-      ws,
-      "google",
-      "needs_attention",
-      "Connected — Google Business Profile API approval pending (Google approves per-project; typically 1–2 weeks)",
-    );
+    // Report what Google actually said. This used to assert "approval pending,
+    // typically 1–2 weeks" for every 403, which is wrong — and expensively so —
+    // when the real cause is simply that the My Business APIs were never
+    // enabled on the project, a change that takes effect immediately.
+    await provider.setIntegrationStatus(ws, "google", "needs_attention", `Connected — ${probe.detail}`);
   } else if (probe.reason === "unauthorized") {
     await provider.setIntegrationStatus(
       ws,

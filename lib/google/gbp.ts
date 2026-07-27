@@ -872,22 +872,47 @@ function classifyError(status: number, body: string): GbpResult<never> {
   }
   if (status === 403) {
     const lower = body.toLowerCase();
-    if (
+
+    // Two very different states both arrive as a 403, and conflating them costs
+    // real time: "not enabled" is a two-minute fix in the Cloud console, while
+    // access approval genuinely takes 1–2 weeks. Distinguish them, and carry
+    // Google's own message so the UI never has to guess.
+    const notEnabled =
       lower.includes("has not been used in project") ||
-      lower.includes("disabled") ||
       lower.includes("service_disabled") ||
-      lower.includes("accessnotconfigured")
-    ) {
+      lower.includes("accessnotconfigured");
+    if (notEnabled) {
       return {
         ok: false,
         reason: "not_approved",
         detail:
-          "GBP API not enabled/approved for this Google Cloud project yet. " +
-          "Enable the My Business APIs and request access: " +
-          "https://developers.google.com/my-business/content/prereqs",
+          "The My Business APIs are not enabled for this Google Cloud project. " +
+          "Enable them in the console (API Library → \"My Business Account Management API\" " +
+          "and \"My Business Business Information API\") — this takes effect immediately. " +
+          `Google said: ${googleMessage(body) || snippet}`,
+      };
+    }
+    if (lower.includes("disabled") || lower.includes("permission_denied")) {
+      return {
+        ok: false,
+        reason: "not_approved",
+        detail:
+          "The My Business APIs are enabled but this project is not approved for Business " +
+          "Profile access yet. Request it at https://developers.google.com/my-business/content/prereqs " +
+          `— approval is per-project and typically takes 1–2 weeks. Google said: ${googleMessage(body) || snippet}`,
       };
     }
     return { ok: false, reason: "unauthorized", detail: `403 from GBP API: ${snippet}` };
   }
   return { ok: false, reason: "error", detail: `GBP API ${status}: ${snippet}` };
+}
+
+/** Google's own `error.message`, when the body is the usual JSON error envelope. */
+function googleMessage(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as { error?: { message?: string } };
+    return (parsed.error?.message ?? "").slice(0, 200);
+  } catch {
+    return "";
+  }
 }
