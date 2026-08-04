@@ -1,6 +1,14 @@
 import type { PlaceDetails } from "./places";
-import type { Location, MetricSnapshot, Review } from "@/lib/data/types";
+import type {
+  Location,
+  LocalGrowthAudit,
+  MetricSnapshot,
+  ProfileSuggestion,
+  Review,
+} from "@/lib/data/types";
 import { computePublicScore } from "@/lib/data/selectors";
+import { buildPublicProfileAudit } from "@/lib/audit/public-audit";
+import { buildSuggestionInbox } from "@/lib/suggestions/inbox";
 
 /**
  * Pure transform: real public Google data (Places Place Details) → the pieces
@@ -47,6 +55,14 @@ export interface GooglePublicUpdate {
   /** Today's snapshot with a real computed score; activity fields are 0. */
   snapshot: MetricSnapshot;
   syncedAt: string;
+  /**
+   * Profile audit derived from the public listing. Callers must only persist
+   * this when no Business Profile snapshot exists — a real GBP audit sees far
+   * more and must never be overwritten by the public one.
+   */
+  audit: LocalGrowthAudit;
+  /** Inbox entries built from `audit`, same shape the GBP path produces. */
+  suggestions: ProfileSuggestion[];
 }
 
 /** Non-technical message for a Places lookup failure. */
@@ -118,12 +134,16 @@ export function buildGooglePublicUpdate(
     profileScore: scores.profile,
   };
 
+  const audit = buildPublicProfileAudit({ location, details, nowIso });
+
   return {
     rating: details.rating,
     reviewCount: details.reviewCount,
     reviews,
     snapshot,
     syncedAt: nowIso,
+    audit,
+    suggestions: buildSuggestionInbox(audit),
   };
 }
 

@@ -26,6 +26,28 @@ export default async function VisibilityPage() {
   const namedPct = total > 0 ? Math.round((named / total) * 100) : 0;
   const detected = aeo ? formatDate(aeo.date) : formatDate(new Date().toISOString());
 
+  // What actually drives being named, read off the latest profile audit. Open
+  // findings are the gaps; the checks that passed are the strengths. Nothing
+  // here is written by hand, so it can never describe a business we didn't scan.
+  const auditFindings = data.location.gbpAudit?.findings ?? [];
+  const factors = [
+    ...auditFindings
+      .filter((finding) => finding.status === "open")
+      .slice(0, 3)
+      .map((finding) => ({
+        good: false,
+        title: finding.title,
+        detail: finding.rationale,
+      })),
+    ...(data.location.rating >= 4.3 && data.location.reviewCount > 0
+      ? [{
+          good: true,
+          title: "Strong star rating",
+          detail: `${data.location.rating.toFixed(1)}★ across ${data.location.reviewCount} Google reviews makes you a safe recommendation.`,
+        }]
+      : []),
+  ].slice(0, 4);
+
   // Positioning breakdown across the questions we actually detail below —
   // a genuine ≥3-slice part-of-whole (a 2-slice named/not donut is chartjunk,
   // DESIGN §3), with "Not named" painted neutral, never blended into a ramp.
@@ -152,15 +174,22 @@ export default async function VisibilityPage() {
         )}
       </div>
 
-      {/* Factor panel */}
+      {/* Factor panel — derived from the latest audit, never hardcoded copy */}
       <Card>
         <CardHeader kicker="Signals" title="What drives whether you're named" />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <FactorRow good title="Strong, recent reviews" detail="4.7★ with fresh reviews makes you a safe recommendation." />
-          <FactorRow good title="Clear service descriptions" detail="Direct billing and dry needling are well described — you win those." />
-          <FactorRow title="Missing service depth" detail="Concussion / vestibular rehab isn't detailed, so AI names others there." />
-          <FactorRow title="Incomplete hours" detail="Saturday hours aren't listed, so 'open Saturday' questions skip you." />
-        </div>
+        {factors.length ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {factors.map((factor) => (
+              <FactorRow key={factor.title} good={factor.good} title={factor.title} detail={factor.detail} />
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            icon="search"
+            title="No profile signals yet"
+            description="Sync your Google data so we can show which parts of your profile help or hurt whether an AI names you."
+          />
+        )}
       </Card>
 
       <div className="flex items-start gap-2 rounded-card border border-gold/40 bg-gold-tint/50 p-3">

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { getPublicProviders } from "@/lib/data";
-import { appUrl } from "@/lib/utils/app-url";
 import { consumeRateLimit } from "@/lib/security/api";
 import { trustedClientIp } from "@/lib/security/client-ip";
 
@@ -15,6 +14,14 @@ export const dynamic = "force-dynamic";
  * Unknown, paused, or degraded codes land on the calm /q-expired fallback —
  * a scan must never dead-end on an error page.
  *
+ * The redirect is RELATIVE on purpose. It used to be resolved against
+ * `appUrl()`, which is derived from environment config — so a scan arriving on
+ * any other origin (a custom domain, a preview deployment, a self-hosted port)
+ * was bounced to the configured host instead of staying where the customer
+ * already was. With no env set that host is localhost:3000, which is a dead end
+ * for a real customer. A relative Location keeps every scan on the origin the
+ * customer actually reached, in every environment.
+ *
  * ABUSE CONTROL: minting a request is an unauthenticated database write, so it
  * is rate-limited per slug and per client IP. Without this, a loop against any
  * known slug inflates the DB with junk requests, poisons the owner's scan/open
@@ -26,8 +33,11 @@ export async function GET(
   req: Request,
   { params }: { params: Promise<{ slug: string }> },
 ) {
-  const base = await appUrl();
-  const expired = () => NextResponse.redirect(new URL("/q-expired", base), 302);
+  // A relative Location is valid per RFC 7231 §7.1.2 and every browser
+  // resolves it against the request URL, which is exactly what we want here.
+  const redirectTo = (path: string) =>
+    new NextResponse(null, { status: 302, headers: { location: path } });
+  const expired = () => redirectTo("/q-expired");
   try {
     const { slug } = await params;
     if (slug) {
@@ -40,7 +50,7 @@ export async function GET(
         try {
           const result = await provider.mintRequestFromQrSlug(slug);
           if (result) {
-            return NextResponse.redirect(new URL(`/r/${result.token}`, base), 302);
+            return redirectTo(`/r/${encodeURIComponent(result.token)}`);
           }
         } catch {
           // This store couldn't resolve the slug — try the next one.

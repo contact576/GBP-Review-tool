@@ -124,6 +124,46 @@ function mergeUnique(custom: string[] | undefined, base: string[]): string[] {
 export function resolveWorkspaceIndustry(
   industryKey: string | undefined,
   custom?: { services?: string[]; attributes?: string[]; label?: string },
+): Industry;
+export function resolveWorkspaceIndustry(
+  industryKey: string | undefined,
+  custom?: IndustryConfigLike,
+): Industry;
+export function resolveWorkspaceIndustry(
+  industryKey: string | undefined,
+  custom?: { services?: string[]; attributes?: string[]; label?: string } | IndustryConfigLike,
+): Industry {
+  return resolveIndustry(industryKey, normalizeCustom(custom));
+}
+
+/**
+ * The stored shape of a workspace's industry overrides. Kept structural rather
+ * than imported so the catalog stays independent of the data layer.
+ */
+export interface IndustryConfigLike {
+  customLabel?: string;
+  customServices?: string[];
+  customAttributes?: string[];
+}
+
+function normalizeCustom(
+  custom?: { services?: string[]; attributes?: string[]; label?: string } | IndustryConfigLike,
+): { services?: string[]; attributes?: string[]; label?: string } | undefined {
+  if (!custom) return undefined;
+  if ("customLabel" in custom || "customServices" in custom || "customAttributes" in custom) {
+    const config = custom as IndustryConfigLike;
+    return {
+      ...(config.customLabel ? { label: config.customLabel } : {}),
+      ...(config.customServices ? { services: config.customServices } : {}),
+      ...(config.customAttributes ? { attributes: config.customAttributes } : {}),
+    };
+  }
+  return custom as { services?: string[]; attributes?: string[]; label?: string };
+}
+
+function resolveIndustry(
+  industryKey: string | undefined,
+  custom?: { services?: string[]; attributes?: string[]; label?: string },
 ): Industry {
   const base = getIndustry(industryKey ?? PROFESSIONAL_SERVICES_INDUSTRY.key);
   if (!custom) return base;

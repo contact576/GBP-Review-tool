@@ -66,14 +66,19 @@ import type {
   ProfileMutationJob,
   ContentPublishingJob,
   AiContentAsset,
+  ProfileSuggestion,
 } from "@/lib/data/types";
 import { prepareProfileMutation, stableStringify } from "@/lib/google/profile-mutation";
 import { executeProfileMutation } from "@/lib/google/mutation-runner";
 import { runLints } from "@/lib/compliance/lints";
 import {
   suggestionToGenerationKind,
+  MANUAL_CONTENT_KINDS,
+  isManualContentKind,
+  manualContentKindLabel,
   type ContentSuggestionPreview,
   type GroundedContentInput,
+  type ManualContentKind,
 } from "@/lib/ai/content-studio";
 import { generateGroundedContentText, generateLocalPostImage } from "@/lib/ai/openai-content";
 import { prepareContentPublication } from "@/lib/google/content-publishing";
@@ -681,6 +686,12 @@ export async function syncGoogleAction(): Promise<GoogleSyncActionResult> {
 
   const stars = typeof pub.rating === "number" ? pub.rating.toFixed(1) : "—";
   const base = `Synced your public Google data: ${stars}★ from ${pub.reviewCount ?? 0} reviews.`;
+  // The public sync now audits the listing too, so report the score and the
+  // number of things to fix even when Business Profile is not connected.
+  const publicAudit =
+    typeof pub.capabilityScore === "number"
+      ? ` Profile score ${pub.capabilityScore}% from public Google data, with ${pub.suggestionsCreated ?? 0} thing${pub.suggestionsCreated === 1 ? "" : "s"} to work on.`
+      : "";
 
   if (profile.ok && profile.pendingApproval) {
     return {
@@ -688,7 +699,10 @@ export async function syncGoogleAction(): Promise<GoogleSyncActionResult> {
       pendingApproval: true,
       rating: pub.rating,
       reviewCount: pub.reviewCount,
-      message: `${base} Your full review history and performance import automatically once Google approves your Business Profile connection (typically 1–2 weeks).`,
+      capabilityScore: pub.capabilityScore,
+      auditFindings: pub.auditFindings,
+      suggestionsCreated: pub.suggestionsCreated,
+      message: `${base}${publicAudit} Your full review history and performance import automatically once Google approves your Business Profile connection (typically 1–2 weeks).`,
     };
   }
   if (profile.ok) {
@@ -709,7 +723,10 @@ export async function syncGoogleAction(): Promise<GoogleSyncActionResult> {
     ok: true,
     rating: pub.rating,
     reviewCount: pub.reviewCount,
-    message: `${base} Connect your Google Business Profile to import your full review history and performance.`,
+    capabilityScore: pub.capabilityScore,
+    auditFindings: pub.auditFindings,
+    suggestionsCreated: pub.suggestionsCreated,
+    message: `${base}${publicAudit} Connect your Google Business Profile to import your full review history and performance.`,
   };
 }
 
@@ -737,6 +754,138 @@ function sameAllowedUrl(candidate: string, allowed: Array<string | undefined>): 
   } catch {
     return undefined;
   }
+}
+
+export type BusinessDetailsActionResult = { ok: boolean; message: string };
+
+/**
+ * Save the business facts an owner can supply without a Google connection.
+ *
+ * Google stays authoritative: when a Business Profile sync has provided a
+ * website or description, that value still wins on screen. This is the fallback
+ * that lets an unconnected workspace supply the website that content CTAs and
+ * website evidence collection both depend on.
+ */
+export async function updateBusinessDetailsAction(
+  formData: FormData,
+): Promise<BusinessDetailsActionResult> {
+  const { provider, ws, session } = await scoped("owner", "manager");
+  const rawWebsite = String(formData.get("website") ?? "").trim();
+  const rawDescription = String(formData.get("ownerDescription") ?? "").trim();
+
+  let website = "";
+  if (rawWebsite) {
+    const candidate = /^https?:\/\//i.test(rawWebsite) ? rawWebsite : `https://${rawWebsite}`;
+    let parsed: URL;
+    try {
+      parsed = new URL(candidate);
+    } catch {
+      return { ok: false, message: "That website address is not a valid URL." };
+    }
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      return { ok: false, message: "The website must be an http or https address." };
+    }
+    if (!parsed.hostname.includes(".")) {
+      return { ok: false, message: "Enter a full domain, for example example.com." };
+    }
+    website = parsed.toString();
+  }
+  if (rawDescription.length > 750) {
+    return { ok: false, message: "Keep the description to 750 characters or fewer." };
+  }
+
+  await provider.updateBusinessDetails(ws, { website, ownerDescription: rawDescription });
+  await provider.appendAuditLog(ws, {
+    id: `audit_${randomBytes(12).toString("hex")}`,
+    workspaceId: ws,
+    actor: session.name,
+    action: "business.details_updated",
+    targetType: "location",
+    targetId: ws,
+    at: new Date().toISOString(),
+    meta: { websiteSet: Boolean(website), descriptionSet: Boolean(rawDescription) },
+  });
+  revalidatePath("/app/settings/business");
+  revalidatePath("/app/studio");
+  return { ok: true, message: "Business details saved." };
+}
+
+export type ManualDraftActionResult =
+  | { ok: true; message: string; suggestionId: string }
+  | { ok: false; message: string };
+
+/**
+ * Start a content draft the owner asked for directly, rather than one the audit
+ * proposed. Grounding is limited to facts Foundly has actually confirmed from
+ * Google Places (business name, category, city) — no Business Profile sync is
+ * required, so the Studio stays usable before API access is granted.
+ *
+ * The draft enters the same inbox at "needs_generation" and then runs through
+ * the unchanged generation path, so it inherits the identical lint pass, exact
+ * preview and approval gate. Nothing here writes to Google.
+ */
+export async function createManualContentDraftAction(
+  kind: string,
+): Promise<ManualDraftActionResult> {
+  const { provider, ws, session } = await scoped("owner", "manager");
+  if (!isManualContentKind(kind)) {
+    return { ok: false, message: "That content type cannot be started manually." };
+  }
+  const limited = consumeRateLimit("ai-manual-draft", session.userId, 8, 60 * 60_000);
+  if (!limited.allowed) {
+    return { ok: false, message: `Draft creation is rate-limited. Try again in ${limited.retryAfter} seconds.` };
+  }
+  const data = await provider.getData(ws);
+  if (!data) return { ok: false, message: "The workspace could not be loaded." };
+  if (!data.location.name.trim() || !data.location.category.trim()) {
+    return {
+      ok: false,
+      message: "Add your business name and category in Settings → Business before generating content.",
+    };
+  }
+
+  const now = new Date().toISOString();
+  const manualKind: ManualContentKind = kind;
+  const label = manualContentKindLabel(manualKind);
+  const suggestion: ProfileSuggestion = {
+    id: `sug_manual_${randomBytes(9).toString("hex")}`,
+    workspaceId: ws,
+    locationId: data.location.id,
+    auditId: "manual",
+    findingId: "manual",
+    target: manualKind === "local_post" ? "local_post" : "description",
+    kind: manualKind === "local_post" ? "local_post" : "profile_edit",
+    title: `${label} requested by ${session.name}`,
+    rationale:
+      "You started this draft yourself. It is grounded only in the business facts Foundly has confirmed from Google Places — connect Business Profile to ground future drafts in your full audit evidence.",
+    priorityScore: 50,
+    risk: manualKind === "local_post" ? "low" : "medium",
+    status: "needs_generation",
+    exactPreviewReady: false,
+    evidenceIds: ["profile.business_name", "profile.primary_category", "profile.city"],
+    blockers: [],
+    nextStep: "Generate exact draft",
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await provider.appendProfileSuggestion(ws, suggestion);
+  await provider.appendAuditLog(ws, {
+    id: `audit_${randomBytes(12).toString("hex")}`,
+    workspaceId: ws,
+    actor: session.name,
+    action: "content.manual_draft_started",
+    targetType: "profile_suggestion",
+    targetId: suggestion.id,
+    at: now,
+    meta: { kind: manualKind },
+  });
+
+  const generated = await generateContentSuggestionPreviewAction(suggestion.id);
+  revalidatePath("/app/studio");
+  revalidatePath("/app/this-week");
+  if (!generated.ok) return { ok: false, message: generated.message };
+  return { ok: true, message: generated.message, suggestionId: suggestion.id };
 }
 
 /**
@@ -781,6 +930,9 @@ export async function generateContentSuggestionPreviewAction(
     ...(snapshot?.location.serviceItems?.length
       ? [{ id: "profile.services", field: "services", value: snapshot.location.serviceItems, source: "google_profile" }]
       : []),
+    ...(data.location.website
+      ? [{ id: "profile.website", field: "website", value: data.location.website, source: "owner" }]
+      : []),
     ...linkedFacts,
   ].slice(0, 40);
 
@@ -804,7 +956,10 @@ export async function generateContentSuggestionPreviewAction(
       businessName: data.location.name,
       primaryCategory: data.location.category,
       city: data.location.city,
-      existingDescription: snapshot?.location.profile?.description ?? data.location.profile.description,
+      existingDescription:
+        snapshot?.location.profile?.description
+        || data.location.profile.description
+        || data.location.ownerDescription,
       verifiedFacts,
       ...(review ? { review: { id: review.id, author: review.author, rating: review.rating, text: review.text } } : {}),
       ...(question?.text ? { question: { resourceName: question.name, text: question.text } } : {}),
@@ -816,7 +971,10 @@ export async function generateContentSuggestionPreviewAction(
     }
 
     const generatedAt = new Date().toISOString();
-    const allowedUrl = sameAllowedUrl(generated.content.callToAction.url, [snapshot?.location.websiteUri]);
+    const allowedUrl = sameAllowedUrl(generated.content.callToAction.url, [
+      snapshot?.location.websiteUri,
+      data.location.website,
+    ]);
     const cta = generated.content.callToAction.actionType !== "NONE"
       ? { actionType: generated.content.callToAction.actionType, ...(allowedUrl ? { url: allowedUrl } : {}) }
       : undefined;

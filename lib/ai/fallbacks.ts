@@ -140,10 +140,16 @@ function composeWarm(s: Slots, rating: number): string {
   return `${opener} ${cap(s.exp)}${staffClause}.${winner} ${cap(s.closer)}.`;
 }
 
+/** "appointment" -> "an appointment", "visit" -> "a visit". */
+function article(noun: string): string {
+  return /^[aeiou]/i.test(noun.trim()) ? "an" : "a";
+}
+
 /** ≤3★ never gets promotional copy — one neutral, factual sentence. */
 function composeNeutral(input: ReviewDraftInput, industry: Industry): DraftVariant[] {
   const svcTail = input.service ? ` for ${lc(input.service)}` : "";
-  const text = `I had a ${industry.terminology.visit} at ${input.business}${svcTail}.`;
+  const visit = industry.terminology.visit;
+  const text = `I had ${article(visit)} ${visit} at ${input.business}${svcTail}.`;
   return [
     { text, tone: "Short & natural" },
     { text: `I visited ${input.business}${svcTail}.`, tone: "Detailed & specific" },

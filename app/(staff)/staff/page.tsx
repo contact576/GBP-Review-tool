@@ -8,13 +8,7 @@ export default async function StaffCapturePage() {
   // workspace-level custom attributes), same source as the customer flow.
   const industry = resolveWorkspaceIndustry(
     data.location.vertical,
-    data.workspace.industryConfig
-      ? {
-          label: data.workspace.industryConfig.customLabel,
-          services: data.workspace.industryConfig.customServices,
-          attributes: data.workspace.industryConfig.customAttributes,
-        }
-      : undefined,
+    data.workspace.industryConfig,
   );
   const seeds = industry.attributes.slice(0, 8);
 

@@ -99,7 +99,15 @@ export async function findRequestByToken(token: string): Promise<
       staffName?: string;
       /** First service captured on the customer (staff-captured requests). */
       serviceHint?: string;
+      /** Every service captured on the customer, most relevant first. */
+      serviceHints?: string[];
       industryKey?: string;
+      /**
+       * The owner's custom services/attributes. The customer review page offers
+       * these before the catalog defaults, so a workspace that renamed its
+       * services sees its own words on the public page.
+       */
+      industryConfig?: import("./types").IndustryConfig;
     }
   | null
 > {
@@ -113,7 +121,9 @@ export async function findRequestByToken(token: string): Promise<
         ...result,
         staffName: staff?.displayName.split(/\s+/)[0],
         serviceHint: customer?.services[0],
+        serviceHints: customer?.services,
         industryKey: data?.workspace.vertical,
+        industryConfig: data?.workspace.industryConfig,
       };
     }
   }

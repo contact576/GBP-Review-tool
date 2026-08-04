@@ -9,6 +9,7 @@ import { formatRelative } from "@/lib/utils/format";
 import { SettingsShell } from "../SettingsShell";
 import { Callout, SettingsSection, SpecList, SpecRow } from "../SettingsUI";
 import { SyncGoogleButton } from "@/components/app/SyncGoogleButton";
+import { BusinessDetailsForm } from "./BusinessDetailsForm";
 
 export default async function BusinessSettingsPage() {
   const data = await getData();
@@ -27,8 +28,11 @@ export default async function BusinessSettingsPage() {
     ...(snapshot?.location.phoneNumbers?.primaryPhone
       ? [{ label: "Primary phone", value: snapshot.location.phoneNumbers.primaryPhone }]
       : []),
-    ...(snapshot?.location.websiteUri
-      ? [{ label: "Website", value: snapshot.location.websiteUri }]
+    ...(snapshot?.location.websiteUri || loc.website
+      ? [{
+          label: "Website",
+          value: snapshot?.location.websiteUri ?? `${loc.website} (entered by you)`,
+        }]
       : []),
     ...(snapshot
       ? [{ label: "Google resource", value: snapshot.locationResource }]
@@ -90,6 +94,19 @@ export default async function BusinessSettingsPage() {
         <Callout tone="info" icon="lock" className="mt-4">
           Foundly never adds ranking keywords to your business name. A genuine real-world name correction requires confirmed evidence and explicit approval.
         </Callout>
+      </SettingsSection>
+
+      {/* Owner-entered facts — the only editable details until Google is connected */}
+      <SettingsSection
+        kicker="Entered by you"
+        title="Details Google hasn't supplied"
+        action={<Badge tone="neutral">Saved in Foundly</Badge>}
+      >
+        <BusinessDetailsForm
+          website={loc.website ?? ""}
+          ownerDescription={loc.ownerDescription ?? ""}
+          googleWebsite={snapshot?.location.websiteUri}
+        />
       </SettingsSection>
 
       {/* Profile completeness */}

@@ -20,6 +20,11 @@ const FIELD_MASK = [
   "places.userRatingCount",
   "places.primaryTypeDisplayName",
 ].join(",");
+/**
+ * Everything Places (New) exposes that the profile audit can actually check.
+ * Each field here becomes an audit signal, so adding one means adding a check —
+ * the audit never claims to have seen a field that is not in this mask.
+ */
 const DETAILS_FIELD_MASK = [
   "id",
   "displayName",
@@ -27,8 +32,15 @@ const DETAILS_FIELD_MASK = [
   "rating",
   "userRatingCount",
   "primaryTypeDisplayName",
+  "types",
   "googleMapsUri",
   "location",
+  "businessStatus",
+  "websiteUri",
+  "nationalPhoneNumber",
+  "regularOpeningHours",
+  "editorialSummary",
+  "photos",
   "reviews.rating",
   "reviews.text",
   "reviews.originalText",
@@ -173,6 +185,24 @@ export interface PlaceDetails {
    * `reviewCount` for the true total.
    */
   reviews: PublicReview[];
+
+  // ── Public profile fields the audit checks ──────────────────
+  /** Website on the public Google listing, if any. */
+  websiteUri?: string;
+  /** Public phone number on the listing, if any. */
+  phone?: string;
+  /** True when Google publishes regular opening hours for the listing. */
+  hasHours: boolean;
+  /** Number of weekday entries Google publishes (0-7). */
+  openDayCount: number;
+  /** How many photos are attached to the public listing. */
+  photoCount: number;
+  /** Google's editorial summary, when present. */
+  editorialSummary?: string;
+  /** All Google place types on the listing (proxy for category coverage). */
+  types: string[];
+  /** OPERATIONAL, CLOSED_TEMPORARILY, CLOSED_PERMANENTLY, or undefined. */
+  businessStatus?: string;
 }
 
 export type PlaceDetailsResult =
@@ -194,8 +224,15 @@ interface RawDetails {
   rating?: number;
   userRatingCount?: number;
   primaryTypeDisplayName?: { text?: string };
+  types?: string[];
   googleMapsUri?: string;
   location?: { latitude?: number; longitude?: number };
+  businessStatus?: string;
+  websiteUri?: string;
+  nationalPhoneNumber?: string;
+  regularOpeningHours?: { periods?: unknown[]; weekdayDescriptions?: string[] };
+  editorialSummary?: { text?: string };
+  photos?: unknown[];
   reviews?: RawReview[];
 }
 
@@ -225,6 +262,7 @@ export async function getPlaceDetails(placeId: string): Promise<PlaceDetailsResu
     }
     const raw = (await res.json()) as RawDetails;
     const address = raw.formattedAddress ?? "";
+    const weekdays = raw.regularOpeningHours?.weekdayDescriptions ?? [];
     return {
       ok: true,
       details: {
@@ -241,6 +279,16 @@ export async function getPlaceDetails(placeId: string): Promise<PlaceDetailsResu
             ? { latitude: raw.location.latitude, longitude: raw.location.longitude }
             : undefined,
         reviews: (raw.reviews ?? []).slice(0, 5).map(toPublicReview),
+        websiteUri: raw.websiteUri,
+        phone: raw.nationalPhoneNumber,
+        hasHours: weekdays.length > 0 || (raw.regularOpeningHours?.periods?.length ?? 0) > 0,
+        // "Monday: Closed" still counts as published hours; a listing with no
+        // weekday lines at all is what the audit flags.
+        openDayCount: weekdays.length,
+        photoCount: raw.photos?.length ?? 0,
+        editorialSummary: raw.editorialSummary?.text,
+        types: raw.types ?? [],
+        businessStatus: raw.businessStatus,
       },
     };
   } catch (err) {

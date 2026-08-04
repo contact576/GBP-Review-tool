@@ -1072,6 +1072,16 @@ export const memoryProvider: DataProvider = {
       ...data.reviews.filter((r) => !isPublicSampleReview(r.id)),
     ];
     data.metrics = upsertSnapshot(data.metrics, update.snapshot);
+    // The public audit is the fallback, never an overwrite: a Business Profile
+    // snapshot sees posts, Q&A, replies and services that Places cannot, so its
+    // audit and inbox always win.
+    if (!data.location.gbpSnapshot) {
+      data.location.gbpAudit = update.audit;
+      data.location.suggestionInbox = mergeSuggestionInbox(
+        data.location.suggestionInbox ?? [],
+        update.suggestions,
+      );
+    }
     const places = data.integrations.find((i) => i.provider === "google_places");
     if (places) {
       places.status = "connected";
@@ -1083,6 +1093,13 @@ export const memoryProvider: DataProvider = {
       rating: update.rating,
       reviewCount: update.reviewCount,
       reviewsImported: update.reviews.length,
+      ...(data.location.gbpSnapshot
+        ? {}
+        : {
+            capabilityScore: update.audit.applicableProfileScore,
+            auditFindings: update.audit.findings.length,
+            suggestionsCreated: update.suggestions.length,
+          }),
     };
   },
 
@@ -1205,6 +1222,21 @@ export const memoryProvider: DataProvider = {
     const suggestion = (data.location.suggestionInbox ?? []).find((item) => item.id === suggestionId);
     if (!suggestion) return null;
     Object.assign(suggestion, patch);
+    return suggestion;
+  },
+
+  async updateBusinessDetails(workspaceId, patch) {
+    const data = mustDb(workspaceId);
+    if (patch.website !== undefined) data.location.website = patch.website || undefined;
+    if (patch.ownerDescription !== undefined) data.location.ownerDescription = patch.ownerDescription || undefined;
+  },
+
+  async appendProfileSuggestion(workspaceId, suggestion) {
+    if (suggestion.workspaceId !== workspaceId) throw new Error("Suggestion workspace mismatch.");
+    const data = mustDb(workspaceId);
+    data.location.suggestionInbox ??= [];
+    if (data.location.suggestionInbox.some((item) => item.id === suggestion.id)) return suggestion;
+    data.location.suggestionInbox.unshift(suggestion);
     return suggestion;
   },
 

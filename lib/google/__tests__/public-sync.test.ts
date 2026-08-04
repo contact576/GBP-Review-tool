@@ -48,6 +48,13 @@ const details: PlaceDetails = {
   rating: 4.6,
   reviewCount: 128,
   category: "Cafe",
+  websiteUri: "https://testbiz.example",
+  phone: "(416) 555-0100",
+  hasHours: true,
+  openDayCount: 7,
+  photoCount: 12,
+  types: ["cafe", "food", "point_of_interest"],
+  businessStatus: "OPERATIONAL",
   reviews: [
     { author: "Sam", rating: 5, text: "Great coffee", relativeTime: "2 weeks ago", publishedAt: "2026-07-01T00:00:00.000Z" },
     { author: "Jo", rating: 4, text: "Solid spot", relativeTime: "a month ago", publishedAt: "2026-06-15T00:00:00.000Z" },

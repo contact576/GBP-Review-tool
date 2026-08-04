@@ -65,7 +65,7 @@ matcher: ["/app/:path*", "/agency/:path*", "/admin/:path*", "/onboarding/:path*"
 | A9 | `/api/ai/report-narration` | POST | Session + `owner\|manager` | 10/min | ✅ OK | V3, V7 |
 | A10 | `/api/ai/task-copy` | POST | Session + `owner\|manager` | 20/min | ✅ OK | V3, V7 |
 | A11 | `/api/ai/review-edit` | POST | **None** — review token only | 30/min IP + 10/min token | 🔴 LOOSE | **V3**, V7, V14 |
-| A12 | `/api/ai/review-draft` | POST | n/a — returns HTTP 410 | n/a | ✅ Retired | — |
+| A12 | `/api/ai/review-draft` | POST | **None** — review token only | 30/min IP + 12/min token | 🔴 LOOSE | **V3**, V7, V14 |
 | A13 | `/api/ai/score-sample` | POST | n/a — returns HTTP 410 | n/a | ✅ Retired | — |
 | A14 | `/api/ai/content-assets/[assetId]` | GET | Session + 4 roles + id regex | 120/min | ✅ OK | — |
 | A15 | `/api/public/content-assets/[assetId]` | GET | HMAC-SHA256 signature + expiry | None | ✅ OK | — |

@@ -34,6 +34,7 @@ import type {
   AiContentAsset,
   AuditLog,
   Notification,
+  BusinessDetailsPatch,
 } from "./types";
 
 export type ProfileSuggestionPatch = Partial<
@@ -461,6 +462,20 @@ export interface DataProvider {
     suggestionId: string,
     patch: ProfileSuggestionPatch,
   ): Promise<ProfileSuggestion | null>;
+  /**
+   * Save owner-entered business facts. Google stays authoritative wherever it is
+   * connected; these fill the gap for workspaces that are not.
+   */
+  updateBusinessDetails(workspaceId: string, patch: BusinessDetailsPatch): Promise<void>;
+  /**
+   * Add one suggestion to the inbox. Used by the owner-initiated content path,
+   * which has no audit finding behind it — the audit builder still owns every
+   * suggestion it creates during a Business Profile sync.
+   */
+  appendProfileSuggestion(
+    workspaceId: string,
+    suggestion: ProfileSuggestion,
+  ): Promise<ProfileSuggestion>;
   createProfileMutationJob(
     workspaceId: string,
     job: ProfileMutationJob,

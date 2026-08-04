@@ -119,6 +119,10 @@ export const location = pgTable("location", {
   gbpSnapshot: jsonb("gbp_snapshot").$type<GbpProfileSnapshot>(),
   gbpAudit: jsonb("gbp_audit").$type<LocalGrowthAudit>(),
   suggestionInbox: jsonb("suggestion_inbox").$type<ProfileSuggestion[]>(),
+  /** Owner-entered website, used when Google has not supplied one. */
+  website: text("website"),
+  /** Owner-entered description, used when Google has not supplied one. */
+  ownerDescription: text("owner_description"),
 });
 
 export const appUser = pgTable("app_user", {

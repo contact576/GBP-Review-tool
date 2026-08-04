@@ -9,10 +9,11 @@ export default async function ReviewPage({ params }: { params: Promise<{ token: 
   const result = await findRequestByToken(token);
   if (!result) notFound();
 
-  const { location, staffName, serviceHint, request } = result;
-  // Industry catalog is the single source of attribute chips — positive
-  // chips first, then the neutral/experience chips.
-  const industry = resolveWorkspaceIndustry(location.vertical, undefined);
+  const { location, staffName, serviceHint, industryKey, industryConfig, request } = result;
+  // Industry catalog is the single source of services and attribute chips, with
+  // the owner's own custom values layered in front of the catalog defaults.
+  // Positive chips come first, then the neutral/experience chips.
+  const industry = resolveWorkspaceIndustry(industryKey ?? location.vertical, industryConfig);
   const seeds = [...industry.attributes, ...industry.neutralAttributes];
 
   return (
@@ -34,10 +35,11 @@ export default async function ReviewPage({ params }: { params: Promise<{ token: 
         token={token}
         business={location.name}
         category={location.category}
-        industryKey={location.vertical}
+        industryKey={industry.key}
         service={serviceHint}
         reviewUrl={location.reviewUrl}
         staffName={staffName}
+        serviceOptions={industry.services}
         attributeSeeds={seeds}
         initialStatus={request.status}
         initialRating={request.rating}

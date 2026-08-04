@@ -18,7 +18,7 @@ bugs; they are known and listed with what unblocks them.
 | B2 | `TWILIO_*` not set | SMS channel inert | Add SID, auth token, messaging service SID |
 | B3 | `STRIPE_SECRET_KEY` / price IDs not set | No checkout, no upgrade, no real plan enforcement | Add Stripe keys + webhook secret + price IDs |
 | B4 | `ANTHROPIC_API_KEY` not set | AI copy silently falls back to deterministic templates (`source: "template"`) | Add key |
-| B5 | Business Profile API not enabled/approved | No review import, no reply publishing, no performance data | Enable My Business APIs; request per-project access |
+| B5 | Business Profile API not enabled/approved | No review import, no reply publishing, no performance data. **Since 2026-08-04 this no longer blocks the profile score or the recommendation list** — `syncGooglePublic` runs a Places-backed audit (10 checks: website, phone, hours, photos, description, categories, review volume/recency/rating, listing status) that produces a real score and real next actions. Checks Places cannot see (posts, Q&A, review replies, services, special hours) are shown as blocked, never as passing | Enable My Business APIs; request per-project access |
 | B6 | OAuth consent screen unverified for `business.manage` | Only test users can connect; real customers cannot | Submit Google verification |
 | B7 | OAuth client is the shared PPC Guru client | Consent screen asks for Gmail/Drive/Ads scopes; Foundly holds far more access than it needs | Create a dedicated client with only `business.manage` + `webmasters.readonly` |
 
@@ -77,7 +77,8 @@ node live-check.mjs   https://foundly-phi.vercel.app                    # real s
 | C1 | Add a customer with consent ticked | Row in `customer`; consent recorded in `customer_consent` |
 | C2 | Add a customer **without** consent | Cannot send a request to them — blocked with a clear reason |
 | C3 | Send a review request | Row in `review_request` with a unique token **[B1: status stays "queued", no email sent]** |
-| C4 | Open the request token URL in a clean browser (no session) | Public rating page for the right business |
+| C4 | Open the request token URL in a clean browser (no session) | Service question for the right business, then rating, then suggested wording |
+| C4b | Scan a QR on a host other than the configured app URL (e.g. a preview deploy) | Stays on that host. Regression: `/q/<slug>` used to redirect to `appUrl()`, which is `localhost:3000` when unset — every scan left the app |
 | C5 | Rate **5 stars** | Routed onward to the real Google review URL for that location |
 | C6 | Rate **4 stars** | Same Google path |
 | C7 | Rate **2 stars** | Private feedback form — must **not** push to Google |

@@ -614,6 +614,19 @@ export interface Location {
   gbpAudit?: LocalGrowthAudit;
   /** Ranked, approval-gated actions derived from the latest audit. */
   suggestionInbox?: ProfileSuggestion[];
+  /**
+   * Owner-entered business facts. Google is authoritative when connected — these
+   * are the fallback so an unconnected workspace can still supply the website and
+   * description that content generation and website evidence depend on.
+   */
+  website?: string;
+  ownerDescription?: string;
+}
+
+/** Owner-editable business details that do not require a Google connection. */
+export interface BusinessDetailsPatch {
+  website?: string;
+  ownerDescription?: string;
 }
 
 export interface User {

@@ -3,6 +3,7 @@ import {
   registerAccount,
   uniqueEmail,
   captureCustomer,
+  rateExperience,
 } from "./helpers";
 
 /**
@@ -103,23 +104,25 @@ for (const s of SCENARIOS) {
     // 4. Studio exposes the location QR + short /q/ URL.
     const slug = await studioSlug(page);
 
-    // 5. Scanning the QR mints a live review session for THIS business.
+    // 5. Scanning the QR mints a live review session for THIS business, and the
+    //    panel opens on the service question naming that business.
     await page.goto(`/q/${slug}`);
     await page.waitForURL(/\/r\/[A-Za-z0-9_]+/);
     await expect(
       page.getByRole("heading", {
-        name: new RegExp(`How was your experience with ${escapeRegex(s.business)}`),
+        name: new RegExp(`What did you come to ${escapeRegex(s.business)} for`),
       }),
     ).toBeVisible();
 
-    // 6. Every industry receives the same customer-authored review experience.
-    await page.getByRole("radio", { name: "5 stars" }).click();
-    await expect(page.getByRole("heading", { name: "Share your experience in your own words" })).toBeVisible();
-    await expect(page.getByLabel("Your Google review in your own words")).toBeVisible();
+    // 6. Every industry offers its own service list, then the same rating step.
+    await rateExperience(page, 5);
     await expect(page.locator('[data-compliance="public-google-link"]')).toBeVisible();
 
-    // 7. For auto_repair, run the full 5★ journey to the thank-you page.
+    // 7. For auto_repair, run the full 5★ journey to the thank-you page using
+    //    the customer's own words rather than any suggested wording.
     if (s.fullFlow) {
+      const ownWords = page.getByRole("button", { name: /Write my own/ });
+      if (await ownWords.isVisible().catch(() => false)) await ownWords.click();
       await page.getByLabel("Your Google review in your own words").fill(
         "The team explained the work clearly and treated me with respect.",
       );

@@ -67,6 +67,7 @@ import type {
   ContentPublishingJob,
   MonitoringRun,
   AiContentAsset,
+  BusinessDetailsPatch,
 } from "./types";
 
 /**
@@ -262,6 +263,8 @@ function mapLocation(row: LocationRow): Location {
     gbpSnapshot: row.gbpSnapshot ?? undefined,
     gbpAudit: row.gbpAudit ?? undefined,
     suggestionInbox: row.suggestionInbox ?? undefined,
+    website: row.website ?? undefined,
+    ownerDescription: row.ownerDescription ?? undefined,
     profile: {
       description: row.profileDescription,
       primaryCategory: row.profilePrimaryCategory,
@@ -597,6 +600,8 @@ function buildLocationRow(l: Location): typeof t.location.$inferInsert {
     gbpSnapshot: l.gbpSnapshot,
     gbpAudit: l.gbpAudit,
     suggestionInbox: l.suggestionInbox,
+    website: l.website ?? null,
+    ownerDescription: l.ownerDescription ?? null,
   };
 }
 
@@ -3175,10 +3180,25 @@ export const drizzleProvider: DataProvider = {
 
     const update = buildGooglePublicUpdate(res.details, location, nowIso());
 
-    // 1) Real aggregate onto the location row.
+    // 1) Real aggregate onto the location row. The public audit is a fallback,
+    // never an overwrite: a Business Profile snapshot sees posts, Q&A, replies
+    // and services that Places cannot, so its audit and inbox always win.
+    const usePublicAudit = !location.gbpSnapshot;
     await db
       .update(t.location)
-      .set({ rating: update.rating, reviewCount: update.reviewCount })
+      .set({
+        rating: update.rating,
+        reviewCount: update.reviewCount,
+        ...(usePublicAudit
+          ? {
+              gbpAudit: update.audit,
+              suggestionInbox: mergeSuggestionInbox(
+                location.suggestionInbox ?? [],
+                update.suggestions,
+              ),
+            }
+          : {}),
+      })
       .where(and(eq(t.location.id, ctx.location.id), eq(t.location.workspaceId, workspaceId)));
 
     // 2) Replace the prior public sample (keep GBP/owner reviews).
@@ -3217,6 +3237,13 @@ export const drizzleProvider: DataProvider = {
       rating: update.rating,
       reviewCount: update.reviewCount,
       reviewsImported: update.reviews.length,
+      ...(usePublicAudit
+        ? {
+            capabilityScore: update.audit.applicableProfileScore,
+            auditFindings: update.audit.findings.length,
+            suggestionsCreated: update.suggestions.length,
+          }
+        : {}),
     };
   },
 
@@ -3431,6 +3458,32 @@ export const drizzleProvider: DataProvider = {
       .set({ suggestionInbox: nextInbox })
       .where(eq(t.location.workspaceId, workspaceId));
     return updated;
+  },
+
+  async updateBusinessDetails(workspaceId: string, patch: BusinessDetailsPatch) {
+    const db = getDb();
+    const set: Record<string, string | null> = {};
+    if (patch.website !== undefined) set.website = patch.website || null;
+    if (patch.ownerDescription !== undefined) set.ownerDescription = patch.ownerDescription || null;
+    if (!Object.keys(set).length) return;
+    await db.update(t.location).set(set).where(eq(t.location.workspaceId, workspaceId));
+  },
+
+  async appendProfileSuggestion(workspaceId: string, suggestion: ProfileSuggestion) {
+    if (suggestion.workspaceId !== workspaceId) throw new Error("Suggestion workspace mismatch.");
+    const db = getDb();
+    const rows = await db
+      .select({ suggestionInbox: t.location.suggestionInbox })
+      .from(t.location)
+      .where(eq(t.location.workspaceId, workspaceId))
+      .limit(1);
+    const inbox = rows[0]?.suggestionInbox ?? [];
+    if (inbox.some((item) => item.id === suggestion.id)) return suggestion;
+    await db
+      .update(t.location)
+      .set({ suggestionInbox: [suggestion, ...inbox] })
+      .where(eq(t.location.workspaceId, workspaceId));
+    return suggestion;
   },
 
   async createProfileMutationJob(workspaceId, job) {

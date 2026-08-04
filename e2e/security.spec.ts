@@ -29,18 +29,35 @@ test.describe("security boundaries", () => {
     expect(deepHealth.status()).toBe(403);
   });
 
+  // The review APIs are token-only, so the CSRF origin guard runs FIRST: a
+  // POST without a same-origin Origin is refused before the token is even read.
+  // Both facts matter, so both are asserted.
+  const sameOrigin = { origin: "http://localhost:3200" };
+
   test("customer review editing requires a valid review token", async ({ request }) => {
+    const crossOrigin = await request.post("/api/ai/review-edit", {
+      data: { token: "not-a-real-token", text: "The staff were helpful." },
+    });
+    expect(crossOrigin.status()).toBe(403);
+
     const response = await request.post("/api/ai/review-edit", {
+      headers: sameOrigin,
       data: { token: "not-a-real-token", text: "The staff were helpful." },
     });
     expect(response.status()).toBe(404);
   });
 
-  test("legacy customer review generation is retired", async ({ request }) => {
-    const response = await request.post("/api/ai/review-draft", {
+  test("customer review drafting requires a valid review token", async ({ request }) => {
+    const crossOrigin = await request.post("/api/ai/review-draft", {
       data: { token: "not-a-real-token", rating: 5, attributes: ["Helpful"] },
     });
-    expect(response.status()).toBe(410);
+    expect(crossOrigin.status()).toBe(403);
+
+    const response = await request.post("/api/ai/review-draft", {
+      headers: sameOrigin,
+      data: { token: "not-a-real-token", rating: 5, attributes: ["Helpful"] },
+    });
+    expect(response.status()).toBe(404);
   });
 
   test("monitoring and generated image delivery fail closed without valid signatures", async ({ request }) => {
