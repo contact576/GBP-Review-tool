@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import type { DataProvider } from "./provider";
 import { memoryProvider, DEMO_WORKSPACE_ID } from "./memory-provider";
@@ -58,18 +59,25 @@ export async function getPublicProviders(): Promise<DataProvider[]> {
 }
 
 /**
+ * One workspace fetch per request, shared by every caller.
+ *
+ * `provider.getData` fans out to ~21 tables. A single `/app` render used to run
+ * it three times over (layout, page, and the org rollup) for the *same*
+ * workspace — ~60 queries where 21 would do, each paying a full round trip to
+ * Postgres. React's `cache` is request-scoped and keyed on the arguments, so
+ * the provider singleton plus the workspace id keep tenants strictly isolated.
+ */
+const loadWorkspaceData = cache(
+  async (provider: DataProvider, workspaceId: string): Promise<FoundlyData | null> =>
+    provider.getData(workspaceId),
+);
+
+/**
  * The whole current-tenant dataset. Signature unchanged from v1 — resolves
  * the session internally so all pages keep calling `await getData()`.
  */
 export async function getData(): Promise<FoundlyData> {
-  const session = await getSession();
-  if (!session) redirect("/sign-in");
-  const provider = await getProviderFor(session);
-  const data = await provider.getData(session.workspaceId);
-  if (!data) {
-    // Stale session pointing at a vanished workspace (e.g. memory reset).
-    redirect("/sign-in?expired=1");
-  }
+  const { data } = await getSessionAndData();
   return data;
 }
 
@@ -78,7 +86,8 @@ export async function getSessionAndData(): Promise<{ session: Session; data: Fou
   const session = await getSession();
   if (!session) redirect("/sign-in");
   const provider = await getProviderFor(session);
-  const data = await provider.getData(session.workspaceId);
+  const data = await loadWorkspaceData(provider, session.workspaceId);
+  // Stale session pointing at a vanished workspace (e.g. memory reset).
   if (!data) redirect("/sign-in?expired=1");
   return { session, data };
 }
@@ -114,7 +123,7 @@ export async function findRequestByToken(token: string): Promise<
   for (const provider of await getPublicProviders()) {
     const result = await provider.getRequestByToken(token);
     if (result) {
-      const data = await provider.getData(result.location.workspaceId);
+      const data = await loadWorkspaceData(provider, result.location.workspaceId);
       const staff = data?.staff.find((s) => s.id === result.request.staffId);
       const customer = data?.customers.find((c) => c.id === result.request.customerId);
       return {
@@ -157,7 +166,7 @@ export async function getWidgetData(slug: string): Promise<WidgetData | null> {
   for (const provider of await getPublicProviders()) {
     const wsId = await provider.getWorkspaceIdBySlug(slug);
     if (!wsId) continue;
-    const data = await provider.getData(wsId);
+    const data = await loadWorkspaceData(provider, wsId);
     if (!data) continue;
     const reviews = data.reviews
       .filter((r) => r.text.trim().length > 0 && r.rating >= 4)

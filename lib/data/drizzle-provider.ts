@@ -6,7 +6,7 @@ import * as t from "../db/schema";
 import { emptyFoundlyData, makeSlug } from "./empty";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { canonicalPhone } from "@/lib/sms/phone";
-import { PLANS } from "@/lib/billing/plans";
+import { PLANS, normalizePlan } from "@/lib/billing/plans";
 import { mergeSuggestionInbox } from "@/lib/suggestions/inbox";
 import {
   buildGooglePublicUpdate,
@@ -232,7 +232,7 @@ function mapWorkspace(row: WorkspaceRow): Workspace {
     industryConfig: row.industryConfig ?? undefined,
     region: row.region as Workspace["region"],
     timezone: row.timezone,
-    plan: row.plan as Workspace["plan"],
+    plan: normalizePlan(row.plan),
     createdAt: row.createdAt,
     isDemo: row.isDemo,
     whiteLabel: row.whiteLabel ?? undefined,
@@ -466,7 +466,10 @@ function mapSubscription(row: SubscriptionRow): Subscription {
   return {
     id: row.id,
     workspaceId: row.workspaceId,
-    tier: row.tier as Subscription["tier"],
+    // Normalized on the way out so a retired tier still sitting in the column
+    // (e.g. "pro", folded into Growth) can never reach `PLANS[tier]` as an
+    // undefined lookup and take a page down.
+    tier: normalizePlan(row.tier),
     interval: row.interval as Subscription["interval"],
     status: row.status as Subscription["status"],
     trialEndsAt: row.trialEndsAt ?? undefined,
@@ -1484,27 +1487,42 @@ export const drizzleProvider: DataProvider = {
       .limit(1);
     const current = currentRows[0];
     if (!current) return [];
-    const workspaces = await db
-      .select({ id: t.workspace.id })
+    // One join, not a getData() per sibling.
+    //
+    // This runs on EVERY /app/* page (the location switcher in the shell). It
+    // used to loop `getData(workspace.id)` — ~21 queries each, awaited
+    // sequentially — to fill seven scalar fields, so a 5-location org paid 105
+    // round trips to render a dropdown. Everything needed lives on three tables,
+    // and only `metrics` is pulled from the 15-column dataset_meta row.
+    const rows = await db
+      .select({
+        workspaceId: t.workspace.id,
+        isDemo: t.workspace.isDemo,
+        locationId: t.location.id,
+        name: t.location.name,
+        city: t.location.city,
+        rating: t.location.rating,
+        reviewCount: t.location.reviewCount,
+        metrics: t.datasetMeta.metrics,
+      })
       .from(t.workspace)
+      .innerJoin(t.location, eq(t.location.workspaceId, t.workspace.id))
+      .innerJoin(t.datasetMeta, eq(t.datasetMeta.workspaceId, t.workspace.id))
       .where(eq(t.workspace.organizationId, current.organizationId));
-    const summaries = [];
-    for (const workspace of workspaces) {
-      const data = await drizzleProvider.getData(workspace.id);
-      if (!data) continue;
-      const latest = [...data.metrics].sort((a, b) => a.date.localeCompare(b.date)).pop();
-      const trustedScore = data.workspace.isDemo || Boolean(latest?.sources?.scores);
-      summaries.push({
-        workspaceId: data.workspace.id,
-        locationId: data.location.id,
-        name: data.location.name,
-        city: data.location.city,
-        rating: data.location.rating,
-        reviewCount: data.location.reviewCount,
+
+    return rows.map((row) => {
+      const latest = [...(row.metrics ?? [])].sort((a, b) => a.date.localeCompare(b.date)).pop();
+      const trustedScore = row.isDemo || Boolean(latest?.sources?.scores);
+      return {
+        workspaceId: row.workspaceId,
+        locationId: row.locationId,
+        name: row.name,
+        city: row.city,
+        rating: row.rating,
+        reviewCount: row.reviewCount,
         growthScore: trustedScore ? latest?.growthScore ?? null : null,
-      });
-    }
-    return summaries;
+      };
+    });
   },
 
   async listAgencyClients(workspaceId) {

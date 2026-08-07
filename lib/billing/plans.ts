@@ -4,7 +4,24 @@
  * the reverse-trial → living-free-tier downgrade. Pure data; no Stripe SDK.
  */
 
-export type PlanId = "free" | "starter" | "growth" | "pro" | "multi" | "agency";
+export type PlanId = "free" | "starter" | "growth" | "multi" | "agency";
+
+/**
+ * Plans that existed in earlier releases and may still sit in the `tier` column
+ * of live subscription rows. Reads normalize through `normalizePlan` so a
+ * retired tier never crashes a page or silently drops entitlements.
+ */
+const LEGACY_PLAN_ALIASES: Record<string, PlanId> = {
+  // "Pro" was folded into Growth — Growth now carries every single-location tool.
+  pro: "growth",
+};
+
+/** Coerce any stored tier string (including retired ones) to a live plan id. */
+export function normalizePlan(tier: string | null | undefined): PlanId {
+  if (!tier) return "free";
+  if (tier in PLANS) return tier as PlanId;
+  return LEGACY_PLAN_ALIASES[tier] ?? "free";
+}
 
 export type Feature =
   | "ai_drafts"
@@ -58,17 +75,8 @@ export const PLANS: Record<PlanId, Plan> = {
     name: "Growth",
     priceMonthly: 99,
     priceAnnualMonthly: 82,
-    blurb: "Everything to get found and get chosen. Most popular.",
+    blurb: "Every tool for one location — rank grid, AI visibility, and the co-pilot included.",
     anchor: true,
-    features: ["ai_drafts", "campaigns_lite", "gbp_copilot", "remove_badge"],
-    limits: { aiDraftsPerMonth: -1, locations: 1, smsCredits: 250, seats: 10 },
-  },
-  pro: {
-    id: "pro",
-    name: "Pro",
-    priceMonthly: 179,
-    priceAnnualMonthly: 149,
-    blurb: "Rank grid, AI visibility, and Campaigns Pro.",
     features: [
       "ai_drafts",
       "campaigns_lite",
@@ -78,7 +86,7 @@ export const PLANS: Record<PlanId, Plan> = {
       "ai_visibility",
       "remove_badge",
     ],
-    limits: { aiDraftsPerMonth: -1, locations: 1, smsCredits: 500, seats: 20 },
+    limits: { aiDraftsPerMonth: -1, locations: 1, smsCredits: 250, seats: 10 },
   },
   multi: {
     id: "multi",
@@ -119,15 +127,46 @@ export const PLANS: Record<PlanId, Plan> = {
   },
 };
 
-export const PLAN_ORDER: PlanId[] = ["free", "starter", "growth", "pro", "multi", "agency"];
+export const PLAN_ORDER: PlanId[] = ["free", "starter", "growth", "multi", "agency"];
 
-/** During the 14-day reverse trial every workspace gets full Growth. */
+/** Length of the no-card reverse trial, in days. */
+export const TRIAL_DAYS = 30;
+
+/** The plan a trialing workspace is treated as being on. */
+export const TRIAL_PLAN: PlanId = "growth";
+
+/**
+ * Every tool unlocked during the trial. Deliberately spelled out rather than
+ * derived, so "what does the trial include" is a one-line answer and a
+ * one-line change. Packaging-only entitlements (`multi_location`,
+ * `white_label`) are not tools and stay with their tiers.
+ */
+export const TRIAL_FEATURES: readonly Feature[] = [
+  "ai_drafts",
+  "campaigns_lite",
+  "campaigns_pro",
+  "gbp_copilot",
+  "rank_grid",
+  "ai_visibility",
+  "remove_badge",
+];
+
+/**
+ * During the 30-day reverse trial every workspace gets the full toolset.
+ *
+ * The trial *raises* a workspace to the trial plan — it never lowers one. A
+ * paying Multi-location or Agency customer whose Stripe status is `trialing`
+ * keeps their own (higher) entitlements instead of being silently downgraded.
+ */
 export function effectivePlan(planId: PlanId, trialing: boolean): PlanId {
-  return trialing ? "growth" : planId;
+  const plan = normalizePlan(planId);
+  if (!trialing) return plan;
+  return PLAN_ORDER.indexOf(plan) > PLAN_ORDER.indexOf(TRIAL_PLAN) ? plan : TRIAL_PLAN;
 }
 
 /** Does this plan (accounting for an active trial) include a feature? */
 export function hasFeature(planId: PlanId, feature: Feature, trialing = false): boolean {
+  if (trialing && TRIAL_FEATURES.includes(feature)) return true;
   return PLANS[effectivePlan(planId, trialing)].features.includes(feature);
 }
 
@@ -136,5 +175,10 @@ export function upgradeFor(feature: Feature): Plan {
   for (const id of PLAN_ORDER) {
     if (PLANS[id].features.includes(feature)) return PLANS[id];
   }
-  return PLANS.pro;
+  return PLANS.growth;
+}
+
+/** ISO timestamp for when a trial started right now would end. */
+export function trialEndsFrom(startedAt: Date = new Date()): string {
+  return new Date(startedAt.getTime() + TRIAL_DAYS * 86_400_000).toISOString();
 }

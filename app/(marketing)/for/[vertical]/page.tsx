@@ -247,7 +247,7 @@ export default async function VerticalPage({ params }: { params: Promise<{ verti
       <CtaBand
         eyebrow="No card required"
         title="Ready to be the obvious choice?"
-        lede="Run your free Growth Score, or start a 14-day Growth trial — no card required."
+        lede="Run your free Growth Score, or start a 30-day full-access trial — no card required."
         actions={
           <>
             <LinkButton href="/score" size="lg" icon="sparkles">Get my free Growth Score</LinkButton>

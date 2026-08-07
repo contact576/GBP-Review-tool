@@ -11,7 +11,14 @@ const globalRef = globalThis as unknown as {
   __foundlyAdditiveReady?: boolean;
 };
 
-type Sql = { unsafe: (statement: string) => Promise<unknown> };
+/**
+ * `unsafe()` returns postgres-js's PendingQuery, which is a thenable that also
+ * exposes `.simple()`. Multi-statement strings REQUIRE the simple protocol —
+ * the default extended protocol rejects them with "cannot insert multiple
+ * commands into a prepared statement".
+ */
+type PendingQuery = Promise<unknown> & { simple?: () => Promise<unknown> };
+type Sql = { unsafe: (statement: string) => PendingQuery };
 
 /**
  * Run additive migrations (new tables/columns) even when the core schema
@@ -20,8 +27,25 @@ type Sql = { unsafe: (statement: string) => Promise<unknown> };
  */
 async function runAdditive(sql: Sql): Promise<void> {
   if (globalRef.__foundlyAdditiveReady) return;
-  for (const statement of ADDITIVE_STATEMENTS) {
-    await sql.unsafe(statement);
+
+  // Sent as ONE round trip rather than one per statement.
+  // `__foundlyAdditiveReady` lives on per-instance globalThis, so every cold
+  // Vercel lambda re-ran this list; at ~45 statements against Tokyo that was
+  // seconds of boot latency holding pool connections the first real request was
+  // queued behind. Every statement is IF NOT EXISTS, so replaying is idempotent.
+  const batch = ADDITIVE_STATEMENTS.join(";\n");
+  try {
+    const pending = sql.unsafe(batch);
+    // Fall back to awaiting the query directly if `.simple` is ever absent
+    // (a different driver, or a test double) — a single statement still works.
+    await (typeof pending.simple === "function" ? pending.simple() : pending);
+  } catch {
+    // Correctness beats the round-trip saving: if the batch is rejected for any
+    // reason, replay one statement at a time so a new column still lands. A
+    // half-applied schema is what takes production down, not a slow boot.
+    for (const statement of ADDITIVE_STATEMENTS) {
+      await sql.unsafe(statement);
+    }
   }
   globalRef.__foundlyAdditiveReady = true;
 }

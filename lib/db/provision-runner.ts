@@ -43,7 +43,7 @@ function arg(name: string): string | undefined {
   return i === -1 ? undefined : process.argv[i + 1];
 }
 
-const VALID_TIERS = ["free", "starter", "growth", "pro", "multi", "agency"] as const;
+const VALID_TIERS = ["free", "starter", "growth", "multi", "agency"] as const;
 type Tier = (typeof VALID_TIERS)[number];
 
 async function main(): Promise<void> {
@@ -54,7 +54,7 @@ async function main(): Promise<void> {
   const business = arg("business");
   const industry = arg("industry") ?? "plumbing";
   const region = (arg("region") ?? "CA") === "US" ? "US" : "CA";
-  const tier = (arg("tier") ?? "pro") as Tier;
+  const tier = (arg("tier") ?? "growth") as Tier;
   const ownerName = arg("name") ?? "Foundly Owner";
 
   if (!email || !password || !business) {

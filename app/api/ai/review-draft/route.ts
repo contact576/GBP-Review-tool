@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { generateReviewDrafts } from "@/lib/ai/generate";
-import { findRequestByToken } from "@/lib/data";
-import { resolveWorkspaceIndustry } from "@/lib/industries";
+import { generateReviewDrafts, makeDraftNonce } from "@/lib/ai/generate";
+import { findRequestByToken, getPublicProviders } from "@/lib/data";
+import { resolveServiceOptions, resolveWorkspaceIndustry } from "@/lib/industries";
 import {
   boundedNumber,
   boundedString,
@@ -9,6 +9,7 @@ import {
   guardPublicApi,
   readJsonObject,
 } from "@/lib/security/api";
+import type { DraftVariant } from "@/lib/data/types";
 
 export const runtime = "nodejs";
 
@@ -41,13 +42,22 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "missing_rating" }, { status: 400 });
     }
 
-    const { location, staffName, industryKey, industryConfig } = context;
+    const { location, staffName, industryKey, industryConfig, request } = context;
     const industry = resolveWorkspaceIndustry(industryKey ?? location.vertical, industryConfig);
 
     // A service or chip only counts if the owner actually offers it. An
     // attacker holding a valid token cannot inject arbitrary text into the
     // draft this way — unknown values are dropped, not passed through.
-    const allowedServices = new Set(industry.services.map((s) => s.toLowerCase()));
+    //
+    // The allowlist is built from the SAME resolver the customer page renders
+    // from, so a real Google Business Profile service the customer just tapped
+    // is never silently filtered back out of the prompt.
+    const serviceOptions = resolveServiceOptions({
+      gbpServiceItems: location.gbpSnapshot?.location.serviceItems,
+      ownerServices: industryConfig?.customServices,
+      catalogServices: industry.services,
+    });
+    const allowedServices = new Set(serviceOptions.services.map((s) => s.toLowerCase()));
     const allowedChips = new Set(
       [...industry.attributes, ...industry.neutralAttributes].map((a) => a.toLowerCase()),
     );
@@ -65,12 +75,45 @@ export async function POST(req: Request) {
       rating,
       attributes,
       industryKey: industry.key,
+      nonce: makeDraftNonce(token),
       ...(service ? { service } : {}),
       ...(staffName ? { staffName } : {}),
     });
 
+    await persistDraft(token, location.workspaceId, request.id, variants, source);
+
     return NextResponse.json({ variants, source });
   } catch {
     return NextResponse.json({ error: "bad_request" }, { status: 400 });
+  }
+}
+
+/**
+ * Store what we generated against the request that asked for it, so the owner
+ * can see what wording was offered. Best-effort: a storage failure must never
+ * cost the customer their draft, so it is swallowed.
+ */
+async function persistDraft(
+  token: string,
+  workspaceId: string,
+  requestId: string,
+  variants: DraftVariant[],
+  source: "ai" | "template",
+): Promise<void> {
+  if (variants.length === 0) return;
+  try {
+    for (const provider of await getPublicProviders()) {
+      const found = await provider.getRequestByToken(token);
+      if (!found) continue;
+      await provider.recordDraft(workspaceId, {
+        requestId,
+        kind: "review",
+        variants,
+        generatedBy: source,
+      });
+      return;
+    }
+  } catch {
+    // Draft persistence is an owner-side convenience, never a customer blocker.
   }
 }

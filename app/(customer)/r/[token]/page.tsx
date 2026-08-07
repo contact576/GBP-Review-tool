@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { findRequestByToken } from "@/lib/data";
-import { resolveWorkspaceIndustry } from "@/lib/industries";
+import { resolveServiceOptions, resolveWorkspaceIndustry } from "@/lib/industries";
 import { Icon } from "@/components/icons";
 import { ReviewFlow } from "./ReviewFlow";
 
@@ -10,11 +10,20 @@ export default async function ReviewPage({ params }: { params: Promise<{ token: 
   if (!result) notFound();
 
   const { location, staffName, serviceHint, industryKey, industryConfig, request } = result;
-  // Industry catalog is the single source of services and attribute chips, with
-  // the owner's own custom values layered in front of the catalog defaults.
+  // Industry catalog is the single source of attribute chips, with the owner's
+  // own custom values layered in front of the catalog defaults.
   // Positive chips come first, then the neutral/experience chips.
   const industry = resolveWorkspaceIndustry(industryKey ?? location.vertical, industryConfig);
   const seeds = [...industry.attributes, ...industry.neutralAttributes];
+  // Services, though, prefer what the business actually publishes on Google
+  // over anything we guessed for them: real profile services first, then the
+  // owner's own list, then the static catalog. `gbpSnapshot` is absent until
+  // the profile is synced, in which case this is exactly the old behaviour.
+  const serviceOptions = resolveServiceOptions({
+    gbpServiceItems: location.gbpSnapshot?.location.serviceItems,
+    ownerServices: industryConfig?.customServices,
+    catalogServices: industry.services,
+  });
 
   return (
     <>
@@ -39,7 +48,8 @@ export default async function ReviewPage({ params }: { params: Promise<{ token: 
         service={serviceHint}
         reviewUrl={location.reviewUrl}
         staffName={staffName}
-        serviceOptions={industry.services}
+        serviceOptions={serviceOptions.services}
+        serviceOptionsSource={serviceOptions.source}
         attributeSeeds={seeds}
         initialStatus={request.status}
         initialRating={request.rating}

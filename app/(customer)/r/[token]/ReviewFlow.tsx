@@ -12,6 +12,7 @@ import { PublicGoogleReviewLink } from "@/components/review/PublicGoogleReviewLi
 import { MICROCOPY } from "@/lib/compliance/microcopy";
 import { advanceRequestAction, submitPrivateFeedbackAction } from "@/lib/actions";
 import type { RequestStatus } from "@/lib/data/types";
+import type { ServiceOptionSource } from "@/lib/industries";
 
 type Step = "service" | "rate" | "write" | "feedback";
 type Rating = 1 | 2 | 3 | 4 | 5;
@@ -70,6 +71,8 @@ interface ReviewFlowProps {
   staffName?: string;
   /** Services the owner offers — the "what did you come in for" options. */
   serviceOptions: string[];
+  /** Where those options came from, so the customer knows the list is real. */
+  serviceOptionsSource?: ServiceOptionSource;
   /** Experience chips: positive first, then neutral. */
   attributeSeeds: string[];
   initialStatus?: RequestStatus;
@@ -93,6 +96,7 @@ export function ReviewFlow({
   service,
   reviewUrl,
   serviceOptions,
+  serviceOptionsSource,
   attributeSeeds,
   initialStatus,
   initialRating,
@@ -128,6 +132,23 @@ export function ReviewFlow({
   const [editMessage, setEditMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
+
+  /**
+   * The customer's own answers, echoed back before they read a draft. Seeing
+   * exactly what the wording is grounded in is what makes "we only used what
+   * you told us" checkable rather than a promise.
+   */
+  const picked = useMemo(() => {
+    const rows: { label: string; value: string }[] = [];
+    if (selectedService) rows.push({ label: "You came in for", value: selectedService });
+    if (rating >= 1 && rating <= 5) {
+      rows.push({ label: "You rated it", value: `${rating} out of 5` });
+    }
+    if (attributes.length > 0) {
+      rows.push({ label: "You picked out", value: attributes.join(", ") });
+    }
+    return rows;
+  }, [selectedService, rating, attributes]);
 
   const totalSteps = hasServiceStep ? 3 : 2;
   const terminal =
@@ -349,6 +370,11 @@ export function ReviewFlow({
           What did you come to {business} for?
         </h1>
         <p className="mt-2 text-[13px] leading-relaxed text-sub">{MICROCOPY.serviceStepHelp}</p>
+        {serviceOptionsSource === "google_profile" ? (
+          <p className="mt-1.5 text-[12px] leading-relaxed text-faint">
+            These are the services listed on this business&apos;s Google Business Profile.
+          </p>
+        ) : null}
 
         <div className="mt-5 flex flex-wrap gap-2">
           {services.map((item) => (
@@ -459,6 +485,22 @@ export function ReviewFlow({
         <p className="mt-1 text-[14px] leading-relaxed text-sub">
           {showDrafts ? MICROCOPY.draftFromYourAnswers : MICROCOPY.customerWordsOnly}
         </p>
+
+        {picked.length > 0 ? (
+          <div className="mt-4 rounded-card border border-hairline bg-card px-3.5 py-3">
+            <div className="text-[11px] font-bold uppercase tracking-wide text-faint">
+              What you told us
+            </div>
+            <dl className="mt-2 space-y-1.5">
+              {picked.map((row) => (
+                <div key={row.label} className="flex flex-wrap items-baseline gap-x-2">
+                  <dt className="text-[12px] text-faint">{row.label}</dt>
+                  <dd className="text-[13px] font-semibold text-ink">{row.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        ) : null}
 
         {drafting ? (
           <div className="mt-6 space-y-3" aria-live="polite">

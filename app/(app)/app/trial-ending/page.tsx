@@ -44,7 +44,7 @@ export default async function TrialEndingPage() {
             Look what you built, {firstName}
           </h1>
           <p className="mt-1 max-w-md text-[14px] text-white/80">
-            Your 14-day Growth trial is wrapping up. Here&apos;s the real progress you made — it&apos;s yours to keep.
+            Your 30-day full-access trial is wrapping up. Here&apos;s the real progress you made — it&apos;s yours to keep.
           </p>
           <div className="mt-5 grid grid-cols-3 gap-3">
             <StatTile onHero label="Reviews captured" value={reviewsCaptured} />

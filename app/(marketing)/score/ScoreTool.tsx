@@ -457,7 +457,7 @@ export function ScoreTool() {
             </h3>
             <p className="mx-auto mt-2 max-w-md text-[14px] text-white/75">
               Start free and Foundly handles consent-aware requests, reminders, review monitoring,
-              and owner-reply suggestions. No card for 14 days.
+              and owner-reply suggestions. No card for 30 days.
             </p>
             <div className="mt-5">
               <LinkButton

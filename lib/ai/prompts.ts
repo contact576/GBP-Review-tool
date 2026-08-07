@@ -26,6 +26,45 @@ Grounding rules:
 - Vary sentence structure and length meaningfully across the 3 variants (one short and natural, one detailed and specific, one warm and conversational).`;
 
 /**
+ * Register, not content.
+ *
+ * Reviews that read as machine-written get distrusted by the next customer and
+ * flagged by Google. This block constrains HOW the draft is worded; it never
+ * relaxes what may be said. The grounding rules, the rating→tone matrix and the
+ * compliance spine above still bind, and every variant is still lint-checked
+ * server-side after generation.
+ */
+const HUMAN_REGISTER = `
+SOUND LIKE A PERSON (style only — this never loosens the grounding or compliance rules):
+- Plain, specific, everyday words. Write the way the customer would text a friend.
+- Short sentences. Mix lengths. It is fine to start a sentence with "And" or "But".
+- Use contractions ("I'd", "they're", "didn't").
+- Be concrete ONLY about what the customer actually selected. If a detail was not selected, leave it out rather than inventing colour.
+- No marketing cadence, no slogans, no rhetorical questions, no sign-off like "Highly recommended!".
+- No tricolon lists ("fast, friendly and professional"). Two items at most, and prefer one.
+- No em-dashes (—). Use a comma, a full stop, or a new sentence.
+- Never use these words or phrases: seamless, top-notch, exceptional, truly, highly recommend, unparalleled, game-changer, second to none, a testament to, elevate, curated, delve, nestled.
+- No emoji, no ALL-CAPS, no exclamation-mark pile-ups (one at most, across the whole review).
+- Do not open every variant the same way, and avoid the formulaic openings listed in the request.`;
+
+/**
+ * Openings that mark a review as machine-written. Passed to the model per
+ * request so drafts stop converging on the same first five words.
+ */
+export const AVOID_OPENINGS: readonly string[] = [
+  "I recently",
+  "I had the pleasure of",
+  "I cannot say enough good things",
+  "From start to finish",
+  "Look no further",
+  "If you're looking for",
+  "I have to say",
+  "Absolutely fantastic",
+  "What a wonderful",
+  "Hands down the best",
+];
+
+/**
  * Review-draft system prompt with the industry voice interpolated.
  * `promptContext` comes from the industry catalog (lib/industries).
  */
@@ -34,7 +73,8 @@ export function buildReviewDraftSystem(industry: { label: string; promptContext:
 ${RATING_TONE_MATRIX}
 
 INDUSTRY VOICE (${industry.label}): ${industry.promptContext}
-${REVIEW_GROUNDING}${COMPLIANCE_SPINE}`;
+${REVIEW_GROUNDING}
+${HUMAN_REGISTER}${COMPLIANCE_SPINE}`;
 }
 
 export const SYSTEM_PROMPTS = {

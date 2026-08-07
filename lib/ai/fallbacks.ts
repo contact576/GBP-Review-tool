@@ -75,6 +75,12 @@ export interface ReviewDraftInput {
   service?: string;
   /** Catalog industry key (preferred over category). */
   industryKey?: string;
+  /**
+   * Per-request uniqueness token (see `makeDraftNonce`). Without it two
+   * customers who tap the same chips at the same business get byte-identical
+   * template text — the repetition bug this field exists to kill.
+   */
+  nonce?: string;
 }
 
 interface Slots {
@@ -166,7 +172,12 @@ export function fallbackReviewDrafts(input: ReviewDraftInput): DraftVariant[] {
   const rating = input.rating >= 5 ? 5 : 4;
   const expBank = rating === 5 ? industry.phrases.experience5 : industry.phrases.experience4;
   const closerBank = rating === 5 ? industry.phrases.closer5 : industry.phrases.closer4;
-  const seed = hashSeed(`${input.business}|${input.attributes.join(",")}|${rating}`);
+  // The nonce is what makes two customers with identical picks read differently.
+  // Each phrase slot hashes its own key as well, so the experience clause and
+  // the closer rotate independently instead of moving in lockstep.
+  const seedBase = `${input.business}|${input.attributes.join(",")}|${rating}|${input.nonce ?? ""}`;
+  const slotSeed = (slot: string, variantIndex: number): number =>
+    hashSeed(`${seedBase}|${slot}|${variantIndex}`);
 
   const base: Omit<Slots, "exp" | "closer"> = {
     biz: input.business,
@@ -180,14 +191,17 @@ export function fallbackReviewDrafts(input: ReviewDraftInput): DraftVariant[] {
 
   const composers = [composeShort, composeDetailed, composeWarm];
   return composers.map((compose, i) => {
-    // Structures use offset phrase picks so the three variants differ; a
-    // retry loop guarantees the lint invariant even for adversarial names.
+    // Structures use independently seeded phrase picks so the three variants
+    // differ; a retry loop guarantees the lint invariant even for adversarial
+    // names.
     let text = "";
+    const expSeed = slotSeed("experience", i);
+    const closerSeed = slotSeed("closer", i);
     for (let attempt = 0; attempt < expBank.length; attempt++) {
       const slots: Slots = {
         ...base,
-        exp: pick(expBank, seed + i * 7 + attempt),
-        closer: pick(closerBank, (seed >> 3) + i * 5 + attempt),
+        exp: pick(expBank, expSeed + attempt),
+        closer: pick(closerBank, closerSeed + attempt),
       };
       text = compose(slots, rating);
       const res = runLints(text, {

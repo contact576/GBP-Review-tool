@@ -111,7 +111,11 @@ export default async function RankGridPage() {
     <div className="space-y-5">
       <Card>
         <CardHeader kicker="Coverage" title="Local visibility grid" />
-        <RankGridView scan={scan} />
+        <RankGridView
+          scan={scan}
+          businessName={data.location.name}
+          {...(data.location.googlePlaceId ? { businessPlaceId: data.location.googlePlaceId } : {})}
+        />
       </Card>
       <Card className="border-primary/30 bg-primary-wash/50">
         <div className="flex items-start gap-3">

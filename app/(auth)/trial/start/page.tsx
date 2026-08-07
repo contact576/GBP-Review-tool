@@ -7,7 +7,7 @@ import { Kicker } from "@/components/ds/misc";
 
 export const metadata: Metadata = {
   title: "Start your free trial",
-  description: "How the Foundly reverse trial works: 14 days of Growth free, no credit card, then keep a free plan forever.",
+  description: "How the Foundly reverse trial works: 30 days of every tool free, no credit card, then keep a free plan forever.",
 };
 
 const STEPS: { icon: "gift" | "sparkles" | "shield"; title: string; body: string }[] = [
@@ -45,7 +45,7 @@ export default function TrialStartPage() {
 
       <div className="mt-6">
         <LinkButton href="/sign-up" size="lg" fullWidth icon="sparkles">Start free</LinkButton>
-        <p className="mt-3 text-center text-[12px] text-faint">14 days of Growth · no credit card · cancel anytime</p>
+        <p className="mt-3 text-center text-[12px] text-faint">30 days of every tool · no credit card · cancel anytime</p>
       </div>
 
       <p className="mt-5 text-center text-[13px] text-sub">

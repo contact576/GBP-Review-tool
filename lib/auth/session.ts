@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { signSession, verifySession, SESSION_TTL_SECONDS, type SessionClaims } from "./jwt";
 
@@ -16,7 +17,16 @@ export const DEMO_USER_ID = "usr_owner";
 export type SessionRole = SessionClaims["role"];
 export interface Session extends SessionClaims {}
 
-export async function getSession(): Promise<Session | null> {
+/**
+ * Resolve the caller's session.
+ *
+ * Wrapped in React's request-scoped `cache` because a single render calls this
+ * several times (layout, page, and every server action helper), and each
+ * uncached call costs a JWT verify plus a `session_version` round trip to
+ * Postgres. The cache is per-request, so revocation still takes effect on the
+ * very next navigation.
+ */
+export const getSession = cache(async function getSession(): Promise<Session | null> {
   const store = await cookies();
   const raw = store.get(SESSION_COOKIE)?.value;
   if (!raw) return null;
@@ -24,7 +34,7 @@ export async function getSession(): Promise<Session | null> {
   if (!claims) return null;
   if (!claims.isDemo && !(await sessionVersionCurrent(claims))) return null;
   return claims;
-}
+});
 
 /**
  * Enforce session revocation (V8): a real session is only valid while its

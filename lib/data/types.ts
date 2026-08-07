@@ -20,11 +20,14 @@ export type CampaignId = Id;
 
 // ── Shared enums ────────────────────────────────────────────
 export type Region = "US" | "CA";
+/**
+ * Live plan tiers. "pro" was retired and folded into Growth — stored rows
+ * still carrying it are coerced by `normalizePlan` (lib/billing/plans).
+ */
 export type PlanTier =
   | "free"
   | "starter"
   | "growth"
-  | "pro"
   | "multi"
   | "agency";
 export type Channel = "email" | "sms" | "whatsapp";
@@ -890,12 +893,33 @@ export interface AeoSnapshot {
   queries: AeoQueryResult[];
 }
 
+/** One business Google actually returned at a grid coordinate. */
+export interface RankGridResult {
+  placeId: string;
+  name: string;
+  /** 1-based position in the relevance-ranked result set at that point. */
+  position: number;
+  address?: string;
+  rating?: number;
+  reviewCount?: number;
+  latitude?: number;
+  longitude?: number;
+}
+
 export interface RankGridPoint {
   row: number;
   col: number;
   rank: number | null;
   latitude?: number;
   longitude?: number;
+  /** Top competitors captured at this point. Absent on scans run before v2. */
+  results?: RankGridResult[];
+  /**
+   * Google could not be reached for this coordinate. Distinct from `rank: null`,
+   * which is a real answer meaning "checked, and you did not appear". Without
+   * this flag a failed lookup reads to the owner as a ranking loss.
+   */
+  unavailable?: boolean;
 }
 
 export interface RankGridScan {
@@ -909,6 +933,8 @@ export interface RankGridScan {
   ranAt: string;
   source?: "google_places";
   radiusKm?: number;
+  /** Scan origin (the business coordinates). Absent on scans run before v2. */
+  center?: { latitude: number; longitude: number };
 }
 
 // ── Studio / assets / milestones ────────────────────────────

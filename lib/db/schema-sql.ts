@@ -79,4 +79,36 @@ export const ADDITIVE_STATEMENTS: string[] = [
   "ALTER TABLE \"location\" ADD COLUMN IF NOT EXISTS \"owner_description\" text;",
   "CREATE TABLE IF NOT EXISTS \"profile_mutation_job\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"workspace_id\" text NOT NULL,\n\t\"location_id\" text NOT NULL,\n\t\"suggestion_id\" text NOT NULL,\n\t\"idempotency_key\" text NOT NULL,\n\t\"target\" text NOT NULL,\n\t\"status\" text NOT NULL,\n\t\"update_mask\" jsonb NOT NULL,\n\t\"before_value\" jsonb,\n\t\"proposed_value\" jsonb NOT NULL,\n\t\"provider_response\" jsonb,\n\t\"verified_value\" jsonb,\n\t\"rollback_value\" jsonb,\n\t\"attempts\" integer DEFAULT 0 NOT NULL,\n\t\"approved_at\" text NOT NULL,\n\t\"approved_by\" text NOT NULL,\n\t\"created_at\" text NOT NULL,\n\t\"updated_at\" text NOT NULL,\n\t\"started_at\" text,\n\t\"applied_at\" text,\n\t\"failed_at\" text,\n\t\"last_error\" text\n);",
   "CREATE UNIQUE INDEX IF NOT EXISTS \"profile_mutation_job_idempotency_uq\" ON \"profile_mutation_job\" USING btree (\"idempotency_key\");",
+
+  // Tenant-scoping indexes. Every one of the ~21 queries getData() fans out
+  // filters on workspace_id and most then sort by seq — with no index that is a
+  // sequential scan plus a sort, per table, per page load. Harmless today at low
+  // row counts, but it degrades linearly with total customers and review/
+  // audit_log are the first to hurt. Composite (workspace_id, seq) so the sort
+  // is satisfied by the index too.
+  //
+  // Deliberately NOT `CONCURRENTLY`: these run inside ensureSchema's batched
+  // transaction, and CREATE INDEX CONCURRENTLY cannot run in a transaction
+  // block. On a fresh/small table the exclusive lock is momentary; on a large
+  // existing table, create them by hand with CONCURRENTLY first — the
+  // IF NOT EXISTS here then becomes a no-op.
+  "CREATE INDEX IF NOT EXISTS \"review_ws_seq_idx\" ON \"review\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"review_request_ws_seq_idx\" ON \"review_request\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"customer_ws_seq_idx\" ON \"customer\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"audit_log_ws_seq_idx\" ON \"audit_log\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"notification_ws_seq_idx\" ON \"notification\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"staff_member_ws_seq_idx\" ON \"staff_member\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"review_draft_ws_seq_idx\" ON \"review_draft\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"gbp_task_ws_seq_idx\" ON \"gbp_task\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"campaign_ws_seq_idx\" ON \"campaign\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"private_feedback_ws_seq_idx\" ON \"private_feedback\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"qr_asset_ws_seq_idx\" ON \"qr_asset\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"staff_invite_ws_seq_idx\" ON \"staff_invite\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"location_ws_idx\" ON \"location\" (\"workspace_id\");",
+  "CREATE INDEX IF NOT EXISTS \"subscription_ws_idx\" ON \"subscription\" (\"workspace_id\");",
+  "CREATE INDEX IF NOT EXISTS \"dataset_meta_ws_idx\" ON \"dataset_meta\" (\"workspace_id\");",
+  "CREATE INDEX IF NOT EXISTS \"customer_consent_ws_idx\" ON \"customer_consent\" (\"workspace_id\");",
+  "CREATE INDEX IF NOT EXISTS \"review_reply_ws_idx\" ON \"review_reply\" (\"workspace_id\");",
+  "CREATE INDEX IF NOT EXISTS \"app_user_ws_role_idx\" ON \"app_user\" (\"workspace_id\",\"role\");",
+  "CREATE INDEX IF NOT EXISTS \"workspace_org_idx\" ON \"workspace\" (\"organization_id\");",
 ];

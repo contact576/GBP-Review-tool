@@ -1,7 +1,7 @@
 import "server-only";
 import { completeText } from "./client";
 import { getModel, hasAiKey } from "./model";
-import { SYSTEM_PROMPTS, buildReviewDraftSystem } from "./prompts";
+import { SYSTEM_PROMPTS, buildReviewDraftSystem, AVOID_OPENINGS } from "./prompts";
 import {
   fallbackReviewDrafts,
   fallbackReplyDrafts,
@@ -25,6 +25,19 @@ import {
 import type { DraftVariant } from "@/lib/data/types";
 
 export type AiSource = "ai" | "template";
+
+/**
+ * A per-request uniqueness token: the review link's own token plus the moment
+ * the draft was asked for. Threading it through generation is what stops two
+ * customers at the same business, who chose the same rating and tapped the same
+ * chips, from receiving the same sentences — the template path seeds on it, and
+ * the model is told to treat it as a variation key.
+ */
+export function makeDraftNonce(token: string): string {
+  const stamp = Date.now().toString(36);
+  const jitter = Math.random().toString(36).slice(2, 10);
+  return `${token.slice(0, 24)}.${stamp}.${jitter}`;
+}
 
 function sanitize(text: string, ctx: LintContext, fallback: string): string {
   const res = runLints(text, ctx);
@@ -91,13 +104,18 @@ export async function generateReviewDrafts(
 Industry: ${industry.label} — ${industry.promptContext}
 Rating the customer chose: ${input.rating}/5 — match this register exactly.
 Things the customer liked: ${input.attributes.join(", ") || "(none specified)"}.
-${input.service ? `Service they came in for: ${input.service}.\n` : ""}${input.staffName ? `Staff member who helped them (${industry.terminology.staff}): ${input.staffName}.\n` : ""}Write 3 distinct review options in this order: short & natural, detailed & specific, warm & conversational. Separate each with a line of only "---".`;
+${input.service ? `Service they came in for: ${input.service}.\n` : ""}${input.staffName ? `Staff member who helped them (${industry.terminology.staff}): ${input.staffName}.\n` : ""}Variation key (do not mention it, just let it push you to different wording than you would otherwise reach for): ${input.nonce ?? "none"}.
+Do NOT begin any variant with these formulaic openings: ${AVOID_OPENINGS.join("; ")}. Start each of the three variants a different way.
+Write 3 distinct review options in this order: short & natural, detailed & specific, warm & conversational. Separate each with a line of only "---".`;
 
   const raw = await completeText({
     model: getModel(),
     system: buildReviewDraftSystem(industry),
     user,
     maxTokens: 600,
+    // Drafting must genuinely vary between customers. The clarity-edit path
+    // (`improveCustomerReviewText`) deliberately passes no temperature.
+    temperature: 1,
   });
   if (!raw) return { variants: template, source: "template" };
 

@@ -12,7 +12,7 @@ import { registerAction } from "@/lib/actions";
 import type { Region } from "@/lib/data/types";
 
 const TRIAL_POINTS = [
-  "Full Growth plan, free for 14 days",
+  "Every tool unlocked, free for 30 days",
   "No credit card required to start",
   "Keep a free plan forever when it ends",
 ];
@@ -103,7 +103,7 @@ export function SignUpForm({
     <Card raised className="p-6 sm:p-8">
       <div className="text-center">
         <h1 className="text-[24px] font-extrabold leading-tight tracking-tight text-ink">
-          Start your 14-day Growth trial
+          Start your 30-day full-access trial
         </h1>
         <p className="mt-1 text-[14px] text-sub">No card. No catch. Cancel anytime.</p>
       </div>

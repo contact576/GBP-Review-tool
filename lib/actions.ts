@@ -63,6 +63,7 @@ import type {
   Subscription,
   Customer,
   RankGridScan,
+  RankGridResult,
   ProfileMutationJob,
   ContentPublishingJob,
   AiContentAsset,
@@ -1444,6 +1445,65 @@ export type RankGridActionResult =
   | { ok: true; message: string }
   | { ok: false; message: string };
 
+/**
+ * Deterministic stand-in businesses so the demo workspace shows a populated
+ * "who is taking the calls here" list without spending a Places call. Names are
+ * obviously generic on purpose — nothing is passed off as a real competitor.
+ */
+const DEMO_COMPETITOR_PREFIXES = [
+  "Northside",
+  "Riverbend",
+  "Oakview",
+  "Summit",
+  "Bright Path",
+  "Cedar Lane",
+  "Harbourfront",
+  "Maple Grove",
+  "Lakeshore",
+  "Stonebridge",
+  "Parkway",
+  "Everley",
+] as const;
+
+function demoRankGridResults(input: {
+  seed: number;
+  rank: number | null;
+  ownPlaceId: string;
+  ownName: string;
+  ownRating: number;
+  ownReviewCount: number;
+  category: string;
+  city: string;
+}): RankGridResult[] {
+  const depth = 10;
+  const entries: RankGridResult[] = [];
+  for (let slot = 0; slot < depth; slot += 1) {
+    const prefix =
+      DEMO_COMPETITOR_PREFIXES[(input.seed * 5 + slot) % DEMO_COMPETITOR_PREFIXES.length] ??
+      "Northside";
+    entries.push({
+      placeId: `demo_place_${prefix.toLowerCase().replace(/\s+/g, "_")}`,
+      name: `${prefix} ${input.category}`,
+      position: slot + 1,
+      address: input.city,
+      rating: Math.round((4.9 - ((input.seed + slot) % 9) * 0.1) * 10) / 10,
+      reviewCount: 40 + ((input.seed * 13 + slot * 29) % 460),
+    });
+  }
+  if (input.rank !== null && input.rank <= depth) {
+    entries.splice(input.rank - 1, 0, {
+      placeId: input.ownPlaceId,
+      name: input.ownName,
+      position: input.rank,
+      address: input.city,
+      rating: input.ownRating,
+      reviewCount: input.ownReviewCount,
+    });
+    entries.length = depth;
+  }
+  return entries.map((entry, index) => ({ ...entry, position: index + 1 }));
+}
+
 export async function runRankGridAction(input: {
   keyword: string;
   gridSize: number;
@@ -1474,6 +1534,8 @@ export async function runRankGridAction(input: {
   }
 
   let points: RankGridScan["points"];
+  let center: RankGridScan["center"];
+  let failedPoints = 0;
   if (session.isDemo) {
     const sample = data.rankScans[0];
     points = (sample?.points ?? []).map((point) => ({ ...point }));
@@ -1484,6 +1546,20 @@ export async function runRankGridAction(input: {
         rank: 1 + ((index * 7) % 14),
       }));
     }
+    center = sample?.center;
+    points = points.map((point, index) => ({
+      ...point,
+      results: demoRankGridResults({
+        seed: index,
+        rank: point.rank,
+        ownPlaceId: data.location.googlePlaceId ?? data.location.id,
+        ownName: data.location.name,
+        ownRating: data.location.rating,
+        ownReviewCount: data.location.reviewCount,
+        category: data.location.category,
+        city: data.location.city,
+      }),
+    }));
   } else {
     const { getPlaceDetails } = await import("@/lib/google/places");
     const details = await getPlaceDetails(data.location.googlePlaceId);
@@ -1507,9 +1583,19 @@ export async function runRankGridAction(input: {
     });
     if (!result.ok) return { ok: false, message: result.error };
     points = result.points;
+    failedPoints = result.failedPoints;
+    center = {
+      latitude: details.details.location.latitude,
+      longitude: details.details.location.longitude,
+    };
   }
 
-  const rankingValues = points.map((point) => point.rank ?? 21);
+  // Points Google could not be reached for are excluded from both averages.
+  // Counting them as "rank 21, not in the pack" would quietly report a ranking
+  // loss the scan never actually observed.
+  const measured = points.filter((point) => !point.unavailable);
+  const measuredCount = Math.max(1, measured.length);
+  const rankingValues = measured.map((point) => point.rank ?? 21);
   const scan: RankGridScan = {
     id: `rank_${randomBytes(10).toString("hex")}`,
     locationId: data.location.id,
@@ -1518,10 +1604,10 @@ export async function runRankGridAction(input: {
     radiusKm,
     source: "google_places",
     points,
-    avgRank: rankingValues.reduce((sum, rank) => sum + rank, 0) / Math.max(1, points.length),
+    ...(center ? { center } : {}),
+    avgRank: rankingValues.reduce((sum, rank) => sum + rank, 0) / measuredCount,
     shareOfLocalPack:
-      points.filter((point) => point.rank !== null && point.rank <= 3).length /
-      Math.max(1, points.length),
+      measured.filter((point) => point.rank !== null && point.rank <= 3).length / measuredCount,
     ranAt: new Date().toISOString(),
   };
   await provider.saveRankGridScan(ws, scan);
@@ -1530,7 +1616,9 @@ export async function runRankGridAction(input: {
     ok: true,
     message: session.isDemo
       ? "Demo scan refreshed with sample results."
-      : `Completed ${points.length} Google Places checks for “${keyword}”.`,
+      : failedPoints > 0
+        ? `Completed ${points.length - failedPoints} of ${points.length} Google Places checks for “${keyword}”. ${failedPoints} point${failedPoints === 1 ? "" : "s"} returned no data.`
+        : `Completed ${points.length} Google Places checks for “${keyword}”.`,
   };
 }
 
@@ -1844,7 +1932,7 @@ export async function startCheckoutAction(
   | { ok: false; reason: "not_configured" | "error"; message: string }
 > {
   const { session, provider, ws } = await scoped("owner");
-  const allowed = ["starter", "growth", "pro", "multi", "agency"] as const;
+  const allowed = ["starter", "growth", "multi", "agency"] as const;
   if (!allowed.includes(tier as (typeof allowed)[number])) {
     return { ok: false, reason: "error", message: "That plan is not available for checkout." };
   }

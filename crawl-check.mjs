@@ -29,7 +29,7 @@ const EXPECTED_404 = new Set(["/setup"]);
 const OWNER_ROUTES = [
   "/app", "/app/this-week", "/app/reviews", "/app/requests", "/app/customers",
   "/app/campaigns", "/app/campaigns/new", "/app/analytics", "/app/benchmark",
-  "/app/visibility", "/app/rank-grid", "/app/studio", "/app/report",
+  "/app/visibility", "/app/rank-grid", "/app/profile", "/app/studio", "/app/report",
   "/app/milestones", "/app/notifications", "/app/trial-ending",
   "/app/settings", "/app/settings/billing", "/app/settings/business",
   "/app/settings/channels", "/app/settings/consent", "/app/settings/integrations",

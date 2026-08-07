@@ -248,7 +248,6 @@ export function AppShell({
                   >
                     <Icon name={item.icon} size={20} className="text-primary" />
                     <span className="text-[12px] font-medium leading-tight text-ink">{item.label}</span>
-                    {item.pro ? <Badge tone="gold">Pro</Badge> : null}
                   </Link>
                 ))}
               </div>

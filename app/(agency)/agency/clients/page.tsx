@@ -8,7 +8,6 @@ const PLAN_LABELS: Record<PlanTier, string> = {
   free: "Free",
   starter: "Starter",
   growth: "Growth",
-  pro: "Pro",
   multi: "Multi-location",
   agency: "Agency",
 };

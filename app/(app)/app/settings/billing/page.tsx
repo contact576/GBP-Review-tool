@@ -5,13 +5,13 @@ import { ProgressMeter } from "@/components/charts";
 import { PageHeader } from "@/components/app/PageHeader";
 import { type IconName } from "@/components/icons";
 import { formatMoney, formatNumber, formatDate, daysUntil } from "@/lib/utils/format";
-import { PLANS, effectivePlan } from "@/lib/billing/plans";
+import { PLANS, effectivePlan, TRIAL_DAYS } from "@/lib/billing/plans";
 import type { Subscription } from "@/lib/data/types";
 import { SettingsNav } from "../SettingsNav";
 import { BillingActions } from "./BillingActions";
 import { BillingPanel } from "./BillingPanel";
 
-const TRIAL_LENGTH = 14;
+const TRIAL_LENGTH = TRIAL_DAYS;
 
 const STATUS_BADGE: Record<
   Subscription["status"],
@@ -69,7 +69,7 @@ export default async function BillingSettingsPage() {
 
             {trialing ? (
               <p className="max-w-[68ch] text-[14px] text-sub">
-                14-day Growth trial — day {trialDay} of {TRIAL_LENGTH}, no card.
+                Every tool unlocked — day {trialDay} of {TRIAL_LENGTH}, no card.
                 {trialEndDate ? (
                   <>
                     {" "}

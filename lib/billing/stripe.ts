@@ -108,7 +108,6 @@ export async function createCustomerCredit(input: {
 const PAID_TIERS: Exclude<PlanTier, "free">[] = [
   "starter",
   "growth",
-  "pro",
   "multi",
   "agency",
 ];

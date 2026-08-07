@@ -1,3 +1,4 @@
+import { trialEndsFrom } from "@/lib/billing/plans";
 import type { FoundlyData, Region } from "./types";
 
 /**
@@ -110,7 +111,7 @@ export function emptyFoundlyData(input: NewWorkspaceInput): FoundlyData {
       tier: "growth",
       interval: "monthly",
       status: "trialing",
-      trialEndsAt: new Date(Date.now() + 14 * 86_400_000).toISOString(),
+      trialEndsAt: trialEndsFrom(),
       currency: input.region === "CA" ? "CAD" : "USD",
       usage: {
         aiDraftsUsed: 0,

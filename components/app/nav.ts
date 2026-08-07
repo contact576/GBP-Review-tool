@@ -4,7 +4,6 @@ export interface NavItem {
   label: string;
   href: string;
   icon: IconName;
-  pro?: boolean;
 }
 export interface NavGroup {
   label: string;
@@ -20,6 +19,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Grow",
     items: [
       { label: "This Week", href: "/app/this-week", icon: "sparkles" },
+      { label: "Profile Audit", href: "/app/profile", icon: "compass" },
       { label: "Campaigns", href: "/app/campaigns", icon: "megaphone" },
     ],
   },
@@ -39,8 +39,8 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Benchmark", href: "/app/benchmark", icon: "chart" },
       { label: "Analytics", href: "/app/analytics", icon: "trend" },
-      { label: "AI Visibility", href: "/app/visibility", icon: "compass", pro: true },
-      { label: "Rank Grid", href: "/app/rank-grid", icon: "grid", pro: true },
+      { label: "AI Visibility", href: "/app/visibility", icon: "compass" },
+      { label: "Rank Grid", href: "/app/rank-grid", icon: "grid" },
     ],
   },
   {
@@ -62,11 +62,12 @@ export const BOTTOM_TABS: NavItem[] = [
 
 export const MORE_ITEMS: NavItem[] = [
   { label: "Requests", href: "/app/requests", icon: "send" },
+  { label: "Profile Audit", href: "/app/profile", icon: "compass" },
   { label: "Campaigns", href: "/app/campaigns", icon: "megaphone" },
   { label: "Benchmark", href: "/app/benchmark", icon: "chart" },
   { label: "Analytics", href: "/app/analytics", icon: "trend" },
-  { label: "AI Visibility", href: "/app/visibility", icon: "compass", pro: true },
-  { label: "Rank Grid", href: "/app/rank-grid", icon: "grid", pro: true },
+  { label: "AI Visibility", href: "/app/visibility", icon: "compass" },
+  { label: "Rank Grid", href: "/app/rank-grid", icon: "grid" },
   { label: "AI Content Studio", href: "/app/studio", icon: "sparkles" },
   { label: "Growth Report", href: "/app/report", icon: "file" },
   { label: "Milestones", href: "/app/milestones", icon: "trophy" },

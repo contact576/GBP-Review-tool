@@ -558,7 +558,7 @@ export function buildSeed(): FoundlyData {
       { id: "int_instagram", locationId, provider: "instagram", label: "Instagram professional account", status: "disconnected", detail: "Connect an authorized Business or Creator account" },
       { id: "int_resend", locationId, provider: "resend", label: "Email (Resend)", status: "connected", detail: "Sending domain verified", lastSyncAt: hoursAgo(1) },
       { id: "int_twilio", locationId, provider: "twilio", label: "SMS (Twilio · A2P 10DLC)", status: "pending", detail: "A2P registration pending — 1–5 day carrier approval", },
-      { id: "int_stripe", locationId, provider: "stripe", label: "Billing (Stripe)", status: "connected", detail: "Growth trial · CAD", lastSyncAt: hoursAgo(12) },
+      { id: "int_stripe", locationId, provider: "stripe", label: "Billing (Stripe)", status: "connected", detail: "Trial · CAD", lastSyncAt: hoursAgo(12) },
     ],
     auditLog: [
       { id: "aud_1", workspaceId, actor: "Alex Chen", action: "review.replied", targetType: "review", targetId: "rev_0", at: hoursAgo(4) },
@@ -595,15 +595,15 @@ export function buildSeed(): FoundlyData {
       },
       clients: [
           { locationId: "loc_harbourview", name: "Harbourview Physiotherapy", city: "Toronto", contactEmail: "harbourview@example.com", growthScore: 78, rating: 4.7, newReviews30d: 9, needsReply: 3, plan: "growth", lastReportSent: daysAgo(6), status: "healthy" },
-          { locationId: "loc_maple", name: "Maple Dental Studio", city: "Mississauga", contactEmail: "maple@example.com", growthScore: 71, rating: 4.6, newReviews30d: 6, needsReply: 5, plan: "pro", lastReportSent: daysAgo(6), status: "attention" },
+          { locationId: "loc_maple", name: "Maple Dental Studio", city: "Mississauga", contactEmail: "maple@example.com", growthScore: 71, rating: 4.6, newReviews30d: 6, needsReply: 5, plan: "growth", lastReportSent: daysAgo(6), status: "attention" },
           { locationId: "loc_summit", name: "Summit HVAC & Heating", city: "Brampton", contactEmail: "summit@example.com", growthScore: 58, rating: 4.3, newReviews30d: 2, needsReply: 8, plan: "growth", lastReportSent: daysAgo(34), status: "at_risk" },
-          { locationId: "loc_bright", name: "Brightside Chiropractic", city: "Toronto", contactEmail: "brightside@example.com", growthScore: 82, rating: 4.8, newReviews30d: 11, needsReply: 1, plan: "pro", lastReportSent: daysAgo(6), status: "healthy" },
+          { locationId: "loc_bright", name: "Brightside Chiropractic", city: "Toronto", contactEmail: "brightside@example.com", growthScore: 82, rating: 4.8, newReviews30d: 11, needsReply: 1, plan: "growth", lastReportSent: daysAgo(6), status: "healthy" },
       ],
     },
     platform: {
       tenants: [
         { id: "org_harbourview", name: "Harbourview Physiotherapy", vertical: "physiotherapy", plan: "growth", mrr: 99, locations: 1, status: "trialing", region: "CA" },
-        { id: "org_maple", name: "Maple Dental Studio", vertical: "dental", plan: "pro", mrr: 179, locations: 1, status: "active", region: "CA" },
+        { id: "org_maple", name: "Maple Dental Studio", vertical: "dental", plan: "growth", mrr: 99, locations: 1, status: "active", region: "CA" },
         { id: "org_summit", name: "Summit HVAC & Heating", vertical: "hvac", plan: "growth", mrr: 99, locations: 1, status: "past_due", region: "CA" },
         { id: "org_northside", name: "Northside Marketing (Agency)", vertical: "physiotherapy", plan: "agency", mrr: 897, locations: 12, status: "active", region: "CA" },
       ],
