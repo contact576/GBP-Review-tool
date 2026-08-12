@@ -107,7 +107,11 @@ function compute(
 
 export function ScoreTool() {
   const [name, setName] = useState("");
-  const [category, setCategory] = useState(CATEGORIES[0] as string);
+  // Deliberately unset. This used to default to CATEGORIES[0] ("Physiotherapy"),
+  // which was then appended to the Places query for everyone who never opened
+  // the select — so a plumber's lookup searched "…Toronto Physiotherapy" and
+  // came back with a physiotherapy clinic's real rating.
+  const [category, setCategory] = useState("");
   const [err, setErr] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
   const [completed, setCompleted] = useState(0);
@@ -279,6 +283,7 @@ export function ScoreTool() {
               </Field>
               <Field label="Category">
                 <Select value={category} onChange={(e) => setCategory(e.target.value)}>
+                  <option value="">Choose a category (optional)</option>
                   {CATEGORIES.map((c) => (
                     <option key={c} value={c}>{c}</option>
                   ))}
@@ -363,7 +368,7 @@ export function ScoreTool() {
             <div className="mb-4">
               <Kicker>You vs the area</Kicker>
               <h3 className="mt-1 text-[17px] font-bold text-ink">Where you stand on the block</h3>
-              <p className="mt-1 text-[13px] text-sub">Compared with a typical nearby {results.category.toLowerCase()}.</p>
+              <p className="mt-1 text-[13px] text-sub">Compared with a typical nearby {categoryLabel(results.category)}.</p>
             </div>
             <div className="grid gap-5 sm:grid-cols-2">
               <GapBar label="Star rating" you={results.rating} area={results.area.rating} format={(n) => n.toFixed(1)} />
@@ -384,7 +389,7 @@ export function ScoreTool() {
               <Kicker>Compare another business</Kicker>
               <h3 className="mt-1 text-[17px] font-bold text-ink">See how you stack up</h3>
               <p className="mt-1 text-[13px] text-sub">
-                Enter any nearby {results.category.toLowerCase()} to run the same Score on them.
+                Enter any nearby {categoryLabel(results.category)} to run the same Score on them.
               </p>
             </div>
             <form onSubmit={handleCompare} className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
@@ -475,6 +480,11 @@ export function ScoreTool() {
       ) : null}
     </div>
   );
+}
+
+/** Reads naturally in a sentence whether or not a category was chosen. */
+function categoryLabel(category: string): string {
+  return category ? category.toLowerCase() : "local business";
 }
 
 function bandLabel(score: number): string {

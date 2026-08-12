@@ -1,6 +1,6 @@
 # Foundly — full test plan
 
-Production: https://foundly-phi.vercel.app · DB: Supabase (ap-northeast-1) · Functions: Vercel `iad1`
+Production: https://foundly-phi.vercel.app · DB: Supabase (ap-northeast-1) · Functions: Vercel `hnd1`
 
 Every case is written as **Do → Expect**. A case fails if the expectation differs, *or* if the
 browser console shows an error, *or* if the page takes more than ~10s.
@@ -17,7 +17,7 @@ bugs; they are known and listed with what unblocks them.
 | B1 | `RESEND_API_KEY` not set in production | No review-request email ever leaves the system. Requests are created and honestly shown as "queued — connect email to send" | Add Resend key + `EMAIL_FROM`, verify sending domain |
 | B2 | `TWILIO_*` not set | SMS channel inert | Add SID, auth token, messaging service SID |
 | B3 | `STRIPE_SECRET_KEY` / price IDs not set | No checkout, no upgrade, no real plan enforcement | Add Stripe keys + webhook secret + price IDs |
-| B4 | `ANTHROPIC_API_KEY` not set | AI copy silently falls back to deterministic templates (`source: "template"`) | Add key |
+| ~~B4~~ | ~~`ANTHROPIC_API_KEY` not set~~ — **closed 2026-08-07.** The key *is* set in Production (confirm with `npx vercel env ls production`), so the Claude path runs. A draft still returning `source: "template"` now means generation failed open, not a missing key | — |
 | B5 | Business Profile API not enabled/approved | No review import, no reply publishing, no performance data. **Since 2026-08-04 this no longer blocks the profile score or the recommendation list** — `syncGooglePublic` runs a Places-backed audit (10 checks: website, phone, hours, photos, description, categories, review volume/recency/rating, listing status) that produces a real score and real next actions. Checks Places cannot see (posts, Q&A, review replies, services, special hours) are shown as blocked, never as passing | Enable My Business APIs; request per-project access |
 | B6 | OAuth consent screen unverified for `business.manage` | Only test users can connect; real customers cannot | Submit Google verification |
 | B7 | OAuth client is the shared PPC Guru client | Consent screen asks for Gmail/Drive/Ads scopes; Foundly holds far more access than it needs | Create a dedicated client with only `business.manage` + `webmasters.readonly` |
@@ -35,8 +35,21 @@ node feature-check.mjs https://foundly-phi.vercel.app <email> '<pass>'  # rank g
 node live-check.mjs   https://foundly-phi.vercel.app                    # real signup on the live site
 ```
 
-**Status:** `npm run check`, `db:verify` and `crawl-check` have been run and pass.
-`loop-check`, `feature-check` and `live-check` have **not been run yet** — do these next.
+**Status (2026-08-07): all five have now been run and pass.**
+
+| Check | Result |
+|---|---|
+| `npm run check` | Pass — lint, typecheck, **181 tests**, build (92 pages) |
+| `crawl-check` | Pass — 62 routes |
+| `loop-check` | **Pass — the core loop in §4 is now verified end to end**, both the 5★ Google path and the 2★ private-feedback path, each read back from Postgres |
+| `live-check` | Pass — real signup, real Places lookup, real review sync, security headers |
+| `feature-check` | Pass — QR redirect, widget, rank grid, `/score` |
+
+Two things had to be fixed to get there, and both were *checker* faults rather than product faults —
+worth knowing, because each one had been reporting a product bug that did not exist:
+`loop-check` never cleared the service step or the post-rating **Continue**, so it never reached the
+stars or the drafts; and `feature-check` filled the `/score` field but never pressed the button, so no
+lookup ever ran. Chasing the second one is what uncovered the real bug below.
 
 ---
 
@@ -89,7 +102,11 @@ node live-check.mjs   https://foundly-phi.vercel.app                    # real s
 | C12 | Send during configured quiet hours | Held, not delivered immediately |
 | C13 | Owner views `/app/requests` | The request appears with an accurate status |
 
-**This is the single most important section. It has not yet been verified end to end.**
+**This is the single most important section. Verified end to end on 2026-08-07** by `loop-check`
+against production: customer created, request + token written, token opened in a clean browser,
+5★ routed to the real Google URL, 2★ stored in `private_feedback` while still being offered the public
+Google link, and both ratings recorded back onto the request row. C3 confirmed: with no Resend key the
+request row lands as `status=failed`, not a fake success.
 
 ## 5. Reviews & replies
 
@@ -124,6 +141,7 @@ node live-check.mjs   https://foundly-phi.vercel.app                    # real s
 | D6 | Staff console + leaderboard | Only that staff member's scope; leaderboard respects the visibility setting |
 | D7 | Agency console as an agency account | Client rollup loads (regression: `/agency`, `/agency/clients`, `/agency/reports` used to time out) |
 | D8 | Platform admin pages as a real platform admin | Tenants, billing, delivery, fraud, audit all load |
+| D9 | Sign in as agency_admin or platform_admin, then navigate to `/app/*` and click any action button | Redirected to `/agency` / `/admin`. Regression 2026-08-07: `/app` was the only protected prefix with no role gate, so both roles loaded every page at HTTP 200 and then hit a **500 on every server action** — `requireRole()` throws, and an uncaught throw in a server action is a 500, not a redirect. Nine pages affected. Owner/manager/staff were never affected |
 
 ## 8. Settings
 
@@ -147,6 +165,8 @@ node live-check.mjs   https://foundly-phi.vercel.app                    # real s
 | X4 | Hit `/api/cron/monitor` without the bearer token | 401/403 |
 | X5 | Password-reset link host | Always the app's own origin — never influenced by a forged `Host` header |
 | X6 | Brute-force sign-in ~20× | Rate-limited |
+| X6b | Burn the sign-in limit against someone else's email, then have them sign in with the **correct** password from a different browser | They get in. Regression 2026-08-07: the strict bucket was keyed on the email alone, so 10 wrong guesses locked the real owner out for the full 10-minute window from anywhere — a brute-force guard usable as a lockout weapon. Now keyed on email + caller |
+| X6c | Sign in on a throttled connection, typing before the page hydrates | Signs in. Regression 2026-08-07: the auth forms are controlled off state that starts empty, and the submit handler read state, so anything typed pre-hydration was discarded — "Invalid email or password" for a correct password, and a rate-limit slot burnt each time. All four auth forms now read FormData with state as fallback |
 | X7 | Inspect cookies | Session cookie `httpOnly`, `secure`, `sameSite` |
 | X8 | Submit XSS payloads in customer name, feedback, reply text | Escaped everywhere it is rendered |
 | X9 | Check any page source for secrets | Only `NEXT_PUBLIC_*` values ever reach the client |
@@ -157,6 +177,8 @@ node live-check.mjs   https://foundly-phi.vercel.app                    # real s
 |---|---|---|
 | P1 | `/`, `/pricing`, `/agencies`, `/resources`, `/for/plumbing`, `/legal/*` | Render; no console errors |
 | P2 | `/score` — run a real lookup | Live Google-backed result |
+| P2b | `/score` — type a business but leave the category select alone | The result is that business, or an honestly-labelled estimate — **never a different business's real rating.** Regression 2026-08-07: the select defaulted to `Physiotherapy` and was appended to the Places query, so "Priority Plumbing & Drains Toronto" returned *Tru Physiotherapy* (5.0, 87 reviews) presented as "from your public Google listing" |
+| P2c | `/score` — type a name matching nothing real | Falls back to the labelled synthetic preview, never a stranger's listing |
 | P3 | `robots.txt`, `sitemap`, OG tags | Present and correct |
 | P4 | Any dashboard page, timed | Under ~3s. Cross-region DB makes this the weak spot |
 | P5 | Whole app at 375px width | Usable; tap targets ≥44px |
@@ -178,7 +200,12 @@ node live-check.mjs   https://foundly-phi.vercel.app                    # real s
 
 1. **B1 — email.** Without it the product cannot deliver its core action. Everything else is decoration.
 2. **B5/B6 — Business Profile access.** Review import and reply publishing are the value proposition; both are weeks of lead time, so start now.
-3. **Run `loop-check`, `feature-check`, `live-check`.** The core loop is still unverified.
+3. ~~**Run `loop-check`, `feature-check`, `live-check`.**~~ Done 2026-08-07 — all pass, core loop verified.
 4. **B3 — Stripe.** No revenue until this is live.
+4b. **Two open low-severity items** from the 2026-08-07 audit, both deliberately left alone:
+    `notFound()` called inside a route group (`/r/<bad-token>`, `/legal/<bad-doc>`, `/resources/<bad-slug>`)
+    returns a correct 404 whose *server-rendered* body is an empty suspense placeholder — browsers fill in
+    the right 404 card, but crawlers and no-JS clients get a blank page; and `/for/<any-slug>` returns 200
+    with a generic fallback rather than 404, which mints unlimited indexable duplicate URLs.
 5. **B7 — dedicated OAuth client.** A review tool asking for Gmail and Drive will cost you signups, and holding that access is a liability.
-6. **Region mismatch.** Supabase in Tokyo, functions in `iad1`. This is the ceiling on every page's speed.
+6. ~~**Region mismatch.**~~ Fixed — `vercel.json` pins `"regions": ["hnd1"]`, beside Supabase. Confirm the Vercel dashboard agrees; if the two disagree, the dashboard wins.

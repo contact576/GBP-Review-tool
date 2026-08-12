@@ -120,13 +120,32 @@ export async function GET(req: NextRequest) {
       "Google authorized, but the granted access couldn't read your Business Profile — try reconnecting.",
     );
   } else {
+    // Carry Google's own message through. This used to report a bare "the
+    // Business Profile check failed", which is unactionable — the status code
+    // and error body that would say *why* were already in `probe.detail` and
+    // were being discarded at the last step.
     await provider.setIntegrationStatus(
       ws,
       "google",
       "needs_attention",
-      "Google connected, but the Business Profile check failed — we'll retry on next sync.",
+      `Google connected, but the Business Profile check failed — we'll retry on next sync. ${probe.detail}`,
     );
   }
+
+  // Search Console is requested in the same consent screen but is a separate
+  // tile, and Google grants scopes individually — the user can approve Business
+  // Profile and decline Search Console. Read what was actually granted rather
+  // than assuming the request succeeded.
+  const grantedScopes = tokens.scope ?? existingCredential?.scopes ?? "";
+  const searchConsoleGranted = grantedScopes.includes("auth/webmasters");
+  await provider.setIntegrationStatus(
+    ws,
+    "search_console",
+    searchConsoleGranted ? "connected" : "disconnected",
+    searchConsoleGranted
+      ? "Read-only Search Console access granted — website queries and landing pages will sync"
+      : "Reconnect Google with read-only Search Console access",
+  );
 
   return done();
 }

@@ -46,8 +46,19 @@ export function SignInForm({
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
+    // Read the DOM, not React state.
+    //
+    // These inputs are controlled off state that starts empty, so anything the
+    // visitor types before hydration finishes is discarded the moment React
+    // takes over — on a throttled phone this silently submitted blank or
+    // half-captured credentials and came back "Invalid email or password" for a
+    // correct password, burning a rate-limit slot each time. The form element
+    // holds what the visitor actually typed; state is only the fallback.
+    const data = new FormData(e.currentTarget);
+    const typedEmail = String(data.get("email") ?? "").trim() || email;
+    const typedPassword = String(data.get("password") ?? "") || password;
     startTransition(async () => {
-      const result = await loginAction({ email, password });
+      const result = await loginAction({ email: typedEmail, password: typedPassword });
       if (!result.ok) {
         setError(result.error ?? "Something went wrong. Please try again.");
         return;

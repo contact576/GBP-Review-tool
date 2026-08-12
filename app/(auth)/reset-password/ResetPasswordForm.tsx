@@ -49,19 +49,27 @@ export function ResetPasswordForm({ token }: { token: string }) {
         method="post"
         onSubmit={(event) => {
           event.preventDefault();
-          if (password !== confirm) {
+          // Read the DOM, not state — see the note in SignInForm. Submitting
+          // before hydration otherwise compared two empty strings, passed the
+          // match check, and sent a blank password to the action.
+          const data = new FormData(event.currentTarget);
+          const typedPassword = String(data.get("password") ?? "") || password;
+          const typedConfirm = String(data.get("confirm") ?? "") || confirm;
+          if (typedPassword !== typedConfirm) {
             setResult({ ok: false, message: "Passwords do not match." });
             return;
           }
           setResult(null);
-          startTransition(async () => setResult(await resetPasswordAction({ token, password })));
+          startTransition(async () =>
+            setResult(await resetPasswordAction({ token, password: typedPassword })),
+          );
         }}
       >
         <Field label="New password">
-          <Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" iconLeft="lock" minLength={8} maxLength={128} required />
+          <Input type="password" name="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" iconLeft="lock" minLength={8} maxLength={128} required />
         </Field>
         <Field label="Confirm new password">
-          <Input type="password" value={confirm} onChange={(event) => setConfirm(event.target.value)} autoComplete="new-password" iconLeft="lock" minLength={8} maxLength={128} required />
+          <Input type="password" name="confirm" value={confirm} onChange={(event) => setConfirm(event.target.value)} autoComplete="new-password" iconLeft="lock" minLength={8} maxLength={128} required />
         </Field>
         {result && !result.ok ? <div role="alert" className="rounded-btn border border-danger/20 bg-danger-tint px-3 py-2 text-[13px] text-danger">{result.message}</div> : null}
         <Button type="submit" size="lg" fullWidth loading={pending}>Reset password</Button>

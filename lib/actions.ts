@@ -278,13 +278,23 @@ export async function loginAction(input: {
   password: string;
 }): Promise<AuthFormResult> {
   const email = input.email.trim().toLowerCase();
-  const loginByEmail = consumeRateLimit("auth-login-email", email || "missing", 10, 10 * 60_000);
-  const loginByIp = consumeRateLimit(
-    "auth-login-ip",
-    await requestIdentity(),
-    100,
+  const identity = await requestIdentity();
+  // Keyed on email AND caller, never on email alone.
+  //
+  // The per-email bucket used to be keyed on the email by itself, which turns a
+  // brute-force guard into a lockout weapon: anyone who knows your address can
+  // spend 10 wrong guesses and hold you out of your own account for the rest of
+  // the window, from anywhere, while you type the correct password. Scoping the
+  // strict bucket to the caller keeps guessing against one account expensive
+  // without letting a stranger's attempts spend a legitimate user's budget. The
+  // wider per-IP bucket below still caps someone spraying many accounts at once.
+  const loginByEmail = consumeRateLimit(
+    "auth-login-email",
+    `${email || "missing"}|${identity}`,
+    10,
     10 * 60_000,
   );
+  const loginByIp = consumeRateLimit("auth-login-ip", identity, 100, 10 * 60_000);
   if (!loginByEmail.allowed || !loginByIp.allowed) {
     return { ok: false, error: "Too many sign-in attempts. Please try again shortly." };
   }
@@ -1612,6 +1622,11 @@ export async function runRankGridAction(input: {
   };
   await provider.saveRankGridScan(ws, scan);
   revalidatePath("/app/rank-grid");
+  // The dashboard's "Visibility in your area" card reads the same latest scan.
+  // Without this it kept rendering the cached "No scan yet" empty state after a
+  // successful scan — the runner's router.refresh() only revalidates the route
+  // it was called from.
+  revalidatePath("/app");
   return {
     ok: true,
     message: session.isDemo

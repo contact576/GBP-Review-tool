@@ -118,6 +118,67 @@ export async function searchBusinesses(
   }
 }
 
+/**
+ * Words that describe an industry rather than identify a business. A match
+ * resting only on these is not a match: "Dental" typed into the score tool must
+ * not silently resolve to whichever dental practice Places ranked first.
+ */
+const GENERIC_TOKENS = new Set([
+  "and", "the", "inc", "llc", "ltd", "co", "corp", "company", "group", "services",
+  "service", "clinic", "centre", "center", "studio", "shop", "store", "salon",
+  "spa", "dental", "dentist", "dentistry", "physio", "physiotherapy", "chiro",
+  "chiropractic", "hvac", "heating", "cooling", "plumbing", "plumber", "auto",
+  "repair", "restaurant", "cafe", "law", "legal", "lawyers", "med", "medical",
+  "renovation", "renovations", "contracting", "solutions", "local", "business",
+]);
+
+/** Lowercase, strip accents and punctuation, split into meaningful tokens. */
+function tokenize(value: string): string[] {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    // Apostrophes join a word rather than break it: O'Brien is one token, and
+    // splitting it stops the listing spelled "OBrien" from ever matching.
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(" ")
+    .filter((t) => t.length > 1);
+}
+
+/**
+ * Does `placeName` plausibly name the business the user typed?
+ *
+ * Places Text Search always returns *something*, ranked by relevance to the
+ * whole query — so a query polluted by an unrelated term (the score tool used
+ * to append the category select's default) comes back with a real, confident,
+ * completely different business. Presenting that as "your public Google
+ * listing" is worse than showing nothing, so callers use this to decide whether
+ * the top hit may be treated as the user's own listing.
+ *
+ * Containment is checked in both directions: the typed name often carries extra
+ * words the listing lacks ("… Toronto"), and just as often lacks words the
+ * listing carries ("Bright Smile" -> "Bright Smile Dental Clinic"). At least one
+ * shared token must be distinctive, so an industry word alone never matches.
+ */
+export function isPlausibleNameMatch(typed: string, placeName: string): boolean {
+  const typedTokens = tokenize(typed);
+  const placeTokens = tokenize(placeName);
+  if (typedTokens.length === 0 || placeTokens.length === 0) return false;
+
+  const typedSet = new Set(typedTokens);
+  const placeSet = new Set(placeTokens);
+  const shared = [...typedSet].filter((t) => placeSet.has(t));
+  if (shared.length === 0) return false;
+  if (!shared.some((t) => !GENERIC_TOKENS.has(t))) return false;
+
+  const containment = Math.max(
+    shared.length / typedSet.size,
+    shared.length / placeSet.size,
+  );
+  return containment >= 0.6;
+}
+
 function toSummary(raw: RawPlace): PlaceSummary | null {
   if (!raw.id) return null;
   const address = raw.formattedAddress ?? "";

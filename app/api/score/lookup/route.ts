@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { placesEnabled } from "@/lib/google/config";
-import { searchBusinesses } from "@/lib/google/places";
+import { isPlausibleNameMatch, searchBusinesses } from "@/lib/google/places";
 import { boundedString, guardPublicApi, readJsonObject } from "@/lib/security/api";
 
 export const runtime = "nodejs";
@@ -35,5 +35,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, real: false });
   }
 
-  return NextResponse.json({ ok: true, real: true, place: result.places[0] });
+  // Text Search ranks against the whole query, category included, and always
+  // returns its best effort — so a name it never really matched still comes
+  // back looking authoritative. Searching "Priority Plumbing & Drains Toronto"
+  // with the category select untouched returned "Tru Physiotherapy" (5.0, 87
+  // reviews), which the tool then showed as the caller's own listing. Match the
+  // hit against the name the user actually typed, never the augmented query,
+  // and fall back to the clearly-labelled synthetic preview when it does not
+  // hold up. Showing an estimate beats stating someone else's numbers as fact.
+  const match = result.places.find((place) => isPlausibleNameMatch(business, place.name));
+  if (!match) {
+    return NextResponse.json({ ok: true, real: false });
+  }
+
+  return NextResponse.json({ ok: true, real: true, place: match });
 }

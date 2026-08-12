@@ -2,6 +2,7 @@ import { cache } from "react";
 import { redirect } from "next/navigation";
 import type { DataProvider } from "./provider";
 import { memoryProvider, DEMO_WORKSPACE_ID } from "./memory-provider";
+import { reconcileIntegrations } from "./integration-status";
 import { getSession, type Session } from "@/lib/auth/session";
 import type { FoundlyData } from "./types";
 
@@ -68,8 +69,10 @@ export async function getPublicProviders(): Promise<DataProvider[]> {
  * the provider singleton plus the workspace id keep tenants strictly isolated.
  */
 const loadWorkspaceData = cache(
-  async (provider: DataProvider, workspaceId: string): Promise<FoundlyData | null> =>
-    provider.getData(workspaceId),
+  async (provider: DataProvider, workspaceId: string): Promise<FoundlyData | null> => {
+    const data = await provider.getData(workspaceId);
+    return data ? reconcileIntegrations(data) : data;
+  },
 );
 
 /**

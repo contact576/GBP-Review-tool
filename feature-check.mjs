@@ -80,11 +80,23 @@ try {
   const input = sp.locator('input[type="text"], input[type="search"], input:not([type])').first();
   if (await input.count()) {
     await input.fill("Priority Plumbing & Drains Toronto");
-    await sp.waitForTimeout(9000);
+    // The lookup only fires on submit. This used to fill the field and wait,
+    // which measured nothing at all — the tool sat on its idle screen for nine
+    // seconds and the run reported a product failure that did not exist.
+    await sp.getByRole("button", { name: /get my free score|re-run score/i }).first().click();
+    // Scan animation is ~3.5s, then the reveal upgrades to real Places data.
+    await sp.waitForFunction(
+      () => /Local Growth Score/i.test(document.body.innerText),
+      { timeout: 60_000 },
+    ).catch(() => {});
+    await sp.waitForTimeout(6000);
     const txt = await sp.locator("body").innerText();
-    /4\.8|1,?887|Dupont/.test(txt)
+    // Review counts move, so match the rating and the "real listing" footnote
+    // rather than a frozen total.
+    const realFootnote = /from your public Google listing/i.test(txt);
+    /4\.[6-9]/.test(txt) && realFootnote
       ? ok("score lookup returned real Google data")
-      : bad("score lookup", `no real data: ${txt.replace(/\s+/g, " ").slice(120, 260)}`);
+      : bad("score lookup", `no real data: ${txt.replace(/\s+/g, " ").slice(120, 320)}`);
   } else {
     bad("score lookup", "no search input on /score");
   }

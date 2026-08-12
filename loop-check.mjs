@@ -71,16 +71,34 @@ try {
     if (!(await addBtn.count())) { bad("add customer", "no add-customer control on /app/customers"); break; }
     await addBtn.click();
     await page.waitForTimeout(1500);
-    await page.fill('input[name="name"]', c.name).catch(() => {});
-    await page.fill('input[name="email"]', c.email).catch(() => {});
+    // The add-customer dialog's inputs carry no `name` attribute, so they are
+    // addressed by placeholder. These fills used to be wrapped in
+    // `.catch(() => {})`, which turned a selector miss into an empty form and
+    // then a confusing "customer not in Postgres" failure two steps later —
+    // the check reported a product bug that did not exist. Fail loudly here
+    // instead: if the dialog changes, the message should say so.
+    // Scope to the dialog. Page-level "Add customer" / "Import CSV" controls sit
+    // behind it with matching accessible names, and a loose page-wide match
+    // picked the trigger instead of the submit — the form never submitted and
+    // the failure surfaced as a bogus "not in Postgres" two steps later.
+    const dialog = page.locator('[role="dialog"]');
+    const form = (await dialog.count()) ? dialog : page;
+    const nameField = form.getByPlaceholder(/customer's name|full name/i).first();
+    const emailField = form.getByPlaceholder(/name@example\.com|email/i).first();
+    if (!(await nameField.count()) || !(await emailField.count())) {
+      bad("add-customer dialog", "name/email fields not found — dialog markup changed");
+      continue;
+    }
+    await nameField.fill(c.name);
+    await emailField.fill(c.email);
     // Consent is required before a request may be sent.
-    for (const box of await page.locator('[role="checkbox"]').all()) {
+    for (const box of await form.locator('[role="checkbox"]').all()) {
       const near = await box.evaluate((el) => (el.parentElement?.textContent || "").trim());
       if (/consent|permission|agree/i.test(near) && (await box.getAttribute("aria-checked")) === "false") {
         await box.click();
       }
     }
-    const saveBtn = page.getByRole("button", { name: /save|add|create/i }).last();
+    const saveBtn = form.getByRole("button", { name: /^add customer$|^save$|^create$/i }).last();
     await saveBtn.click();
     await page.waitForTimeout(4000);
 
@@ -97,10 +115,20 @@ try {
     if (await sendBtn.count()) {
       await sendBtn.click();
       await page.waitForTimeout(2000);
-      // Pick this customer if a chooser appeared, then confirm.
-      const chooser = page.getByText(c.name).first();
-      if (await chooser.count()) await chooser.click().catch(() => {});
-      const confirm = page.getByRole("button", { name: /send|confirm/i }).last();
+      // The chooser is a native <select> ("Only customers you haven't asked yet
+      // appear here"), not clickable text — and the confirm button must be
+      // scoped to the dialog, since the page behind it carries the same label.
+      const sendDialog = page.locator('[role="dialog"]');
+      const scope = (await sendDialog.count()) ? sendDialog : page;
+      const chooser = scope.locator("select").first();
+      if (await chooser.count()) {
+        await chooser.selectOption({ label: c.name }).catch(async () => {
+          // Fall back to matching on the option text if the label differs.
+          await chooser.selectOption({ index: 1 }).catch(() => {});
+        });
+        await page.waitForTimeout(800);
+      }
+      const confirm = scope.getByRole("button", { name: /^send request$|^send$|^confirm$/i }).last();
       await confirm.click().catch(() => {});
       await page.waitForTimeout(5000);
     }
@@ -129,6 +157,32 @@ try {
     const pageText = await gp.locator("body").innerText();
     pageText.length > 100 ? ok("review page rendered", `${pageText.length} chars`) : bad("review page", "empty");
 
+    // ── Clear the service step, which comes before the stars ─
+    // Any workspace whose industry has services (i.e. nearly all of them) opens
+    // on "What did you come to {business} for?". The rating control does not
+    // exist until this step is answered, so skipping it here used to surface as
+    // "found 0 star controls".
+    const serviceOption = gp.getByRole("button", { name: /^skip this$/i }).first();
+    if (await serviceOption.count()) {
+      // Pick a real service when one is offered — it exercises the grounding
+      // path that feeds the draft — otherwise skip.
+      const firstService = gp
+        .locator('button[aria-pressed], [role="button"]')
+        .filter({ hasNotText: /^skip this$/i })
+        .first();
+      if (await firstService.count()) await firstService.click().catch(() => {});
+      else await serviceOption.click();
+      await gp.waitForTimeout(2500);
+      // If a real service was chosen the flow may still need a confirm/continue.
+      const cont = gp.getByRole("button", { name: /^continue$|^next$/i }).first();
+      if (await cont.count()) { await cont.click().catch(() => {}); await gp.waitForTimeout(2000); }
+      // Still on the service step? Take the explicit skip.
+      if (await gp.getByRole("button", { name: /^skip this$/i }).first().count()) {
+        await gp.getByRole("button", { name: /^skip this$/i }).first().click().catch(() => {});
+        await gp.waitForTimeout(2500);
+      }
+    }
+
     // ── Choose the star rating ───────────────────────────
     const starBtn = gp.getByRole("button", { name: new RegExp(`${c.rating}\\s*star|^${c.rating}$`, "i") }).first();
     if (await starBtn.count()) {
@@ -142,6 +196,15 @@ try {
     }
     await gp.waitForTimeout(4000);
 
+    // Picking a rating reveals the "what stood out?" chips on the SAME step,
+    // gated behind Continue. The drafts and the private-feedback option live on
+    // the step after, so without this the run never sees either.
+    const continueBtn = gp.getByRole("button", { name: /^continue$/i }).first();
+    if (await continueBtn.count()) {
+      await continueBtn.click().catch(() => {});
+      await gp.waitForTimeout(4000);
+    }
+
     const afterRating = await gp.locator("body").innerText();
     if (c.rating >= 4) {
       // High rating must offer the public Google path.
@@ -149,7 +212,18 @@ try {
         ? ok("high rating offers the Google path")
         : bad("high rating", "no Google path offered");
     } else {
-      // Low rating must collect private feedback instead of pushing to Google.
+      // Low rating must OFFER private feedback — as an option, not a diversion.
+      // The product deliberately puts 1-3★ on the same path as everyone else and
+      // keeps the public Google link visible (review gating breaks Google policy
+      // and FTC guidance), so the textarea is behind an opt-in control rather
+      // than presented automatically. Open it first, then assert.
+      const openPrivate = gp
+        .getByRole("button", { name: /private|feedback|tell (us|them)|what went wrong/i })
+        .first();
+      if ((await openPrivate.count()) && !(await gp.locator("textarea").count())) {
+        await openPrivate.click().catch(() => {});
+        await gp.waitForTimeout(2500);
+      }
       const box = gp.locator("textarea").first();
       if (await box.count()) {
         await box.fill("Verification: the technician was late and did not call ahead.");
@@ -163,12 +237,21 @@ try {
           ? ok("private feedback stored", `${fb[0].rating}★ "${fb[0].snippet}…"`)
           : bad("private feedback", "nothing stored in private_feedback");
       } else {
-        bad("low rating", "no private-feedback textarea presented");
+        bad("low rating", "no private-feedback option offered anywhere on the page");
       }
-      // A low rating must never be pushed to a public Google review.
-      /leave.*google review|post.*google/i.test(afterRating)
-        ? bad("low rating", "pushed the customer to a public Google review")
-        : ok("low rating kept private (no Google push)");
+      // A low rating must still be OFFERED the public Google review link.
+      //
+      // This assertion used to be inverted — it failed the run whenever the
+      // Google path appeared at 1-3★, which would have pushed someone to
+      // implement exactly the review gating the product forbids. Hiding the
+      // public link from unhappy customers breaks Google's policy and FTC
+      // guidance, so components/review/PublicGoogleReviewLink.tsx renders it
+      // unconditionally and carries data-compliance for this check to find.
+      // What must NOT happen is a low rating being auto-posted or nudged; the
+      // private-feedback path above proves the honest route is offered too.
+      (await gp.locator('[data-compliance="public-google-link"]').count())
+        ? ok("low rating still offered the public Google link (no review gating)")
+        : bad("review gating", "public Google link hidden from a 1-3★ customer");
     }
 
     // Rating must be recorded against the request.

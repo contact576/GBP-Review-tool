@@ -80,12 +80,19 @@ export function SignUpForm({
       return;
     }
     setError(null);
+    // Read the DOM, not state — see the note in SignInForm. A pre-hydration
+    // submit here would have created an account with a blank name and business,
+    // or failed validation on credentials the visitor had plainly typed. The
+    // selects carry their own defaults, so state stays authoritative for those.
+    const data = new FormData(e.currentTarget);
+    const typed = (field: string, fallback: string) =>
+      String(data.get(field) ?? "").trim() || fallback;
     startTransition(async () => {
       const result = await registerAction({
-        name,
-        email,
-        password,
-        businessName,
+        name: typed("name", name),
+        email: typed("email", email),
+        password: String(data.get("password") ?? "") || password,
+        businessName: typed("businessName", businessName),
         industryKey,
         region,
         referralCode,

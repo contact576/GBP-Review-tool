@@ -45,6 +45,21 @@ export async function middleware(req: NextRequest) {
       url.pathname = "/app";
       return applySecurityHeaders(NextResponse.redirect(url), pathname);
     }
+    // /app is the owner console, and it used to be the one prefix with no role
+    // gate — every role could walk in. The pages rendered fine, so it looked
+    // harmless, but each one's server actions call requireRole(), which THROWS
+    // on a role mismatch; an uncaught throw in a server action is a 500, so an
+    // agency or platform admin got a working-looking page whose every button
+    // dropped them on the error boundary. Send them to their own console
+    // instead. No loop is possible: /agency admits agency_admin and /admin
+    // admits platform_admin, so each redirect terminates on the next hop.
+    if (pathname.startsWith("/app")) {
+      if (role === "agency_admin" || role === "platform_admin") {
+        const url = req.nextUrl.clone();
+        url.pathname = role === "agency_admin" ? "/agency" : "/admin";
+        return applySecurityHeaders(NextResponse.redirect(url), pathname);
+      }
+    }
   }
 
   // ── 2. Security headers (all matched routes) ──────────────
