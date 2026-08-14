@@ -28,6 +28,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Reviews", href: "/app/reviews", icon: "chat" },
       { label: "Requests", href: "/app/requests", icon: "send" },
+      { label: "Ask on WhatsApp", href: "/app/whatsapp", icon: "phone" },
     ],
   },
   {
@@ -62,6 +63,7 @@ export const BOTTOM_TABS: NavItem[] = [
 
 export const MORE_ITEMS: NavItem[] = [
   { label: "Requests", href: "/app/requests", icon: "send" },
+  { label: "Ask on WhatsApp", href: "/app/whatsapp", icon: "phone" },
   { label: "Profile Audit", href: "/app/profile", icon: "compass" },
   { label: "Campaigns", href: "/app/campaigns", icon: "megaphone" },
   { label: "Benchmark", href: "/app/benchmark", icon: "chart" },

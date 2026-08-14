@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ds/Card";
 import { Button } from "@/components/ds/Button";
@@ -406,6 +407,13 @@ export function RequestsView({
                 SMS
               </Chip>
             </div>
+            <p className="mt-1.5 text-[12px] text-faint">
+              Asking on WhatsApp?{" "}
+              <Link href="/app/whatsapp" className="font-semibold text-primary underline">
+                Send a batch from your own WhatsApp
+              </Link>{" "}
+              — no API needed.
+            </p>
           </div>
 
           <div>

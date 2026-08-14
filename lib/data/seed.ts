@@ -569,7 +569,7 @@ export function buildSeed(): FoundlyData {
       { key: "rank_grid", description: "Local rank-grid map", enabled: true, rollout: "beta" },
       { key: "aeo", description: "AI Visibility / AEO module", enabled: true, rollout: "beta" },
       { key: "campaigns_pro", description: "Campaigns Pro journeys", enabled: false, rollout: "internal" },
-      { key: "whatsapp", description: "WhatsApp channel", enabled: false, rollout: "internal" },
+      { key: "whatsapp", description: "WhatsApp channel (manual click-to-chat)", enabled: true, rollout: "all" },
     ],
     notifications: [
       { id: "ntf_1", locationId, kind: "review", title: "New 5★ review detected", body: "Dana R. left a 5-star review — likely matched to a request you sent.", createdAt: hoursAgo(3), read: false },

@@ -432,6 +432,33 @@ export const googleCredential = pgTable("google_credential", {
   updatedAt: text("updated_at").notNull(),
 });
 
+/**
+ * Per-workspace outbound email sender. One row per workspace, written from
+ * Settings → Channels so an owner can switch email on without a redeploy.
+ *
+ * `provider` is "resend" (hosted API) or "smtp" (their own mailbox). The single
+ * `encryptedSecret` column holds whichever secret that provider needs — the
+ * Resend API key or the SMTP password — as an AES-256-GCM envelope, never
+ * plaintext. `verifiedAt` is stamped only by a real test send that succeeded,
+ * so the UI can never claim "verified" on an untested config.
+ */
+export const emailCredential = pgTable("email_credential", {
+  workspaceId: text("workspace_id").primaryKey(),
+  provider: text("provider").notNull(),
+  encryptedSecret: text("encrypted_secret").notNull(),
+  fromEmail: text("from_email").notNull(),
+  fromName: text("from_name"),
+  replyTo: text("reply_to"),
+  smtpHost: text("smtp_host"),
+  smtpPort: integer("smtp_port"),
+  smtpUser: text("smtp_user"),
+  smtpSecure: boolean("smtp_secure"),
+  verifiedAt: text("verified_at"),
+  lastError: text("last_error"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
 export const instagramCredential = pgTable("instagram_credential", {
   workspaceId: text("workspace_id").primaryKey(),
   encryptedAccessToken: text("encrypted_access_token").notNull(),

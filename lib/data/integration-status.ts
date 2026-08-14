@@ -24,13 +24,22 @@ import type { FoundlyData, Integration } from "./types";
  * their seeded values are a curated sales surface, not a claim about this
  * deployment's environment.
  */
-export function reconcileIntegrations(data: FoundlyData): FoundlyData {
+export function reconcileIntegrations(
+  data: FoundlyData,
+  /**
+   * Email is no longer platform-only: a workspace can save its own Resend key
+   * or SMTP mailbox in Settings → Channels. That lookup is async and needs a
+   * database, so the caller resolves it (see `loadWorkspaceData`) and passes
+   * the answer in. Omitted, this falls back to the env-level check.
+   */
+  overrides?: { emailOn?: boolean },
+): FoundlyData {
   if (data.workspace.isDemo) return data;
   const integrations = data.integrations ?? [];
   if (integrations.length === 0) return data;
 
   const website = data.location.website?.trim();
-  const emailOn = emailEnabled();
+  const emailOn = overrides?.emailOn ?? emailEnabled();
   const smsOn = smsEnabled();
 
   return {
@@ -44,7 +53,7 @@ export function reconcileIntegrations(data: FoundlyData): FoundlyData {
         case "resend":
           return emailOn
             ? patch(integration, "connected", "Email service configured — review requests send live")
-            : patch(integration, "pending", "Email sending activates once the platform email service is configured");
+            : patch(integration, "pending", "Add a sender in Settings → Channels to start sending email");
         case "twilio":
           return smsOn
             ? patch(integration, "connected", "SMS sender configured — review requests can send by text")

@@ -46,8 +46,9 @@ const EXPECTED_TABLES = [
   "staff_invite", "staff_member", "customer", "customer_consent", "review_request",
   "review", "review_reply", "review_draft", "gbp_task", "campaign", "subscription",
   "private_feedback", "notification", "audit_log", "qr_asset", "dataset_meta",
-  "google_credential", "instagram_credential", "profile_mutation_job",
-  "content_publishing_job", "monitoring_run", "ai_content_asset",
+  "google_credential", "instagram_credential", "email_credential",
+  "profile_mutation_job", "content_publishing_job", "monitoring_run",
+  "ai_content_asset",
 ];
 
 const REQUIRED_USER_COLUMNS = [

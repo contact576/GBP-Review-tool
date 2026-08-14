@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import type { DataProvider } from "./provider";
 import { memoryProvider, DEMO_WORKSPACE_ID } from "./memory-provider";
 import { reconcileIntegrations } from "./integration-status";
+import { emailEnabledFor } from "@/lib/email";
 import { getSession, type Session } from "@/lib/auth/session";
 import type { FoundlyData } from "./types";
 
@@ -71,7 +72,10 @@ export async function getPublicProviders(): Promise<DataProvider[]> {
 const loadWorkspaceData = cache(
   async (provider: DataProvider, workspaceId: string): Promise<FoundlyData | null> => {
     const data = await provider.getData(workspaceId);
-    return data ? reconcileIntegrations(data) : data;
+    if (!data) return data;
+    return reconcileIntegrations(data, {
+      emailOn: await emailEnabledFor(workspaceId),
+    });
   },
 );
 

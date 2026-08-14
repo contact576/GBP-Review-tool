@@ -1,5 +1,5 @@
 import { getAgencyClients, getSessionAndData } from "@/lib/data";
-import { emailEnabled } from "@/lib/email";
+import { emailEnabledFor } from "@/lib/email";
 import { PageHeader } from "@/components/app/PageHeader";
 import { ReportsSender } from "./ReportsSender";
 
@@ -16,7 +16,7 @@ export default async function AgencyReportsPage() {
       <ReportsSender
         clients={clients}
         brandName={data.agency.whiteLabel.brandName}
-        deliveryConnected={session.isDemo || emailEnabled()}
+        deliveryConnected={session.isDemo || (await emailEnabledFor(session.workspaceId))}
       />
     </div>
   );

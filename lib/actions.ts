@@ -25,9 +25,18 @@ import {
   createCheckoutSession,
   createPortalSession,
 } from "@/lib/billing/stripe";
-import { emailEnabled, sendEmail } from "@/lib/email";
+import { emailEnabled, emailEnabledFor, sendEmail } from "@/lib/email";
+import {
+  readEmailSettings,
+  saveEmailSettings,
+  deleteEmailSettings,
+  recordEmailTestResult,
+  type EmailProvider,
+  type EmailSettingsView,
+} from "@/lib/email/config";
 import {
   agencyGrowthReportEmail,
+  emailTestEmail,
   passwordResetEmail,
   reviewRequestEmail,
   staffInviteEmail,
@@ -36,6 +45,7 @@ import {
 import { reviewRequestSms } from "@/lib/sms/templates";
 import { sendSms, smsEnabled } from "@/lib/sms/twilio";
 import { canonicalPhone, isE164 } from "@/lib/sms/phone";
+import { toWhatsAppNumber } from "@/lib/whatsapp/link";
 import { appUrl } from "@/lib/utils/app-url";
 import { consumeRateLimit } from "@/lib/security/api";
 import { trustedClientIp } from "@/lib/security/client-ip";
@@ -118,9 +128,12 @@ async function deliverReviewRequest(
 ): Promise<"sent" | "failed" | "suppressed"> {
   let status: "sent" | "failed" | "suppressed" = "failed";
   let reason: string | undefined;
+  // Email can be switched on per workspace (Settings → Channels) or at the env
+  // level, so the capability check is workspace-scoped rather than global.
+  const canEmail = simulate ? false : await emailEnabledFor(ws);
   if (simulate) {
     status = "sent";
-  } else if (emailEnabled() && !(await provider.isWorkspaceEmailVerified(ws))) {
+  } else if (canEmail && !(await provider.isWorkspaceEmailVerified(ws))) {
     // V17: an account whose email is not yet confirmed cannot send outbound
     // messages. Reuses the existing "suppressed" delivery state, so the request
     // is recorded honestly rather than silently sent from an unverified account.
@@ -137,7 +150,14 @@ async function deliverReviewRequest(
     if (!customer?.consent.serviceConsent || customer.consent.withdrawnAt || suppressed) {
       status = "suppressed";
       reason = customer?.suppressedReason ?? "Service consent is missing or withdrawn.";
-    } else if (request.channel === "email" && customer.email && emailEnabled() && data) {
+    } else if (request.channel === "whatsapp") {
+      // WhatsApp is a manual, no-API channel: the message is composed here but
+      // the owner sends it from WhatsApp Web themselves. Nothing to deliver
+      // server-side, so the request stays queued until they confirm the send
+      // (see markWhatsAppRequestSentAction).
+      status = "failed";
+      reason = "Open this request in WhatsApp to send it.";
+    } else if (request.channel === "email" && customer.email && canEmail && data) {
       try {
         const base = await appUrl();
         const { subject, html } = reviewRequestEmail({
@@ -145,8 +165,19 @@ async function deliverReviewRequest(
           customerName: request.customerName,
           link: `${base}/r/${request.token}`,
         });
-        const result = await sendEmail({ to: customer.email, subject, html });
+        const result = await sendEmail({
+          to: customer.email,
+          subject,
+          html,
+          workspaceId: ws,
+        });
         status = result.ok ? "sent" : "failed";
+        if (!result.ok) {
+          reason =
+            result.reason === "not_configured"
+              ? "Connect an email sender in Settings → Channels."
+              : result.detail;
+        }
       } catch {
         status = "failed";
       }
@@ -488,6 +519,123 @@ export async function sendRequestAction(input: SendRequestInput) {
   return { token: req.token, emailed: status === "sent", status };
 }
 
+// ── WhatsApp (manual, no API) ───────────────────────────────
+
+/**
+ * WhatsApp is the one channel Foundly cannot deliver on the user's behalf, by
+ * design: it rides WhatsApp's public click-to-chat links rather than the
+ * Business API, so the owner presses send in their own WhatsApp.
+ *
+ * That splits the work in two. This action mints the review links up front
+ * (one token per customer, so opens and posted reviews still attribute
+ * correctly), and `markWhatsAppRequestSentAction` records the send once the
+ * owner confirms it. A request the owner skips simply stays "queued" — the
+ * ledger never claims a message that was never sent.
+ */
+export interface WhatsAppRecipient {
+  customerId: string;
+  requestId: string;
+  name: string;
+  /** Digits-only international number, ready for a wa.me link. */
+  phone: string;
+  phoneDisplay: string;
+  /** Their unique review link. */
+  link: string;
+}
+
+export interface PrepareWhatsAppResult {
+  recipients: WhatsAppRecipient[];
+  business: string;
+  /** Customers that were requested but couldn't be prepared, with the reason. */
+  skipped: { customerId: string; name: string; reason: string }[];
+}
+
+export async function prepareWhatsAppRequestsAction(input: {
+  locationId: string;
+  customerIds: string[];
+}): Promise<PrepareWhatsAppResult> {
+  const { provider, ws } = await scoped("owner", "manager", "staff");
+
+  const ids = Array.from(
+    new Set(
+      (Array.isArray(input.customerIds) ? input.customerIds : [])
+        .filter((id): id is string => typeof id === "string")
+        .slice(0, 200),
+    ),
+  );
+  if (ids.length === 0) return { recipients: [], business: "", skipped: [] };
+
+  const data = await provider.getData(ws);
+  if (!data) throw new Error("Workspace not found");
+
+  const base = await appUrl();
+  const region = data.workspace.region;
+  const recipients: WhatsAppRecipient[] = [];
+  const skipped: PrepareWhatsAppResult["skipped"] = [];
+
+  for (const customerId of ids) {
+    const customer = data.customers.find((item) => item.id === customerId);
+    if (!customer) {
+      skipped.push({ customerId, name: "Customer", reason: "No longer in this workspace." });
+      continue;
+    }
+    if (customer.suppressedReason) {
+      skipped.push({ customerId, name: customer.name, reason: customer.suppressedReason });
+      continue;
+    }
+    if (!customer.consent.serviceConsent || customer.consent.withdrawnAt) {
+      skipped.push({
+        customerId,
+        name: customer.name,
+        reason: "No service-message consent on file.",
+      });
+      continue;
+    }
+    const number = toWhatsAppNumber(customer.phone, region);
+    if (!number) {
+      skipped.push({
+        customerId,
+        name: customer.name,
+        reason: customer.phone ? "That phone number isn't dialable." : "No phone number on file.",
+      });
+      continue;
+    }
+
+    const request = await provider.sendRequest(ws, {
+      locationId: input.locationId,
+      customerId,
+      channel: "whatsapp",
+    });
+    recipients.push({
+      customerId,
+      requestId: request.id,
+      name: customer.name,
+      phone: number.digits,
+      phoneDisplay: number.display,
+      link: `${base}/r/${request.token}`,
+    });
+  }
+
+  revalidatePath("/app/requests");
+  revalidatePath("/app/customers");
+  return { recipients, business: data.location.name, skipped };
+}
+
+/**
+ * Confirm the owner actually pressed send in WhatsApp. Only ever called from
+ * the queue UI after the chat was opened — never on our own initiative.
+ */
+export async function markWhatsAppRequestSentAction(
+  requestId: string,
+): Promise<{ ok: boolean }> {
+  const { provider, ws } = await scoped("owner", "manager", "staff");
+  if (typeof requestId !== "string" || !requestId) return { ok: false };
+  const updated = await provider.setRequestDeliveryStatus(ws, requestId, "sent");
+  revalidatePath("/app/requests");
+  revalidatePath("/app");
+  return { ok: Boolean(updated) };
+}
+
 // Public (token-keyed, no session) — used by the customer review flow.
 export async function advanceRequestAction(
   token: string,
@@ -655,6 +803,132 @@ export async function updateLocationGoogleAction(patch: GoogleLocationPatch) {
   }
   await provider.updateLocationGoogle(ws, clean);
   revalidatePath("/", "layout");
+}
+
+// ── Email sender (Settings → Channels) ──────────────────────
+
+/**
+ * Owners connect outbound email themselves — either a Resend API key or any
+ * SMTP mailbox they already own. Nothing here trusts the form blindly: the
+ * addresses are validated, the SMTP port is range-checked, and "verified" is
+ * only ever stamped by `sendTestEmailAction` actually delivering a message.
+ */
+export interface EmailSettingsFormInput {
+  provider: EmailProvider;
+  /** Blank keeps the stored secret — the UI never receives it to send back. */
+  secret?: string;
+  fromEmail: string;
+  fromName?: string;
+  replyTo?: string;
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpUser?: string;
+  smtpSecure?: boolean;
+}
+
+export async function getEmailSettingsAction(): Promise<EmailSettingsView> {
+  const { ws } = await scoped("owner", "manager");
+  return readEmailSettings(ws);
+}
+
+export async function saveEmailSettingsAction(
+  input: EmailSettingsFormInput,
+): Promise<{ ok: boolean; message: string }> {
+  const { ws } = await scoped("owner");
+
+  const provider: EmailProvider = input.provider === "smtp" ? "smtp" : "resend";
+  const fromEmail = String(input.fromEmail ?? "").trim();
+  if (!EMAIL_RE.test(fromEmail)) {
+    return { ok: false, message: "Enter the address your review requests should come from." };
+  }
+  const replyTo = String(input.replyTo ?? "").trim();
+  if (replyTo && !EMAIL_RE.test(replyTo)) {
+    return { ok: false, message: "The reply-to address isn't a valid email address." };
+  }
+
+  const patch: EmailSettingsFormInput = {
+    provider,
+    secret: typeof input.secret === "string" ? input.secret.trim() : undefined,
+    fromEmail,
+    fromName: String(input.fromName ?? "").trim().slice(0, 120) || undefined,
+    replyTo: replyTo || undefined,
+  };
+
+  if (provider === "smtp") {
+    const host = String(input.smtpHost ?? "").trim();
+    const user = String(input.smtpUser ?? "").trim();
+    const port = Number(input.smtpPort ?? 587);
+    if (!host) return { ok: false, message: "Enter your SMTP server address, e.g. smtp.gmail.com." };
+    if (!user) return { ok: false, message: "Enter the SMTP username (usually the full mailbox address)." };
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+      return { ok: false, message: "SMTP port must be a number between 1 and 65535." };
+    }
+    patch.smtpHost = host.slice(0, 253);
+    patch.smtpUser = user.slice(0, 320);
+    patch.smtpPort = port;
+    // Port 465 is implicit TLS; everything else negotiates STARTTLS.
+    patch.smtpSecure = input.smtpSecure ?? port === 465;
+  }
+
+  const saved = await saveEmailSettings(ws, patch);
+  if (!saved.ok) return { ok: false, message: saved.reason };
+
+  revalidatePath("/app/settings", "layout");
+  revalidatePath("/", "layout");
+  return {
+    ok: true,
+    message: "Saved. Send a test email to confirm it delivers.",
+  };
+}
+
+export async function sendTestEmailAction(
+  to?: string,
+): Promise<{ ok: boolean; message: string }> {
+  const { ws, session } = await scoped("owner");
+
+  const recipient = String(to ?? session.email ?? "").trim();
+  if (!EMAIL_RE.test(recipient)) {
+    return { ok: false, message: "Enter a valid address to send the test to." };
+  }
+  const limit = consumeRateLimit("email-test-send", ws, 10, 60 * 60_000);
+  if (!limit.allowed) {
+    return { ok: false, message: "Too many test emails. Try again in an hour." };
+  }
+
+  const template = emailTestEmail();
+  const result = await sendEmail({
+    to: recipient,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
+    workspaceId: ws,
+  });
+
+  await recordEmailTestResult(ws, {
+    ok: result.ok,
+    detail: result.ok ? undefined : (result.detail ?? result.reason),
+  });
+  revalidatePath("/app/settings", "layout");
+  revalidatePath("/", "layout");
+
+  if (result.ok) {
+    return { ok: true, message: `Test email sent to ${recipient}. Check the inbox (and spam).` };
+  }
+  return {
+    ok: false,
+    message:
+      result.reason === "not_configured"
+        ? "No email sender is connected yet. Save your settings first."
+        : `Delivery failed: ${result.detail ?? "the mail server rejected the message"}`,
+  };
+}
+
+export async function disconnectEmailAction(): Promise<{ ok: true }> {
+  const { ws } = await scoped("owner");
+  await deleteEmailSettings(ws);
+  revalidatePath("/app/settings", "layout");
+  revalidatePath("/", "layout");
+  return { ok: true };
 }
 
 // ── Google data sync ────────────────────────────────────────
@@ -1684,13 +1958,13 @@ export async function sendAgencyReportsAction(
       message: `Demo delivery simulated for ${targets.length} client${targets.length === 1 ? "" : "s"}.`,
     };
   }
-  if (!emailEnabled()) {
+  if (!(await emailEnabledFor(ws))) {
     return {
       ok: false,
       sent: 0,
       skipped: targets.filter((client) => !client.contactEmail).length,
       failed: 0,
-      message: "Connect Resend and a verified EMAIL_FROM address before sending client reports.",
+      message: "Connect an email sender in Settings → Channels before sending client reports.",
     };
   }
 
@@ -1718,6 +1992,7 @@ export async function sendAgencyReportsAction(
       html: report.html,
       text: report.text,
       replyTo: data.organization.billingEmail,
+      workspaceId: ws,
     });
     if (delivery.ok) sentIds.push(client.locationId);
     else failed += 1;
@@ -1751,7 +2026,7 @@ export async function inviteStaffAction(
 
   // Best-effort delivery — never blocks the invite, never fakes success.
   let emailed = false;
-  if (emailEnabled()) {
+  if (await emailEnabledFor(ws)) {
     try {
       const data = await provider.getData(ws);
       if (data) {
@@ -1760,7 +2035,12 @@ export async function inviteStaffAction(
           business: data.location.name,
           link: `${base}/sign-up?invite=${result.token}`,
         });
-        const res = await sendEmail({ to: result.email, subject, html });
+        const res = await sendEmail({
+          to: result.email,
+          subject,
+          html,
+          workspaceId: ws,
+        });
         emailed = res.ok;
       }
     } catch {

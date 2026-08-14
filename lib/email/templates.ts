@@ -97,6 +97,31 @@ export function verificationEmail(input: { link: string; brand?: string }): {
   };
 }
 
+/**
+ * The Settings → Channels test send. Deliberately plain: its only job is to
+ * prove the sender works end-to-end, so what lands in the inbox should look
+ * like what a customer will get.
+ */
+export function emailTestEmail(input?: { brand?: string }): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const brand = input?.brand ?? "Foundly";
+  return {
+    subject: `${brand} test email — your sender works`,
+    html: wrap(
+      h("Your email sender is working") +
+        p(
+          "This is a test from your Foundly Channels settings. If you're reading it, review requests will reach your customers from this address.",
+        ) +
+        p("Nothing else to do — you can close this."),
+      { brand: input?.brand },
+    ),
+    text: `Your email sender is working.\n\nThis is a test from your ${brand} Channels settings. If you're reading it, review requests will reach your customers from this address.`,
+  };
+}
+
 export function genericCampaignEmail(input: {
   subject: string;
   body: string;

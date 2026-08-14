@@ -104,7 +104,7 @@ describe("reconcileIntegrations", () => {
     delete process.env.RESEND_API_KEY;
     const settled: Integration = {
       ...integration("resend", "pending"),
-      detail: "Email sending activates once the platform email service is configured",
+      detail: "Add a sender in Settings → Channels to start sending email",
     };
     const data = makeData({ integrations: [settled] });
     expect(find(reconcileIntegrations(data), "resend")).toBe(settled);
