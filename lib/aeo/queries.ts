@@ -56,7 +56,11 @@ export function buildDefaultQueries(
     service1 ? `where can I get ${service1} ${place}` : undefined,
     `which ${category} ${place} has the best reviews`,
     service2 ? `where can I get ${service2} ${place}` : undefined,
-    `is there a ${category} ${place} open on the weekend`,
+    // No leading article: the category is whatever Google calls the business,
+    // which may be plural or a noun phrase ("marketing agency", "services",
+    // "home services"). "is there a services in Toronto" is not a question a
+    // real person would type, and an assistant's answer to it is worthless.
+    `${category} ${place} open on the weekend`,
     service3 ? `where can I get ${service3} ${place}` : undefined,
     `affordable ${category} ${place}`,
     `top rated ${category} ${place} taking new customers`,
