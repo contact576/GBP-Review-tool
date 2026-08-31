@@ -16,14 +16,52 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
+ * The question set this workspace would be asked, recomputed now.
+ *
+ * Read-only and free: it runs the same `buildAeoContext` + `buildDefaultQueries`
+ * the POST does, asks no model and spends no quota. It exists so the list on
+ * screen can be refreshed from the server immediately before a run, instead of
+ * a preview rendered minutes earlier standing in for what will actually be
+ * asked. It is still only a preview — the POST response is the authority on
+ * what was asked, because only the POST asked it.
+ */
+export async function GET(req: Request) {
+  const guard = await guardAuthenticatedApi(req, {
+    scope: "aeo-plan",
+    roles: ["owner", "manager"],
+    limit: 20,
+    windowMs: 60_000,
+  });
+  if (!guard.ok) return guard.response;
+  const session = guard.session;
+
+  const provider = await getProviderFor(session);
+  const data = await provider.getData(session.workspaceId);
+  if (!data) return NextResponse.json({ error: "workspace_not_found" }, { status: 404 });
+
+  if (!hasFeature(data.subscription.tier, "ai_visibility", data.subscription.status === "trialing")) {
+    return NextResponse.json({ error: "upgrade_required" }, { status: 403 });
+  }
+
+  const plan = buildDefaultQueries(buildAeoContext(data), AEO_DEFAULT_QUERY_COUNT);
+  return NextResponse.json({
+    ok: true,
+    queries: plan.queries.slice(0, AEO_MAX_QUERIES_PER_RUN),
+    blockers: plan.blockers,
+    quota: aeoQuota(data.auditLog, data.subscription.tier),
+  });
+}
+
+/**
  * The server entry point for "run an AI-Visibility check".
  *
  * Deliberately a route handler rather than a server action: lib/actions.ts is
  * owned elsewhere, and this is a long-running, metered, money-spending call
  * that benefits from explicit HTTP status codes the client can act on.
  *
- * Gates, in order: session + role, short-window abuse guard, Pro entitlement,
- * demo workspace, a configured provider, durable monthly quota, then the run.
+ * Gates, in order: session + role, short-window abuse guard, the
+ * `ai_visibility` entitlement, demo workspace, a configured provider, durable
+ * monthly quota, then the run.
  */
 export async function POST(req: Request) {
   const guard = await guardAuthenticatedApi(req, {
@@ -115,9 +153,13 @@ export async function POST(req: Request) {
     persisted = false;
   }
 
+  // `asked` is the exact array handed to the runner, not a re-derivation. The
+  // client renders it as the question set of record, so a preview computed on
+  // an older render can never be mistaken for what this run actually asked.
   return NextResponse.json({
     ok: true,
     persisted,
+    asked: queries,
     run: record,
     quota: metered
       ? { ...quota, used: quota.used + 1, remaining: Math.max(0, quota.remaining - 1) }

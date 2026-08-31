@@ -9,7 +9,7 @@ import { StatTile } from "@/components/charts/StatTile";
 import { ProgressMeter } from "@/components/charts/ProgressMeter";
 import { Donut, type DonutSegment } from "@/components/charts/Donut";
 import { NEUTRAL_SEG } from "@/components/charts/tokens";
-import { hasFeature } from "@/lib/billing/plans";
+import { hasFeature, upgradeFor } from "@/lib/billing/plans";
 import { hasAiKey } from "@/lib/ai/model";
 import { formatDate } from "@/lib/utils/format";
 import { buildAeoContext, SERVICES_SOURCE_COPY } from "@/lib/aeo/context";
@@ -22,6 +22,11 @@ import { RunCheck } from "./RunCheck";
 
 export default async function VisibilityPage() {
   const { session, data } = await getSessionAndData();
+  // Named from the plan catalog, never typed into copy. "Pro" was folded into
+  // Growth (LEGACY_PLAN_ALIASES in lib/billing/plans.ts) and this page kept
+  // advertising the retired name; `upgradeFor` reads the lowest plan that
+  // actually carries `ai_visibility`, so the badge cannot drift again.
+  const visibilityPlan = upgradeFor("ai_visibility");
   const entitled = hasFeature(
     data.subscription.tier,
     "ai_visibility",
@@ -150,7 +155,8 @@ export default async function VisibilityPage() {
     </Card>
   );
 
-  // The full report — per-query breakdown + what drives being named. Pro-gated.
+  // The full report — per-query breakdown + the signals an assistant can read.
+  // Gated on the `ai_visibility` entitlement — see `visibilityPlan` above.
   const details = !hasSnapshot ? (
     <Card>
       <EmptyState
@@ -382,7 +388,7 @@ export default async function VisibilityPage() {
           <span className="inline-flex items-center gap-2">
             AI Visibility
             <Badge tone="gold" icon="sparkles">
-              Pro
+              {visibilityPlan.name} and up
             </Badge>
           </span>
         }
