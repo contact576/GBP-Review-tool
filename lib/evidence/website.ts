@@ -138,23 +138,52 @@ export function isBlockedIp(address: string): boolean {
  * lookup makes the check atomic with the connection: the address that is
  * validated is the exact address that gets dialed.
  */
+interface LookupEntry {
+  address: string;
+  family: number;
+}
+
+type GuardedLookupCallback = (
+  err: NodeJS.ErrnoException | null,
+  address: string | LookupEntry[],
+  family?: number,
+) => void;
+
 function guardedLookup(
   hostname: string,
-  _options: unknown,
-  callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void,
+  options: unknown,
+  callback: GuardedLookupCallback,
 ): void {
+  /*
+   * Answer in the SHAPE the caller asked for.
+   *
+   * Node's connector sets `autoSelectFamily` by default from Node 20, and that
+   * path calls `lookup` with `{ all: true }` and then indexes the result as an
+   * array. Replying with a single address string made it read `undefined.address`
+   * and throw "Invalid IP address: undefined" — so every website evidence fetch
+   * failed on any modern Node, and the failure surfaced as an unexplained error
+   * string on the profile snapshot rather than as a missing website.
+   */
+  const wantsAll = Boolean((options as { all?: boolean } | null | undefined)?.all);
   lookupCb(hostname, { all: true, verbatim: true }, (err, addresses) => {
     if (err) return callback(err, "", 0);
     const list = Array.isArray(addresses) ? addresses : [addresses];
-    const safe = list.find((entry) => !isBlockedIp(entry.address));
-    if (!safe) {
+    // Every candidate is filtered, not just the first: with autoSelectFamily the
+    // connector may try any address in the list, so a blocked one left in the
+    // array would still be dialed.
+    const safe = list
+      .filter((entry) => !isBlockedIp(entry.address))
+      .map((entry) => ({ address: entry.address, family: entry.family }));
+    const first = safe[0];
+    if (!first) {
       return callback(
         Object.assign(new Error("Resolved to a private or unsafe network address."), { code: "EAI_BLOCKED" }),
         "",
         0,
       );
     }
-    callback(null, safe.address, safe.family);
+    if (wantsAll) return callback(null, safe);
+    callback(null, first.address, first.family);
   });
 }
 
