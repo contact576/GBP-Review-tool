@@ -5,6 +5,7 @@ import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { canonicalPhone } from "@/lib/sms/phone";
 import { PLANS } from "@/lib/billing/plans";
 import { mergeSuggestionInbox } from "@/lib/suggestions/inbox";
+import { googleIntegrationDetail, googleIntegrationStatus } from "./google-sync-status";
 import { buildAudienceSnapshot } from "@/lib/campaigns/audience";
 import { isAssetEffectivelyDegraded } from "@/lib/qr/degrade";
 import type { QrScanContext } from "@/lib/qr/types";
@@ -1239,8 +1240,12 @@ export const memoryProvider: DataProvider = {
       return { ok: false, error: "The demo uses sample data." };
     }
     const credential = store().credentials.get(workspaceId) ?? null;
-    const { fetchGoogleProfile, locationFromProfileSnapshot } = await import("@/lib/google/profile-sync");
-    const outcome = await fetchGoogleProfile(
+    const { fetchGoogleProfile, fetchApifyProfile, locationFromProfileSnapshot } = await import(
+      "@/lib/google/profile-sync"
+    );
+    // Set when the owned sync was unavailable and public data stood in for it.
+    let fromPublicData = false;
+    let outcome = await fetchGoogleProfile(
       credential,
       data.location,
       nowIso(),
@@ -1249,13 +1254,26 @@ export const memoryProvider: DataProvider = {
     if (!outcome.ok) return { ok: false, error: outcome.error };
 
     if (outcome.pendingApproval) {
+      // Mirrors the Drizzle provider exactly: fall back to the public-data
+      // import when Apify is configured, otherwise report pending unchanged.
+      const publicOutcome = await fetchApifyProfile(data.location, nowIso());
       const g = data.integrations.find((i) => i.provider === "google");
-      if (g) {
-        g.status = "needs_attention";
-        g.detail =
-          "Connected — Google Business Profile API approval pending (Google approves per-project; typically 1–2 weeks)";
+      if (publicOutcome.ok) {
+        outcome = publicOutcome;
+        fromPublicData = true;
+        if (g) {
+          g.status = "needs_attention";
+          g.detail =
+            "Connected — importing your reviews from public Google data while Business Profile API approval is pending. Views, calls and direction requests need approval and are not measured.";
+        }
+      } else {
+        if (g) {
+          g.status = "needs_attention";
+          g.detail =
+            "Connected — Google Business Profile API approval pending (Google approves per-project; typically 1–2 weeks)";
+        }
+        return { ok: true, pendingApproval: true };
       }
-      return { ok: true, pendingApproval: true };
     }
 
     if (outcome.profileSnapshot) {
@@ -1298,13 +1316,13 @@ export const memoryProvider: DataProvider = {
     data.location.gbpConnected = true;
     const g = data.integrations.find((i) => i.provider === "google");
     if (g) {
-      g.status = outcome.performanceError ? "needs_attention" : "connected";
-      g.detail = `Google Business Profile synced — ${outcome.reviewCount ?? imported.length} reviews`;
-      if (outcome.performanceError) {
-        g.detail = `Reviews synced; GBP performance unavailable - ${outcome.performanceError}`;
-      } else {
-        g.detail = `Google Business Profile synced - ${outcome.reviewCount ?? imported.length} reviews and performance`;
-      }
+      const status = {
+        source: fromPublicData ? "google_public_scrape" : outcome.profileSnapshot?.source,
+        reviewCount: outcome.reviewCount,
+        performanceError: outcome.performanceError,
+      };
+      g.status = googleIntegrationStatus(status);
+      g.detail = googleIntegrationDetail(status, imported.length);
       g.lastSyncAt = nowIso();
     }
     const external = outcome.profileSnapshot?.externalEvidence;

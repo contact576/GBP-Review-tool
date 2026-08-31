@@ -9,6 +9,7 @@ import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { canonicalPhone } from "@/lib/sms/phone";
 import { PLANS, normalizePlan } from "@/lib/billing/plans";
 import { mergeSuggestionInbox } from "@/lib/suggestions/inbox";
+import { googleIntegrationDetail, googleIntegrationStatus } from "./google-sync-status";
 import { buildAudienceSnapshot } from "@/lib/campaigns/audience";
 import {
   buildGooglePublicUpdate,
@@ -3536,8 +3537,12 @@ export const drizzleProvider: DataProvider = {
     const ctx = await loadContext(db, workspaceId);
     const location = mapLocation(ctx.location);
     const credential = await loadGoogleCredential(db, workspaceId);
-    const { fetchGoogleProfile, locationFromProfileSnapshot } = await import("@/lib/google/profile-sync");
-    const outcome = await fetchGoogleProfile(
+    const { fetchGoogleProfile, fetchApifyProfile, locationFromProfileSnapshot } = await import(
+      "@/lib/google/profile-sync"
+    );
+    // Set when the owned sync was unavailable and public data stood in for it.
+    let fromPublicData = false;
+    let outcome = await fetchGoogleProfile(
       credential,
       location,
       nowIso(),
@@ -3546,13 +3551,31 @@ export const drizzleProvider: DataProvider = {
     if (!outcome.ok) return { ok: false, error: outcome.error };
 
     if (outcome.pendingApproval) {
-      await setGoogleIntegration(
-        db,
-        workspaceId,
-        "needs_attention",
-        "Connected — Google Business Profile API approval pending (Google approves per-project; typically 1–2 weeks)",
-      );
-      return { ok: true, pendingApproval: true };
+      // Approval hasn't landed. Rather than leave the owner with nothing, import
+      // the same profile from public Google data when Apify is configured. The
+      // snapshot records itself as `google_public_scrape` and marks every
+      // owner-only surface not_authorized, so nothing here is presented as an
+      // owned sync. When Apify is not configured this falls through to the
+      // original pending state unchanged.
+      const publicOutcome = await fetchApifyProfile(location, nowIso());
+      if (publicOutcome.ok) {
+        outcome = publicOutcome;
+        fromPublicData = true;
+        await setGoogleIntegration(
+          db,
+          workspaceId,
+          "needs_attention",
+          "Connected — importing your reviews from public Google data while Business Profile API approval is pending. Views, calls and direction requests need approval and are not measured.",
+        );
+      } else {
+        await setGoogleIntegration(
+          db,
+          workspaceId,
+          "needs_attention",
+          "Connected — Google Business Profile API approval pending (Google approves per-project; typically 1–2 weeks)",
+        );
+        return { ok: true, pendingApproval: true };
+      }
     }
 
     const syncedLocation = outcome.profileSnapshot
@@ -3644,11 +3667,16 @@ export const drizzleProvider: DataProvider = {
         .set({ metrics })
         .where(eq(t.datasetMeta.workspaceId, workspaceId));
     }
+    const googleStatusInput = {
+      source: fromPublicData ? "google_public_scrape" : outcome.profileSnapshot?.source,
+      reviewCount: outcome.reviewCount,
+      performanceError: outcome.performanceError,
+    };
     await setGoogleIntegration(
       db,
       workspaceId,
-      outcome.performanceError ? "needs_attention" : "connected",
-      `Google Business Profile synced — ${outcome.reviewCount ?? imported.length} reviews`,
+      googleIntegrationStatus(googleStatusInput),
+      googleIntegrationDetail(googleStatusInput, imported.length),
     );
     const external = outcome.profileSnapshot?.externalEvidence;
     if (external) {
