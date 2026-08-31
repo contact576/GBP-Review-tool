@@ -9,7 +9,13 @@ import { formatRelative } from "@/lib/utils/format";
 import { SettingsShell } from "../SettingsShell";
 import { Callout, SettingsSection, SpecList, SpecRow } from "../SettingsUI";
 import { SyncGoogleButton } from "@/components/app/SyncGoogleButton";
+import { getIndustry } from "@/lib/industries";
+import {
+  AEO_QUESTION_LIMIT,
+  REVIEW_PICKER_LIMIT,
+} from "@/components/app/business-services";
 import { BusinessDetailsForm } from "./BusinessDetailsForm";
+import { BusinessServicesForm } from "./BusinessServicesForm";
 
 export default async function BusinessSettingsPage() {
   const data = await getData();
@@ -18,6 +24,15 @@ export default async function BusinessSettingsPage() {
   const googleInt = (data.integrations ?? []).find((i) => i.provider === "google");
   const snapshot = loc.gbpSnapshot;
   const audit = loc.gbpAudit;
+
+  // The owner's own service list — the middle tier of `resolveServiceOptions`,
+  // read by the customer review picker and by the AI-Visibility question set.
+  const savedServices = data.workspace.industryConfig?.customServices ?? [];
+  const industry = getIndustry(data.workspace.vertical || loc.vertical);
+  // Null means no Business Profile snapshot exists yet, which is not the same
+  // as a synced profile that lists zero services.
+  const googleServiceCount = snapshot ? (snapshot.location.serviceItems ?? []).length : null;
+  const googleSupplies = googleServiceCount !== null && googleServiceCount > 0;
 
   const rows: { label: string; value: string }[] = [
     { label: "Business name", value: loc.name },
@@ -107,6 +122,68 @@ export default async function BusinessSettingsPage() {
           ownerDescription={loc.ownerDescription ?? ""}
           googleWebsite={snapshot?.location.websiteUri}
         />
+      </SettingsSection>
+
+      {/* Owner-entered service list — feeds the review picker and AI Visibility */}
+      <SettingsSection
+        kicker="Entered by you"
+        title="Services you offer"
+        action={
+          <Badge tone={savedServices.length ? "primary" : "neutral"}>
+            {savedServices.length ? `${savedServices.length} saved` : "None saved"}
+          </Badge>
+        }
+      >
+        <p className="text-[14px] leading-relaxed text-sub">
+          The services a customer would recognise, in the words they would use. Two
+          places read this list, and with nothing saved both fall back to generic
+          examples for {industry.label} taken from our industry catalog rather than
+          from your business.
+        </p>
+
+        <ul className="mt-4 space-y-2">
+          <UsedInRow
+            icon="chat"
+            title="Review page service picker"
+            detail={
+              googleSupplies
+                ? `Your synced Google profile already supplies ${googleServiceCount} of these options. Yours are offered after those, to a combined ${REVIEW_PICKER_LIMIT}.`
+                : `The service options a customer picks from, up to ${REVIEW_PICKER_LIMIT}.`
+            }
+          />
+          <UsedInRow
+            icon="sparkles"
+            title="AI Visibility questions"
+            detail={
+              googleSupplies
+                ? `Not read while your Google profile lists services — the run uses those ${googleServiceCount} instead.`
+                : `The first ${AEO_QUESTION_LIMIT} are what each question is built from.`
+            }
+          />
+        </ul>
+
+        {savedServices.length === 0 ? (
+          <Callout tone="warning" icon="alert" className="mt-4">
+            Nothing saved yet, so both of those are running on catalog examples for{" "}
+            {industry.label}. They are our guess at a typical business, not a record of
+            what you sell.
+          </Callout>
+        ) : null}
+
+        <div className="mt-4 border-t border-hairline pt-4">
+          <BusinessServicesForm
+            savedServices={savedServices}
+            suggestions={[...industry.services]}
+            industryLabel={industry.label}
+            googleSuppliesServices={googleSupplies}
+          />
+        </div>
+
+        <Callout tone="info" icon="lock" className="mt-4">
+          Saved in Foundly only. Nothing here is written to your Google Business
+          Profile, and the Services row in the Google capability inventory below counts
+          only what Google itself returns for this location.
+        </Callout>
       </SettingsSection>
 
       {/* Profile completeness */}
@@ -283,6 +360,29 @@ function severityTone(severity: "low" | "medium" | "high" | "critical") {
   if (severity === "high") return "gold" as const;
   if (severity === "medium") return "primary" as const;
   return "neutral" as const;
+}
+
+/** One "this list is read here" row, with the real rule that surface applies. */
+function UsedInRow({
+  icon,
+  title,
+  detail,
+}: {
+  icon: "chat" | "sparkles";
+  title: string;
+  detail: string;
+}) {
+  return (
+    <li className="flex items-start gap-3 rounded-card border border-hairline bg-card p-3">
+      <div className="grid size-8 shrink-0 place-items-center rounded-btn bg-primary-wash text-primary-dark">
+        <Icon name={icon} size={16} />
+      </div>
+      <div className="min-w-0">
+        <div className="text-[13px] font-bold text-ink">{title}</div>
+        <p className="mt-0.5 text-[12px] leading-relaxed text-sub">{detail}</p>
+      </div>
+    </li>
+  );
 }
 
 function Stat({ label, value }: { label: string; value: number | string }) {

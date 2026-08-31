@@ -110,6 +110,10 @@ import {
 } from "@/lib/google/content-publishing";
 import { executeContentPublication } from "@/lib/google/content-publish-runner";
 import { createSignedContentAssetUrl } from "@/lib/security/content-asset-signature";
+import {
+  normalizeOwnerServices,
+  ownerServicesProblem,
+} from "@/components/app/business-services";
 
 // ── Helpers ─────────────────────────────────────────────────
 async function requireSession(): Promise<Session> {
@@ -1030,6 +1034,85 @@ export async function updateIndustryAction(industryKey: string, config?: Industr
   const { provider, ws } = await scoped("owner");
   await provider.updateIndustry(ws, industryKey, config);
   revalidatePath("/", "layout");
+}
+
+export type BusinessServicesActionResult =
+  | { ok: true; message: string; services: string[] }
+  | { ok: false; message: string };
+
+/**
+ * The owner's own service list (Settings → Business).
+ *
+ * This is the middle tier of `resolveServiceOptions`: it sits behind whatever
+ * the connected Google profile publishes and in front of the static industry
+ * catalog, so saving here replaces guessed catalog defaults on the customer
+ * review page and in the AI-Visibility question set.
+ *
+ * It writes nothing to Google. `provider.updateIndustry` is the only writer of
+ * `industryConfig`, so the workspace's existing industry key, custom label and
+ * custom attributes are read back and re-sent unchanged — only the service list
+ * moves. No business-name field is touched anywhere in this path.
+ */
+export async function updateBusinessServicesAction(
+  services: unknown,
+): Promise<BusinessServicesActionResult> {
+  const { provider, ws, session } = await scoped("owner", "manager");
+  if (!Array.isArray(services)) {
+    return { ok: false, message: "That service list could not be read." };
+  }
+  const normalized = normalizeOwnerServices(
+    services.map((entry) => (typeof entry === "string" ? entry : "")),
+  );
+  const problem = ownerServicesProblem(normalized);
+  if (problem) return { ok: false, message: problem };
+
+  const data = await provider.getData(ws);
+  if (!data) return { ok: false, message: "This workspace could not be loaded." };
+
+  // `updateIndustry` also stamps the industry key onto the workspace and its
+  // location, so the current key has to be re-sent verbatim or saving a service
+  // list would silently clear the industry the owner picked.
+  const industryKey = (data.workspace.vertical || data.location.vertical || "").trim();
+  if (!industryKey) {
+    return {
+      ok: false,
+      message: "Choose a business type before saving services.",
+    };
+  }
+
+  const existing = data.workspace.industryConfig;
+  const config: IndustryConfig = {
+    ...(existing?.customLabel ? { customLabel: existing.customLabel } : {}),
+    ...(existing?.customAttributes?.length
+      ? { customAttributes: existing.customAttributes }
+      : {}),
+    ...(normalized.services.length ? { customServices: normalized.services } : {}),
+  };
+
+  await provider.updateIndustry(ws, industryKey, config);
+  await provider.appendAuditLog(ws, {
+    id: `audit_${randomBytes(12).toString("hex")}`,
+    workspaceId: ws,
+    actor: session.name,
+    action: "business.services_updated",
+    targetType: "workspace",
+    targetId: ws,
+    at: new Date().toISOString(),
+    meta: { serviceCount: normalized.services.length },
+  });
+
+  revalidatePath("/app/settings/business");
+  revalidatePath("/", "layout");
+
+  const duplicateNote =
+    normalized.duplicatesRemoved > 0
+      ? ` ${normalized.duplicatesRemoved} repeated ${normalized.duplicatesRemoved === 1 ? "entry was" : "entries were"} removed.`
+      : "";
+  const message =
+    normalized.services.length === 0
+      ? "Service list cleared. Nothing of your own is saved now."
+      : `${normalized.services.length} ${normalized.services.length === 1 ? "service" : "services"} saved.${duplicateNote}`;
+  return { ok: true, message, services: normalized.services };
 }
 
 export async function updateWorkspaceSettingsAction(patch: Partial<WorkspaceSettings>) {
