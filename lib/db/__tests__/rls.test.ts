@@ -234,18 +234,30 @@ interface FakeSql {
   submitted: { text: string; values: unknown[] }[][];
 }
 
+/**
+ * Models the `postgres` driver's transaction API: `sql.begin(cb)` opens one
+ * transaction and hands the callback a scoped handle whose `unsafe(text,
+ * values)` runs parameterized raw SQL. Each `begin` call records one batch, so
+ * the assertions below still read as "everything arrived in ONE transaction,
+ * in this order".
+ */
 function makeFakeSql(): FakeSql {
   const submitted: { text: string; values: unknown[] }[][] = [];
-  const query = (text: string, values?: unknown[]) => ({
-    text,
-    values: values ?? [],
-  });
-  const fn = query as unknown as FoundlySql;
-  (fn as unknown as { transaction: unknown }).transaction = (
-    queries: { text: string; values: unknown[] }[],
+  const fn = {} as unknown as FoundlySql;
+  (fn as unknown as { begin: unknown }).begin = async (
+    cb: (tx: {
+      unsafe: (text: string, values?: unknown[]) => Promise<unknown>;
+    }) => Promise<unknown>,
   ) => {
-    submitted.push(queries);
-    return Promise.resolve(queries.map((q) => [{ marker: q.text }]));
+    const batch: { text: string; values: unknown[] }[] = [];
+    submitted.push(batch);
+    const tx = {
+      unsafe: async (text: string, values?: unknown[]) => {
+        batch.push({ text, values: values ?? [] });
+        return [{ marker: text }];
+      },
+    };
+    return cb(tx);
   };
   return { sql: fn, submitted };
 }

@@ -233,6 +233,10 @@ export const TENANT_SCOPED_TABLES: readonly TenantScopedTable[] = [
   { table: "customer", tenantColumn: "workspace_id" },
   { table: "customer_consent", tenantColumn: "workspace_id" },
   { table: "dataset_meta", tenantColumn: "workspace_id" },
+  // Holds each workspace's encrypted Resend key / SMTP password. Cross-tenant
+  // reads here would expose sending credentials, so it is scoped like any
+  // other credential table.
+  { table: "email_credential", tenantColumn: "workspace_id" },
   { table: "gbp_task", tenantColumn: "workspace_id" },
   { table: "google_credential", tenantColumn: "workspace_id" },
   { table: "instagram_credential", tenantColumn: "workspace_id" },

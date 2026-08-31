@@ -301,8 +301,6 @@ export interface PlaceDetails {
   editorialSummary?: string;
   /** All Google place types on the listing (proxy for category coverage). */
   types: string[];
-  /** OPERATIONAL, CLOSED_TEMPORARILY, CLOSED_PERMANENTLY, or undefined. */
-  businessStatus?: string;
 }
 
 export type PlaceDetailsResult =
@@ -390,7 +388,6 @@ export async function getPlaceDetails(placeId: string): Promise<PlaceDetailsResu
         photoCount: raw.photos?.length ?? 0,
         editorialSummary: raw.editorialSummary?.text,
         types: raw.types ?? [],
-        businessStatus: raw.businessStatus,
       },
     };
   } catch (err) {

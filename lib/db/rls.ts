@@ -298,9 +298,7 @@ export async function runInWorkspaceScope(
   const planned = planScopedStatements(workspaceIds, statements);
   if (planned.length === 0) return [];
 
-  const results = (await sql.transaction(
-    planned.map((s) => sql(s.text, [...(s.values ?? [])])),
-  )) as unknown[][];
+  const results = await runInOneTransaction(sql, planned);
 
   const scopeStatementCount = planned.length - statements.length;
   return results.slice(scopeStatementCount);
@@ -320,11 +318,41 @@ export async function runWithRlsBypass(
     ? [bypassScopeStatement(), ...statements]
     : statements;
 
-  const results = (await sql.transaction(
-    planned.map((s) => sql(s.text, [...(s.values ?? [])])),
-  )) as unknown[][];
+  const results = await runInOneTransaction(sql, planned);
 
   return results.slice(planned.length - statements.length);
+}
+
+/**
+ * Run every statement inside ONE transaction, in order.
+ *
+ * The transaction is not an optimization — it is what makes scoping work. The
+ * scope statements this batches ahead of the caller's work use `SET LOCAL`,
+ * whose effect is defined only within a transaction; run outside one, the
+ * scope would silently evaporate and the following statements would execute
+ * unscoped. So the statements must share a single connection and transaction,
+ * which is exactly what `sql.begin` gives us.
+ *
+ * `unsafe` is required for parameterized raw SQL text under the postgres
+ * driver: these statements are module-level constants, and every value the
+ * caller supplies travels as a bound parameter, never interpolated.
+ */
+async function runInOneTransaction(
+  sql: FoundlySql,
+  planned: readonly ScopedStatement[],
+): Promise<unknown[][]> {
+  return (await sql.begin(async (tx) => {
+    const out: unknown[][] = [];
+    for (const statement of planned) {
+      // `ScopedStatement.values` is intentionally `unknown[]` — callers bind
+      // arbitrary column values. The driver's parameter type is narrower, so
+      // the cast happens here, at the single boundary, rather than forcing
+      // every caller to pre-narrow what is genuinely dynamic data.
+      const values = [...(statement.values ?? [])] as Parameters<typeof tx.unsafe>[1];
+      out.push((await tx.unsafe(statement.text, values)) as unknown[]);
+    }
+    return out;
+  })) as unknown[][];
 }
 
 /** One row of RLS_STATUS_QUERY. */
@@ -352,7 +380,7 @@ export async function readRlsStatus(sql: FoundlySql): Promise<{
   role: RlsRoleStatus | null;
   tables: RlsTableStatus[];
 }> {
-  const roleRows = (await sql(RLS_CURRENT_ROLE_QUERY)) as RlsRoleStatus[];
-  const tableRows = (await sql(RLS_STATUS_QUERY)) as RlsTableStatus[];
+  const roleRows = (await sql.unsafe(RLS_CURRENT_ROLE_QUERY)) as unknown as RlsRoleStatus[];
+  const tableRows = (await sql.unsafe(RLS_STATUS_QUERY)) as unknown as RlsTableStatus[];
   return { role: roleRows[0] ?? null, tables: tableRows };
 }

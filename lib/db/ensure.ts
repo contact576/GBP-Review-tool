@@ -47,7 +47,7 @@ async function runRlsPolicies(sql: Sql): Promise<string | undefined> {
   if (globalRef.__foundlyRlsReady) return undefined;
   try {
     for (const statement of RLS_POLICY_STATEMENTS) {
-      await sql(statement);
+      await sql.unsafe(statement);
     }
     globalRef.__foundlyRlsReady = true;
     return undefined;
