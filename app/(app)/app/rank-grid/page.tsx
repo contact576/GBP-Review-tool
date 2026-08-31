@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/app/PageHeader";
 import { Paywall } from "@/components/app/Paywall";
 import { Icon } from "@/components/icons";
 import { StatTile } from "@/components/charts/StatTile";
-import { hasFeature } from "@/lib/billing/plans";
+import { hasFeature, upgradeFor } from "@/lib/billing/plans";
 import { formatDate } from "@/lib/utils/format";
 import { RankGridView } from "./RankGridView";
 import { RankGridRunner } from "./RankGridRunner";
@@ -18,6 +18,10 @@ export default async function RankGridPage() {
     "rank_grid",
     data.subscription.status === "trialing",
   );
+  // Named from the entitlement rather than written by hand: the badge used to
+  // say "Pro", a tier folded into Growth and now only a legacy alias, while the
+  // Paywall directly below it already read "Growth" off this same helper.
+  const rankGridPlan = upgradeFor("rank_grid");
   const scan = (data.rankScans ?? [])[0];
   const month = new Date().toISOString().slice(0, 7);
   const scansUsed = data.rankScans.filter((item) => item.ranAt.startsWith(month)).length;
@@ -36,7 +40,7 @@ export default async function RankGridPage() {
         <PageHeader
           title={
             <span className="inline-flex items-center gap-2">
-              Rank Grid <Badge tone="gold" icon="sparkles">Pro</Badge>
+              Rank Grid <Badge tone="gold" icon="sparkles">{rankGridPlan.name} and up</Badge>
             </span>
           }
           sub="Measure relevance-ranked Google Places visibility across nearby coordinates."
@@ -148,7 +152,7 @@ export default async function RankGridPage() {
       <PageHeader
         title={
           <span className="inline-flex items-center gap-2">
-            Rank Grid <Badge tone="gold" icon="sparkles">Pro</Badge>
+            Rank Grid <Badge tone="gold" icon="sparkles">{rankGridPlan.name} and up</Badge>
           </span>
         }
         sub="Measure relevance-ranked Google Places visibility across nearby coordinates."
