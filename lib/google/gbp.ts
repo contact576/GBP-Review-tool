@@ -904,7 +904,30 @@ function classifyError(status: number, body: string): GbpResult<never> {
     }
     return { ok: false, reason: "unauthorized", detail: `403 from GBP API: ${snippet}` };
   }
-  return { ok: false, reason: "error", detail: `GBP API ${status}: ${snippet}` };
+  if (status === 429) {
+    /*
+     * An unapproved project is not always refused with a 403. Google also
+     * grants it a per-minute quota of zero, so the very first call of a sync
+     * comes back 429 RESOURCE_EXHAUSTED. Treating that as a generic failure
+     * printed the raw JSON envelope on the integrations tile and told the owner
+     * we would "retry on next sync" — which would fail identically forever,
+     * because no amount of waiting raises a quota of zero.
+     *
+     * Reported as `not_approved` so it lands in the same honest waiting state
+     * as a 403, and so the public-data import stands in meanwhile instead of
+     * the profile simply going stale.
+     */
+    return {
+      ok: false,
+      reason: "not_approved",
+      detail:
+        "Google is rate-limiting this project's Business Profile requests. A project still " +
+        "awaiting Business Profile approval is given a quota of zero, so this is the usual " +
+        "shape of approval not having landed yet rather than a burst of traffic. " +
+        `Google said: ${googleMessage(body) || snippet}`,
+    };
+  }
+  return { ok: false, reason: "error", detail: `GBP API ${status}: ${googleMessage(body) || snippet}` };
 }
 
 /** Google's own `error.message`, when the body is the usual JSON error envelope. */
