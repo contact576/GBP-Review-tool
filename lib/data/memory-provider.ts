@@ -1243,29 +1243,32 @@ export const memoryProvider: DataProvider = {
     const { fetchGoogleProfile, fetchApifyProfile, locationFromProfileSnapshot } = await import(
       "@/lib/google/profile-sync"
     );
-    // Set when the owned sync was unavailable and public data stood in for it.
+    // Set when the owned sync could not serve and public data stood in for it.
     let fromPublicData = false;
+    let publicDataReason: "approval_pending" | "not_connected" | undefined;
     let outcome = await fetchGoogleProfile(
       credential,
       data.location,
       nowIso(),
       store().instagramCredentials.get(workspaceId) ?? null,
     );
-    if (!outcome.ok) return { ok: false, error: outcome.error };
 
-    if (outcome.pendingApproval) {
-      // Mirrors the Drizzle provider exactly: fall back to the public-data
-      // import when Apify is configured, otherwise report pending unchanged.
+    // Whenever Google itself cannot supply the profile — no connection, an
+    // expired token, or approval still pending — try public data before giving
+    // up. Waiting on Google is the thing this is meant to remove.
+    if (!outcome.ok || outcome.pendingApproval) {
+      const reason = outcome.ok ? "approval_pending" : "not_connected";
+      const googleError = outcome.ok ? undefined : outcome.error;
       const publicOutcome = await fetchApifyProfile(data.location, nowIso());
       const g = data.integrations.find((i) => i.provider === "google");
       if (publicOutcome.ok) {
         outcome = publicOutcome;
         fromPublicData = true;
-        if (g) {
-          g.status = "needs_attention";
-          g.detail =
-            "Connected — importing your reviews from public Google data while Business Profile API approval is pending. Views, calls and direction requests need approval and are not measured.";
-        }
+        publicDataReason = reason;
+      } else if (googleError) {
+        // Public data could not stand in either. Report Google's own problem
+        // rather than the scraper's, which is the one the owner can act on.
+        return { ok: false, error: googleError };
       } else {
         if (g) {
           g.status = "needs_attention";
@@ -1318,6 +1321,7 @@ export const memoryProvider: DataProvider = {
     if (g) {
       const status = {
         source: fromPublicData ? "google_public_scrape" : outcome.profileSnapshot?.source,
+        publicDataReason,
         reviewCount: outcome.reviewCount,
         performanceError: outcome.performanceError,
       };

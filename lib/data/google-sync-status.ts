@@ -19,6 +19,13 @@ export interface GoogleSyncStatusInput {
   reviewCount?: number;
   /** Why the Performance API could not be read, if it could not. */
   performanceError?: string;
+  /**
+   * Why the owned sync could not serve, when public data stood in for it.
+   * Named so the tile states the real blocker: telling an owner to wait for
+   * approval when the actual problem is a disconnected account would send them
+   * off to wait for something that was never going to arrive.
+   */
+  publicDataReason?: "approval_pending" | "not_connected";
 }
 
 function isPublicScrape(input: GoogleSyncStatusInput): boolean {
@@ -41,7 +48,11 @@ export function googleIntegrationDetail(
 ): string {
   const reviews = input.reviewCount ?? importedCount;
   if (isPublicScrape(input)) {
-    return `${reviews} reviews imported from public Google data — views, calls and direction requests need Business Profile approval and are not measured`;
+    const blocker =
+      input.publicDataReason === "not_connected"
+        ? "connect Google Business Profile to measure views, calls and direction requests"
+        : "views, calls and direction requests need Business Profile approval and are not measured";
+    return `${reviews} reviews imported from public Google data — ${blocker}`;
   }
   if (input.performanceError) {
     return `Reviews synced; Business Profile performance unavailable — ${input.performanceError}`;

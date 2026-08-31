@@ -3540,33 +3540,33 @@ export const drizzleProvider: DataProvider = {
     const { fetchGoogleProfile, fetchApifyProfile, locationFromProfileSnapshot } = await import(
       "@/lib/google/profile-sync"
     );
-    // Set when the owned sync was unavailable and public data stood in for it.
+    // Set when the owned sync could not serve and public data stood in for it.
     let fromPublicData = false;
+    let publicDataReason: "approval_pending" | "not_connected" | undefined;
     let outcome = await fetchGoogleProfile(
       credential,
       location,
       nowIso(),
       await loadInstagramCredential(db, workspaceId),
     );
-    if (!outcome.ok) return { ok: false, error: outcome.error };
 
-    if (outcome.pendingApproval) {
-      // Approval hasn't landed. Rather than leave the owner with nothing, import
-      // the same profile from public Google data when Apify is configured. The
-      // snapshot records itself as `google_public_scrape` and marks every
-      // owner-only surface not_authorized, so nothing here is presented as an
-      // owned sync. When Apify is not configured this falls through to the
-      // original pending state unchanged.
+    // Mirrors the memory provider exactly. Whenever Google itself cannot supply
+    // the profile — no connection, an expired token, or approval still pending
+    // — import it from public data instead. The snapshot records itself as
+    // `google_public_scrape` and marks every owner-only surface
+    // not_authorized, so none of it is presented as an owned sync.
+    if (!outcome.ok || outcome.pendingApproval) {
+      const reason = outcome.ok ? "approval_pending" : "not_connected";
+      const googleError = outcome.ok ? undefined : outcome.error;
       const publicOutcome = await fetchApifyProfile(location, nowIso());
       if (publicOutcome.ok) {
         outcome = publicOutcome;
         fromPublicData = true;
-        await setGoogleIntegration(
-          db,
-          workspaceId,
-          "needs_attention",
-          "Connected — importing your reviews from public Google data while Business Profile API approval is pending. Views, calls and direction requests need approval and are not measured.",
-        );
+        publicDataReason = reason;
+      } else if (googleError) {
+        // Public data could not stand in either. Report Google's own problem
+        // rather than the scraper's, which is the one the owner can act on.
+        return { ok: false, error: googleError };
       } else {
         await setGoogleIntegration(
           db,
@@ -3669,6 +3669,7 @@ export const drizzleProvider: DataProvider = {
     }
     const googleStatusInput = {
       source: fromPublicData ? "google_public_scrape" : outcome.profileSnapshot?.source,
+      publicDataReason,
       reviewCount: outcome.reviewCount,
       performanceError: outcome.performanceError,
     };

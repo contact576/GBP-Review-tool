@@ -106,13 +106,43 @@ describe("sync falls back to public data while GBP approval is pending", () => {
     expect(apifyCalls).toBe(0);
   });
 
-  it("surfaces a real Google failure rather than papering over it with a scrape", async () => {
+  it("stands in with public data when Google is not connected at all", async () => {
+    const workspaceId = await freshWorkspace();
+    gbpRef.current = { ok: false, error: "Google Business Profile isn't connected yet." };
+    apifyRef.current = { ok: true, rating: 4.2, reviewCount: 88 };
+
+    const result = await memoryProvider.syncGoogleProfile(workspaceId);
+
+    expect(apifyCalls).toBe(1);
+    expect(result.ok).toBe(true);
+    const data = await memoryProvider.getData(workspaceId);
+    expect(data?.location.reviewCount).toBe(88);
+  });
+
+  it("names the real blocker: connect Google, not wait for approval", async () => {
+    const workspaceId = await freshWorkspace();
+    gbpRef.current = { ok: false, error: "Google Business Profile isn't connected yet." };
+    apifyRef.current = { ok: true, rating: 4.2, reviewCount: 88 };
+
+    await memoryProvider.syncGoogleProfile(workspaceId);
+
+    const data = await memoryProvider.getData(workspaceId);
+    const detail = googleIntegrationDetail(data?.integrations ?? []);
+    expect(detail).toMatch(/public Google data/i);
+    // Telling someone to await approval they never applied for wastes their time.
+    expect(detail).toMatch(/connect Google Business Profile/i);
+    expect(detail).not.toMatch(/approval pending/i);
+  });
+
+  it("reports Google's own error, not the scraper's, when neither can serve", async () => {
     const workspaceId = await freshWorkspace();
     gbpRef.current = { ok: false, error: "Google connection expired — reconnect Google." };
+    apifyRef.current = { ok: false, error: "Apify isn't configured" };
 
     const result = await memoryProvider.syncGoogleProfile(workspaceId);
 
     expect(result.ok).toBe(false);
-    expect(apifyCalls).toBe(0);
+    // The actionable message is Google's; the scraper's is noise to the owner.
+    expect(result.error).toMatch(/reconnect Google/i);
   });
 });
