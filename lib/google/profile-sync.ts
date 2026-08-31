@@ -471,7 +471,13 @@ export function deriveGbpCapabilities(input: {
       4,
       location.metadata?.canModifyServiceList === false
         ? "Google marks service-list editing as unavailable for this location."
-        : `${services.length} services; ${describedServices} include descriptions.`,
+        : location.metadata?.canModifyServiceList === undefined
+          // Exactly when serviceStatus() reports "unknown". Google does not
+          // publish the service list on a public listing, so a public-data sync
+          // never sees one. Stating "0 services" here would be a count from a
+          // source we never read.
+          ? "Google does not publish a service list publicly, so this sync could not read one. That is not the same as your profile having none."
+          : `${services.length} services; ${describedServices} include descriptions.`,
     ),
     capability(
       "attributes",
@@ -504,28 +510,40 @@ export function deriveGbpCapabilities(input: {
       "Cover photo",
       mediaStatus(sourceStatus.media, input.media.some((media) => media.category === "COVER")),
       3,
-      input.media.some((media) => media.category === "COVER") ? "Google cover photo found." : "No Google cover photo was returned.",
+      sourceStatus.media !== "synced"
+        ? "Your Google photos were not read in this sync, so the cover photo could not be checked."
+        : input.media.some((media) => media.category === "COVER")
+          ? "Google cover photo found."
+          : "No Google cover photo was returned.",
     ),
     capability(
       "profile_media",
       "Profile photo or logo",
       mediaStatus(sourceStatus.media, input.media.some((media) => media.category === "PROFILE" || media.category === "LOGO")),
       2,
-      input.media.some((media) => media.category === "PROFILE" || media.category === "LOGO") ? "Profile or logo media found." : "No profile or logo media was returned.",
+      sourceStatus.media !== "synced"
+        ? "Your Google photos were not read in this sync, so the profile photo could not be checked."
+        : input.media.some((media) => media.category === "PROFILE" || media.category === "LOGO")
+          ? "Profile or logo media found."
+          : "No profile or logo media was returned.",
     ),
     capability(
       "media_library",
       "Photo library",
       sourceStatus.media !== "synced" ? "unknown" : input.media.length >= 10 ? "complete" : input.media.length > 0 ? "partial" : "missing",
       3,
-      `${input.media.length} original Google media items synced.`,
+      sourceStatus.media !== "synced"
+        ? "Your Google photo library was not read in this sync, so its size is unknown."
+        : `${input.media.length} original Google media items synced.`,
     ),
     capability(
       "local_posts",
       "Local posts",
       sourceStatus.posts === "unavailable" ? "not_applicable" : sourceStatus.posts !== "synced" ? "unknown" : recentPostCount > 0 ? "complete" : input.posts.length > 0 ? "partial" : "missing",
       2,
-      `${input.posts.length} posts synced; ${recentPostCount} published in the last 30 days.`,
+      sourceStatus.posts !== "synced"
+        ? "Your Google posts were not read in this sync."
+        : `${input.posts.length} posts synced; ${recentPostCount} published in the last 30 days.`,
     ),
     capability(
       "questions",
