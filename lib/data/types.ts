@@ -324,7 +324,14 @@ export interface GbpLocationRecord {
 
 export interface GbpProfileSnapshot {
   schemaVersion: 1;
-  source: "google_business_profile";
+  /**
+   * Where this snapshot's facts came from. `google_public_scrape` is the
+   * fallback used while Business Profile API approval is pending: it carries
+   * real public Google data (including Google's own review ids) but no
+   * owner-only surface and no write access, so it must stay distinguishable
+   * from an owned-profile sync rather than being presented as one.
+   */
+  source: "google_business_profile" | "google_public_scrape";
   accountResource: string;
   locationResource: string;
   syncedAt: string;

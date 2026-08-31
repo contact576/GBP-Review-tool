@@ -42,6 +42,16 @@ import {
 } from "./gbp";
 import { daysSince, GBP_REVIEW_ID_PREFIX } from "./public-sync";
 import { isPlausibleFullImport, PRE_RECONCILE_DURABILITY } from "@/lib/reviews/durability";
+import { fetchApifyPlace, fetchApifyReviews, isApifyConfigured } from "./apify";
+import {
+  apifyLocationResource,
+  mapApifyReviews,
+  mapAttributes,
+  mapLocalPosts,
+  mapLocationRecord,
+  mapQuestions,
+  responseRate,
+} from "./apify-map";
 
 /**
  * Google Business Profile (owned-profile) sync — the deeper integration that
@@ -798,5 +808,150 @@ function buildSnapshot(
     growthScore: scores.growth,
     reviewsScore: scores.reviews,
     profileScore: scores.profile,
+  };
+}
+
+/**
+ * Public-data profile sync (Apify) — the substitute used while Business
+ * Profile API approval is pending.
+ *
+ * This produces the SAME `GbpProfileSnapshot` shape as the owned sync, so the
+ * audit engine, suggestion inbox and dashboard need no special case. What
+ * differs is recorded in the data rather than hidden:
+ *
+ *  - `source` is `google_public_scrape`, never `google_business_profile`.
+ *  - `performance`, `searchKeywords` and `googleUpdates` are `not_authorized`.
+ *    They are owner-only surfaces; no scraper reaches them, so they read as
+ *    not-measured rather than as a healthy zero.
+ *  - `availableAttributes` is empty, so completeness scores what IS set rather
+ *    than what could be.
+ *  - `reviewsImportOk` is true only when the imported count is consistent with
+ *    the total Google itself reports, which is what stops a capped import from
+ *    being mistaken for reviews disappearing.
+ *
+ * It grants no write access whatsoever. `locationResource` is an unusable
+ * sentinel so a mutation attempt fails loudly instead of finding a real target.
+ */
+export async function fetchApifyProfile(
+  location: Location,
+  nowIso: string,
+  maxReviews = 500,
+): Promise<ProfileSyncOutcome> {
+  if (!isApifyConfigured()) {
+    return {
+      ok: false,
+      error:
+        "Apify isn't configured — set APIFY_TOKEN to import Google reviews while Business Profile approval is pending.",
+    };
+  }
+  const placeId = location.googlePlaceId?.trim();
+  if (!placeId) {
+    return {
+      ok: false,
+      error: "This location has no Google Place ID yet — find the business in Settings first.",
+    };
+  }
+
+  const [placeRes, reviewsRes] = await Promise.all([
+    fetchApifyPlace(placeId),
+    fetchApifyReviews(placeId, maxReviews),
+  ]);
+  if (!placeRes.ok) return { ok: false, error: placeRes.detail };
+
+  const place = placeRes.data;
+  const [websiteEvidence, instagramEvidence] = await Promise.all([
+    collectWebsiteEvidence(place.website, nowIso),
+    collectInstagramEvidence(null, nowIso),
+  ]);
+
+  const reviews = reviewsRes.ok ? mapApifyReviews(reviewsRes.data, location.id) : [];
+  const locationRecord = mapLocationRecord(place);
+  const attributes = mapAttributes(place.additionalInfo);
+  const questions = mapQuestions(place.questionsAndAnswers);
+  const localPosts = mapLocalPosts(place.ownerUpdates);
+
+  // Google's own aggregate, never the sample length.
+  const reviewCount = place.reviewsCount ?? reviews.length;
+  const rating = place.totalScore ?? aggregateRating(reviews);
+
+  const sourceStatus: GbpProfileSnapshot["sourceStatus"] = {
+    location: "synced",
+    attributes: attributes.length > 0 ? "synced" : "unavailable",
+    // The attribute CATALOGUE is owner-only — not merely absent, unauthorised.
+    attributeMetadata: "not_authorized",
+    // Photo counts Google publishes include customer uploads, which is a
+    // different metric from the owner's media library. Left unmeasured.
+    media: "unavailable",
+    posts: localPosts.length > 0 ? "synced" : "unavailable",
+    questions: questions.length > 0 ? "synced" : "unavailable",
+    reviews: reviewsRes.ok ? "synced" : "error",
+    performance: "not_authorized",
+    searchKeywords: "not_authorized",
+    googleUpdates: "not_authorized",
+  };
+
+  const warnings = [
+    "Imported from public Google data. Views, calls and direction requests need Business Profile approval and are not measured.",
+    reviewsRes.ok ? undefined : `Reviews: ${reviewsRes.detail}`,
+    websiteEvidence.error ? `Website: ${websiteEvidence.error}` : undefined,
+  ].filter((warning): warning is string => Boolean(warning));
+
+  const capabilities = deriveGbpCapabilities({
+    location: locationRecord,
+    attributes,
+    availableAttributes: [],
+    media: [],
+    posts: localPosts,
+    questions,
+    reviews,
+    sourceStatus,
+    nowIso,
+  });
+  const profileSnapshot: GbpProfileSnapshot = {
+    schemaVersion: 1,
+    source: "google_public_scrape",
+    accountResource: "",
+    locationResource: apifyLocationResource(placeId),
+    syncedAt: nowIso,
+    location: locationRecord,
+    attributes,
+    availableAttributes: [],
+    media: [],
+    localPosts,
+    questions,
+    searchKeywords: [],
+    externalEvidence: {
+      website: websiteEvidence,
+      instagram: instagramEvidence,
+      // This path has no Google OAuth at all, so Search Console was never
+      // reachable. Not connected — not "zero clicks".
+      searchConsole: { status: "not_connected", observedAt: nowIso, rows: [] },
+    },
+    capabilities,
+    capabilityScore: scoreApplicableCapabilities(capabilities),
+    reviewResponseRate: responseRate(reviews),
+    sourceStatus,
+    warnings,
+  };
+
+  const syncedLocation = locationFromProfileSnapshot(location, profileSnapshot);
+  const profileAudit = buildLocalGrowthAudit({
+    location: syncedLocation,
+    snapshot: profileSnapshot,
+    reviews,
+    nowIso,
+  });
+
+  return {
+    ok: true,
+    rating,
+    reviewCount,
+    reviews,
+    // A capped import must never license vanish detection.
+    reviewsImportOk: reviewsRes.ok && isPlausibleFullImport(reviews.length, reviewCount),
+    snapshot: buildSnapshot(syncedLocation, rating, reviewCount, reviews, nowIso),
+    profileSnapshot,
+    profileAudit,
+    suggestionInbox: buildSuggestionInbox(profileAudit),
   };
 }
