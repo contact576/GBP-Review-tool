@@ -1,5 +1,6 @@
 import { getData } from "@/lib/data";
 import { appUrl } from "@/lib/utils/app-url";
+import { cn } from "@/lib/utils/cn";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge, EmptyState } from "@/components/ds/misc";
 import { PageHeader } from "@/components/app/PageHeader";
@@ -7,7 +8,8 @@ import { Icon, type IconName } from "@/components/icons";
 import { QrFrame } from "@/components/app/QrFrame";
 import { QrDownload } from "@/components/app/QrDownload";
 import { ProgressMeter, StatTile } from "@/components/charts";
-import { formatNumber } from "@/lib/utils/format";
+import { formatDate, formatNumber } from "@/lib/utils/format";
+import { qrDegradeStatus, qrOpenRate } from "@/lib/qr/status";
 import { EmbedSnippet } from "./EmbedSnippet";
 import { PrintKitButton } from "./PrintKitButton";
 import { QrConfigurator } from "./QrConfigurator";
@@ -38,7 +40,17 @@ export default async function StudioPage() {
 
   const totalScans = qrAssets.reduce((sum, q) => sum + q.scans, 0);
   const totalOpens = qrAssets.reduce((sum, q) => sum + q.pageOpens, 0);
-  const avgOpenRate = totalScans > 0 ? Math.round((totalOpens / totalScans) * 100) : 0;
+  const avgOpenRate = qrOpenRate(totalScans, totalOpens);
+
+  // What the degrade promise can actually deliver for THIS workspace right now.
+  const degrade = qrDegradeStatus({
+    subscription: {
+      status: data.subscription.status,
+      currentPeriodEnd: data.subscription.currentPeriodEnd ?? null,
+      trialEndsAt: data.subscription.trialEndsAt ?? null,
+    },
+    reviewUrl: data.location.reviewUrl,
+  });
 
   return (
     <>
@@ -143,6 +155,9 @@ export default async function StudioPage() {
                       subtitle={qr.label}
                       shortUrl={shortUrl(qr.slug)}
                     />
+                    <p className="sr-only">
+                      {`QR code for ${staff?.displayName ?? qr.label}. It encodes the review link ${scanUrl(qr.slug)}.`}
+                    </p>
                     <div className="mt-3">
                       <QrDownload
                         svgContainerId={`qr-svg-${qr.id}`}
@@ -150,8 +165,12 @@ export default async function StudioPage() {
                       />
                     </div>
                     <div className="mt-3 flex justify-center gap-2">
-                      <Badge tone="primary" icon="qr">{formatNumber(qr.scans)} scans</Badge>
-                      <Badge tone="neutral" icon="eye">{formatNumber(qr.pageOpens)} opens</Badge>
+                      <Badge tone="primary" icon="qr">
+                        <span className="tabular-nums">{formatNumber(qr.scans)}</span> scans
+                      </Badge>
+                      <Badge tone="neutral" icon="eye">
+                        <span className="tabular-nums">{formatNumber(qr.pageOpens)}</span> opens
+                      </Badge>
                     </div>
                   </div>
                 );
@@ -222,16 +241,72 @@ export default async function StudioPage() {
           />
         </Card>
 
-        {/* Degrade notice — trust signal (semantic callout, line icon) */}
-        <div className="flex items-start gap-3 rounded-card border border-primary/25 bg-primary-wash/50 p-4">
-          <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-primary text-white">
-            <Icon name="shield" size={20} />
+        {/* Degrade promise — states exactly what the scan endpoint does. */}
+        <div
+          className={cn(
+            "flex items-start gap-3 rounded-card border p-4",
+            degrade.hasReviewTarget
+              ? "border-primary/25 bg-primary-wash/50"
+              : "border-gold/40 bg-gold-tint/50",
+          )}
+        >
+          <div
+            className={cn(
+              "grid size-10 shrink-0 place-items-center rounded-btn text-white",
+              degrade.hasReviewTarget ? "bg-primary" : "bg-gold-deep",
+            )}
+          >
+            <Icon name={degrade.hasReviewTarget ? "shield" : "alert"} size={20} />
           </div>
           <div>
-            <div className="text-[16px] font-bold text-ink">Your codes never go dead</div>
-            <p className="mt-0.5 text-[14px] text-sub">
-              If your plan lapses, codes redirect to your public Google review page for 90 days.
-              No reprinting, no lock-in.
+            <div className="text-[16px] font-bold text-ink">
+              {degrade.lapsed
+                ? "Your printed codes are in their grace window"
+                : degrade.hasReviewTarget
+                  ? "If your plan lapses, your printed codes keep working"
+                  : "Connect your Google review link to protect your printed codes"}
+            </div>
+            {degrade.hasReviewTarget ? (
+              <p className="mt-0.5 text-[14px] leading-relaxed text-sub">
+                A cancelled subscription is detected on the next scan — nothing to switch on. For{" "}
+                <span className="tabular-nums">{degrade.graceDays}</span> days after your last paid
+                period ends, every scan redirects straight to your public Google review page, so
+                nothing needs reprinting. After that window, scans land on a plain
+                &ldquo;this code isn&apos;t active&rdquo; page — never an error.
+              </p>
+            ) : (
+              <p className="mt-0.5 text-[14px] leading-relaxed text-sub">
+                We can only redirect lapsed codes to a Google review page we have on file, and
+                yours is empty. Until you connect your Google Business Profile, scans after a
+                lapse would land on the &ldquo;this code isn&apos;t active&rdquo; page instead.
+              </p>
+            )}
+            {degrade.lapsed ? (
+              <p className="mt-2 text-[13px] font-semibold text-ink">
+                {degrade.graceEndsAt ? (
+                  <>
+                    Scans are redirecting to Google until{" "}
+                    <span className="tabular-nums">{formatDate(degrade.graceEndsAt)}</span>
+                    {typeof degrade.daysLeft === "number" ? (
+                      <>
+                        {" "}
+                        (<span className="tabular-nums">{degrade.daysLeft}</span> days left).
+                      </>
+                    ) : (
+                      "."
+                    )}
+                  </>
+                ) : (
+                  <>
+                    We have no billing end date on file, so scans keep redirecting to Google until
+                    one exists — we never cut the window short on a date we can&apos;t verify.
+                  </>
+                )}
+              </p>
+            ) : null}
+            <p className="mt-2 text-[12px] leading-relaxed text-faint">
+              There is no per-code pause switch yet. A code stays live until the subscription is
+              cancelled, or until that specific code is marked degraded in the database.
             </p>
           </div>
         </div>
@@ -242,22 +317,41 @@ export default async function StudioPage() {
           {qrAssets.length ? (
             <>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <StatTile label="Total scans" value={totalScans} />
-                <StatTile label="Page opens" value={totalOpens} />
-                <StatTile label="Avg open rate" value={`${avgOpenRate}%`} />
+                <StatTile label="Code scans" value={totalScans} />
+                <StatTile label="Review pages opened" value={totalOpens} />
+                <StatTile
+                  label="Avg open rate"
+                  value={avgOpenRate === null ? "—" : `${avgOpenRate}%`}
+                />
               </div>
+
+              <p className="mt-3 flex items-start gap-1.5 text-[12px] leading-relaxed text-faint">
+                <Icon name="shield" size={13} className="mt-0.5 shrink-0 text-primary" />
+                <span>
+                  These count two different events. A <strong className="font-semibold text-sub">scan</strong> is
+                  any hit on the code&apos;s short link — including phone camera previews, messaging
+                  link unfurlers and link scanners. An{" "}
+                  <strong className="font-semibold text-sub">open</strong> is only counted when a real
+                  browser navigates in and is handed a live review page, so the rate below is a
+                  genuine ratio rather than a number that is always 100%.
+                </span>
+              </p>
 
               <div className="mt-5 space-y-4">
                 <div className="kicker">Open rate by asset</div>
                 {qrAssets.map((qr) => {
-                  const rate = qr.scans > 0 ? Math.round((qr.pageOpens / qr.scans) * 100) : 0;
+                  const rate = qrOpenRate(qr.scans, qr.pageOpens);
                   return (
                     <div key={qr.id}>
                       <ProgressMeter
-                        value={rate}
+                        value={rate ?? 0}
                         max={100}
                         label={qr.label}
-                        valueText={`${formatNumber(qr.pageOpens)} of ${formatNumber(qr.scans)} · ${rate}%`}
+                        valueText={
+                          rate === null
+                            ? "No scans yet"
+                            : `${formatNumber(qr.pageOpens)} of ${formatNumber(qr.scans)} · ${rate}%`
+                        }
                       />
                     </div>
                   );

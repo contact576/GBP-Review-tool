@@ -1,17 +1,25 @@
 import { redirect } from "next/navigation";
 import { getData } from "@/lib/data";
+import { emailEnabled } from "@/lib/email";
 import { captureCustomerAction } from "@/lib/actions";
+import { buildSetupChecklist } from "../_components/setup-checklist";
 import { Step } from "../_components/Step";
 import { TestInvitePanel } from "./TestInvitePanel";
 
-export default function TestInvitePage() {
+export default async function TestInvitePage() {
+  const data = await getData();
+  const checklist = buildSetupChecklist(data);
+  const resend = (data.integrations ?? []).find((i) => i.provider === "resend");
+  const emailLive = resend?.status === "connected" || emailEnabled();
+  const existingRequests = data.requests.length;
+
   async function previewReviewPage() {
     "use server";
-    const data = await getData();
+    const current = await getData();
     const { token } = await captureCustomerAction({
-      locationId: data.location.id,
+      locationId: current.location.id,
       name: "Test invite",
-      email: data.owner.email,
+      email: current.owner.email,
       channel: "email",
       services: [],
       serviceConsent: true,
@@ -28,8 +36,13 @@ export default function TestInvitePage() {
       subtitle="See exactly what your customers get before you send a real invite."
       continueHref="/onboarding/team"
       skipHref="/onboarding/team"
+      stepDone={checklist.stepDone}
     >
-      <TestInvitePanel action={previewReviewPage} />
+      <TestInvitePanel
+        action={previewReviewPage}
+        emailLive={emailLive}
+        existingRequests={existingRequests}
+      />
     </Step>
   );
 }

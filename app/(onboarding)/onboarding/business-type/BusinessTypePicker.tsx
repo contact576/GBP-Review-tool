@@ -30,6 +30,17 @@ const TYPES: { key: string; label: string; icon: IconName }[] = [
   { key: "professional_services", label: "Professional services", icon: "compass" },
 ];
 
+/** "dog_grooming" -> "Dog Grooming" — for industries saved outside this list. */
+function humanizeKey(key: string): string {
+  return key
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((word) => word.length > 0)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 export function BusinessTypePicker({ initial }: { initial: string }) {
   const [selected, setSelected] = useState(initial);
   const [saving, startSaving] = useTransition();
@@ -58,17 +69,27 @@ export function BusinessTypePicker({ initial }: { initial: string }) {
         ))}
       </div>
 
+      {/* Status reflects what is actually stored — nothing claims to be saved
+          until an industry has genuinely been chosen. */}
       <div className="flex items-start gap-2 rounded-btn bg-primary-wash px-3 py-2.5 text-[12px] text-sub">
-        <Icon name="sparkles" size={15} className="mt-0.5 shrink-0 text-primary" />
+        <Icon
+          name={saving ? "refresh" : selected ? "check-circle" : "sparkles"}
+          size={15}
+          className="mt-0.5 shrink-0 text-primary"
+        />
         <span>
           {saving ? (
             "Saving your industry…"
-          ) : (
+          ) : selected ? (
             <>
               Saved. The attribute catalog for{" "}
-              <span className="font-semibold text-ink">{current?.label ?? "your industry"}</span>{" "}
+              <span className="font-semibold text-ink">
+                {current?.label ?? humanizeKey(selected)}
+              </span>{" "}
               loads automatically — customers tag things like speed, results, and friendliness.
             </>
+          ) : (
+            "No industry chosen yet — pick one and your review prompts and attribute catalog load automatically."
           )}
         </span>
       </div>

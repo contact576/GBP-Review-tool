@@ -787,6 +787,98 @@ export interface GbpTask {
 
 // ── Campaigns ───────────────────────────────────────────────
 export type CampaignType = "promo" | "winback" | "reminder" | "festival";
+
+/** What happened to one snapshotted recipient. `pending` = not attempted yet. */
+export type CampaignRecipientOutcome =
+  | "pending"
+  | "sent"
+  | "failed"
+  | "skipped"
+  | "held";
+
+export interface CampaignRecipient {
+  customerId: CustomerId;
+  name: string;
+  channel: Channel;
+  /**
+   * The real destination the message goes to. Stored (not masked) because the
+   * snapshot IS the send list — a scheduled campaign drains from it hours
+   * later and must not re-derive the audience. Surfaces mask it for display.
+   */
+  destination: string;
+  outcome: CampaignRecipientOutcome;
+  /** Plain-language reason for any outcome that is not `sent`. */
+  detail?: string;
+  /** Resend/Twilio message id, when the provider accepted the message. */
+  providerId?: string;
+  attemptedAt?: string;
+}
+
+/**
+ * The audience frozen at the moment a send is committed.
+ *
+ * WHY IMMUTABLE: consent is a point-in-time legal fact. If a customer opts out
+ * tomorrow, the record of who we were permitted to contact today must not
+ * silently change — otherwise the delivery log stops being evidence. Counts and
+ * the recipient list are written once; only per-recipient `outcome` is filled
+ * in as delivery proceeds.
+ *
+ * A withdrawal between snapshot and send is still honoured: the drain re-checks
+ * live consent and marks that recipient `skipped`, leaving the snapshot intact.
+ */
+export interface CampaignAudienceSnapshot {
+  takenAt: string;
+  consentBasis: "service" | "marketing";
+  channel: Channel;
+  /** Everyone considered, before any filtering. */
+  total: number;
+  /** Size of `recipients` — who this snapshot permits contacting. */
+  eligible: number;
+  excluded: { reason: string; count: number }[];
+  recipients: CampaignRecipient[];
+}
+
+export type CampaignDeliveryState =
+  /** Provider keys absent — nothing was sent, and we say so. */
+  | "not_configured"
+  /** A compliance or quota gate refused the send. */
+  | "blocked"
+  /** Outside the recipient's local sending window. */
+  | "held"
+  /** Committed for a future time; the cron drains it. */
+  | "scheduled"
+  | "delivered"
+  | "partial";
+
+export interface CampaignDelivery {
+  state: CampaignDeliveryState;
+  /** Owner-facing sentence: what happened and what to do about it. */
+  note: string;
+  /** Env vars / connections missing when `state === "not_configured"`. */
+  missing?: string[];
+  attemptedAt?: string;
+  snapshot?: CampaignAudienceSnapshot;
+  /** SMS credits this campaign actually consumed. */
+  creditsUsed?: number;
+}
+
+export interface CampaignStats {
+  sent: number;
+  opened: number;
+  clicked: number;
+  /** Real outcome counters from the delivery pipeline (absent = never sent). */
+  failed?: number;
+  skipped?: number;
+  held?: number;
+  /**
+   * STORAGE DETAIL: the delivery record rides inside this jsonb blob in
+   * Postgres so the `campaign` table needs no migration. Providers lift it
+   * onto `Campaign.delivery` on read and fold it back in on write — read
+   * `Campaign.delivery`, never this.
+   */
+  delivery?: CampaignDelivery;
+}
+
 export interface Campaign {
   id: CampaignId;
   locationId: LocationId;
@@ -802,7 +894,9 @@ export interface Campaign {
   audienceTotal: number;
   audienceConsented: number;
   excluded: { reason: string; count: number }[];
-  stats: { sent: number; opened: number; clicked: number };
+  stats: CampaignStats;
+  /** Frozen audience + per-recipient outcomes of the last committed send. */
+  delivery?: CampaignDelivery;
   createdAt: string;
 }
 
@@ -880,17 +974,40 @@ export type MetricSource =
 
 export interface AeoQueryResult {
   query: string;
+  /**
+   * Whether the assistant named this business. ONLY meaningful when `status`
+   * is "checked" (or absent, for legacy snapshots, which are all checked).
+   * When `status` is "not_checked" this field is not a verdict and must never
+   * be rendered as "not named".
+   */
   named: boolean;
   position: number | null;
   competitorsNamed: string[];
   answerExcerpt: string;
+  /**
+   * "checked"     — the assistant answered and the verdict was derived from
+   *                 its literal words.
+   * "not_checked" — we could not ask or could not use the reply (no API key,
+   *                 transport error, refusal, unusable output). Absent on
+   *                 legacy snapshots written before this field existed.
+   */
+  status?: "checked" | "not_checked";
+  /** Why the query could not be checked. Present only when not_checked. */
+  notCheckedReason?: string;
 }
 
 export interface AeoSnapshot {
   locationId: LocationId;
   date: string;
+  /**
+   * Denominator counts CHECKED queries only — never the total asked, so a run
+   * where half the queries failed cannot read as "named in 3 of 10".
+   */
   namedFraction: { named: number; total: number };
   queries: AeoQueryResult[];
+  /** Which assistant produced this sample, so the claim stays attributable. */
+  provider?: string;
+  model?: string;
 }
 
 /** One business Google actually returned at a grid coordinate. */

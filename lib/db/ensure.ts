@@ -1,4 +1,9 @@
-import { SCHEMA_STATEMENTS, ADDITIVE_STATEMENTS } from "./schema-sql";
+import {
+  SCHEMA_STATEMENTS,
+  ADDITIVE_STATEMENTS,
+  RLS_POLICY_STATEMENTS,
+} from "./schema-sql";
+import { isRlsEnabled } from "./rls";
 
 /**
  * Self-service schema setup — lets the deployed app initialize its own
@@ -9,6 +14,7 @@ import { SCHEMA_STATEMENTS, ADDITIVE_STATEMENTS } from "./schema-sql";
 const globalRef = globalThis as unknown as {
   __foundlySchemaReady?: boolean;
   __foundlyAdditiveReady?: boolean;
+  __foundlyRlsReady?: boolean;
 };
 
 /**
@@ -19,6 +25,36 @@ const globalRef = globalThis as unknown as {
  */
 type PendingQuery = Promise<unknown> & { simple?: () => Promise<unknown> };
 type Sql = { unsafe: (statement: string) => PendingQuery };
+
+/**
+ * Rollout step 1 — create the tenant-isolation policies (opt-in).
+ *
+ * DEFAULT OFF. Without FOUNDLY_ENABLE_RLS this function returns immediately and
+ * ensureSchema() issues exactly the statements it issues today.
+ *
+ * Even when it does run, this applies ONLY RLS_POLICY_STATEMENTS: it enables
+ * RLS and creates the policies, which is INERT while the app connects as the
+ * Neon table owner (Postgres does not apply RLS to a table's owner unless the
+ * table is also FORCEd). It deliberately never applies RLS_FORCE_STATEMENTS —
+ * beginning enforcement is a manual operator step run against staging first.
+ * See the rollout notes in lib/db/schema-sql.ts.
+ *
+ * Failures are reported but never fatal: an inert policy that failed to be
+ * created cannot break a single query.
+ */
+async function runRlsPolicies(sql: Sql): Promise<string | undefined> {
+  if (!isRlsEnabled()) return undefined;
+  if (globalRef.__foundlyRlsReady) return undefined;
+  try {
+    for (const statement of RLS_POLICY_STATEMENTS) {
+      await sql(statement);
+    }
+    globalRef.__foundlyRlsReady = true;
+    return undefined;
+  } catch (err) {
+    return err instanceof Error ? err.message : "Unknown RLS policy error";
+  }
+}
 
 /**
  * Run additive migrations (new tables/columns) even when the core schema
@@ -54,6 +90,12 @@ export interface EnsureResult {
   ok: boolean;
   ran: boolean;
   error?: string;
+  /**
+   * Non-fatal problem applying the opt-in RLS policies. Always undefined while
+   * FOUNDLY_ENABLE_RLS is off. `ok` stays true — the policies are inert, so a
+   * failure here cannot affect any query.
+   */
+  rlsError?: string;
 }
 
 export async function ensureSchema(): Promise<EnsureResult> {
@@ -73,8 +115,9 @@ export async function ensureSchema(): Promise<EnsureResult> {
       WHERE table_name = 'qr_asset' LIMIT 1`;
     if (probe.length > 0) {
       await runAdditive(sql);
+      const rlsError = await runRlsPolicies(sql);
       globalRef.__foundlySchemaReady = true;
-      return { ok: true, ran: false };
+      return { ok: true, ran: false, ...(rlsError ? { rlsError } : {}) };
     }
 
     for (const statement of SCHEMA_STATEMENTS) {
@@ -88,9 +131,14 @@ export async function ensureSchema(): Promise<EnsureResult> {
     // ALTERs here. Skipping them on first init left every fresh database without
     // session_version, which made all auth queries fail. Every additive
     // statement is IF NOT EXISTS, so running them after a full init is safe.
+    //
+    // `runAdditive` sets __foundlyAdditiveReady itself, so this deliberately
+    // does NOT pre-set the flag — doing so would skip the very statements a
+    // fresh database is missing.
     await runAdditive(sql);
+    const rlsError = await runRlsPolicies(sql);
     globalRef.__foundlySchemaReady = true;
-    return { ok: true, ran: true };
+    return { ok: true, ran: true, ...(rlsError ? { rlsError } : {}) };
   } catch (err) {
     return {
       ok: false,

@@ -1,10 +1,12 @@
 import Link from "next/link";
-import { getData } from "@/lib/data";
 import { Card, CardHeader, EmptyState } from "@/components/ds";
 import { Icon, type IconName } from "@/components/icons";
 import { LeaderboardRow } from "@/components/app/widgets";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
 import { pluralize } from "@/lib/utils/format";
+import { cn } from "@/lib/utils/cn";
+import { getStaffIdentity } from "../../staff-identity";
+import { RosterNotice } from "../../RosterNotice";
 
 function Tile({ label, value, icon }: { label: string; value: number; icon: IconName }) {
   return (
@@ -19,11 +21,11 @@ function Tile({ label, value, icon }: { label: string; value: number; icon: Icon
 }
 
 export default async function StaffLeaderboardPage() {
-  const data = await getData();
-  const sorted = [...data.staff].sort((a, b) => b.captures - a.captures);
-  const me = data.staff.find((s) => s.id === "stf_priya") ?? sorted[0];
-  const rank = me ? sorted.findIndex((s) => s.id === me.id) + 1 : 0;
-  const leader = sorted[0];
+  // "me" is the signed-in account's own roster row, or null when nothing
+  // links them to one — the board is never falsely personalised.
+  const { staff: me, unlinkedReason, roster, rank, displayName, canManageTeam } =
+    await getStaffIdentity();
+  const leader = roster[0];
   const gapToLead = me && leader ? leader.captures - me.captures : 0;
 
   return (
@@ -42,12 +44,14 @@ export default async function StaffLeaderboardPage() {
             <div className="min-w-0">
               <div className="truncate text-[18px] font-extrabold text-ink">{me.displayName}</div>
               <div className="text-[13px] text-sub">
-                You&apos;re #{rank} of {data.staff.length} this month
+                You&apos;re #<span className="tabular-nums">{rank}</span> of{" "}
+                <span className="tabular-nums">{roster.length}</span> this month
               </div>
             </div>
             {me.streakDays > 0 ? (
               <span className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-chip bg-gold-tint px-2.5 py-1 text-[13px] font-bold text-gold-deep">
-                <Icon name="flame" size={16} /> {me.streakDays}
+                <Icon name="flame" size={16} />
+                <span className="tabular-nums">{me.streakDays}</span>
               </span>
             ) : null}
           </div>
@@ -68,21 +72,51 @@ export default async function StaffLeaderboardPage() {
                 : "Log your next capture to climb the board."}
           </div>
         </Card>
+      ) : unlinkedReason ? (
+        <RosterNotice reason={unlinkedReason} name={displayName} canManageTeam={canManageTeam} />
       ) : (
-        <EmptyState icon="users" title="No staff yet" description="Captures will appear here as your team logs them." />
+        <EmptyState
+          icon="users"
+          title="No staff yet"
+          description="Captures will appear here as your team logs them."
+        />
       )}
 
       <Card>
         <CardHeader kicker="This month" title="Team leaderboard" />
-        {sorted.length ? (
+        {roster.length ? (
           <div className="divide-y divide-hairline">
-            {sorted.map((s, i) => (
-              <LeaderboardRow key={s.id} staff={s} rank={i + 1} />
-            ))}
+            {roster.map((s, i) => {
+              const isMe = me?.id === s.id;
+              return (
+                <div
+                  key={s.id}
+                  aria-current={isMe ? "true" : undefined}
+                  className={cn(
+                    "-mx-2 flex items-center gap-2 px-2",
+                    isMe && "rounded-btn bg-primary-wash",
+                  )}
+                >
+                  <div className="min-w-0 flex-1">
+                    <LeaderboardRow staff={s} rank={i + 1} />
+                  </div>
+                  {isMe ? (
+                    <span className="shrink-0 rounded-chip bg-primary px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">
+                      You
+                    </span>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
         ) : (
           <p className="py-4 text-center text-[13px] text-faint">No captures logged yet.</p>
         )}
+        {!me && roster.length ? (
+          <p className="mt-3 border-t border-hairline pt-3 text-center text-[12px] text-faint">
+            You&apos;re not on this board yet — captures you send aren&apos;t credited to anyone.
+          </p>
+        ) : null}
       </Card>
 
       {/* Floating Request/Capture FAB — one-tap back to the capture flow, clear

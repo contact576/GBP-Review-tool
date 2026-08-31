@@ -9,6 +9,7 @@ import type {
 import { computePublicScore } from "@/lib/data/selectors";
 import { buildPublicProfileAudit } from "@/lib/audit/public-audit";
 import { buildSuggestionInbox } from "@/lib/suggestions/inbox";
+import { PRE_RECONCILE_DURABILITY } from "@/lib/reviews/durability";
 
 /**
  * Pure transform: real public Google data (Places Place Details) → the pieces
@@ -31,6 +32,29 @@ import { buildSuggestionInbox } from "@/lib/suggestions/inbox";
  *  Google code into its static import graph). */
 export const PUBLIC_REVIEW_ID_PREFIX = "rev_gpub_"; // Places public sample (≤5)
 export const GBP_REVIEW_ID_PREFIX = "rev_gbp_"; // Business Profile full history
+
+/**
+ * Content-derived id for a public sample review.
+ *
+ * The Places sample has no review id and Google rotates which ≤5 it returns, so
+ * a positional id (`..._0`, `..._1`) renames the same review between syncs and
+ * loses everything we learned about it. Hashing the immutable content instead
+ * gives the same review the same id every time, which is what lets durability
+ * and match attribution survive a refresh. FNV-1a: tiny, dependency-free, and
+ * only ever used as a local key (never as a security primitive).
+ */
+export function publicSampleReviewId(
+  locationId: string,
+  review: { author: string; text: string; publishedAt?: string },
+): string {
+  const seed = `${review.author}|${review.publishedAt ?? ""}|${review.text}`;
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `${PUBLIC_REVIEW_ID_PREFIX}${locationId}_${hash.toString(36)}`;
+}
 
 /** True for reviews imported from the public Places sample (not GBP history). */
 export function isPublicSampleReview(id: string): boolean {
@@ -109,15 +133,18 @@ export function buildGooglePublicUpdate(
 
   const reviews: Review[] = details.reviews
     .filter((r) => r.text.trim().length > 0)
-    .map((r, i) => ({
-      id: `${PUBLIC_REVIEW_ID_PREFIX}${location.id}_${i}`,
+    .map((r) => ({
+      id: publicSampleReviewId(location.id, r),
       locationId: location.id,
       author: r.author,
       rating: r.rating,
       text: r.text,
       publishedAt: r.publishedAt ?? nowIso,
       source: "google",
-      durability: "stable",
+      // Provisional only. The public sample is a rotating ≤5 subset, so absence
+      // from it proves nothing; the provider reconciles this against stored
+      // history (lib/reviews/durability.ts) and that is what decides the value.
+      durability: PRE_RECONCILE_DURABILITY,
       needsReply: false,
     }));
 

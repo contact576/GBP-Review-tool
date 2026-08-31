@@ -7,21 +7,21 @@ import { ReviewFlowPreview } from "./ReviewFlowPreview";
 export const metadata: Metadata = {
   title: "Free Local Growth Score",
   description:
-    "Scan any local business in 30 seconds — see its Local Growth Score, how it compares to nearby businesses, and a real AI-drafted sample review. No signup, no card.",
+    "Scan any local business — see its Local Growth Score and how it compares to real businesses nearby, read straight from public Google data. Nothing estimated. No signup, no card.",
 };
 
 const PILLARS: { title: string; body: string }[] = [
   {
     title: "Reviews",
-    body: "Rating, volume, and how recently people are still posting — weighted for durability.",
+    body: "Your real Google star rating and total review count, plus how recently people are still posting.",
   },
   {
     title: "Profile",
-    body: "Photos, completeness, and how often you reply to the reviews you already have.",
+    body: "Photos on your listing and whether the fields customers need — hours, phone, website, description — are actually filled in.",
   },
   {
     title: "Growth",
-    body: "The blended 0–100 signal that tracks how findable and choosable you are locally.",
+    body: "The blended 0–100 signal built only from those verified inputs. Anything Google doesn't publish is left out, never guessed.",
   },
 ];
 
@@ -37,8 +37,9 @@ export default function ScorePage() {
               Your free Local Growth Score
             </h1>
             <p className="mt-4 max-w-xl text-[16px] leading-relaxed text-sub">
-              Enter your business and watch Foundly read your profile, count your reviews, compare you
-              to the block, and draft a real sample review — live, in about 30 seconds.
+              Enter your business and watch Foundly read your public Google listing, count your real
+              reviews, and compare you to actual businesses nearby. If we can&apos;t verify something,
+              we leave it out — we never estimate a number.
             </p>
             <div className="mt-8">
               <ScoreTool />

@@ -25,7 +25,17 @@ export function QrFrame({
     <div className="mx-auto w-full max-w-[280px] rounded-card border border-hairline bg-card p-6 text-center shadow-sm">
       <div className="mb-3 text-[15px] font-bold text-ink">{title}</div>
       <div id={id} className="mx-auto inline-block rounded-card bg-white p-3 ring-1 ring-hairline">
-        <QRCodeSVG value={url} size={168} level="M" fgColor="#0C4A3E" bgColor="#FFFFFF" />
+        {/* qrcode.react emits role="img"; without a title it is an unlabelled
+            graphic. Passing `title` makes it render <title> and wire
+            aria-labelledby itself, so screen readers announce the destination. */}
+        <QRCodeSVG
+          value={url}
+          size={168}
+          level="M"
+          fgColor="#0C4A3E"
+          bgColor="#FFFFFF"
+          title={`QR code linking to ${shortUrl ?? url}`}
+        />
       </div>
       <p className="mt-3 text-[13px] text-sub">{subtitle ?? "Scan to leave us a quick review"}</p>
       {shortUrl ? (

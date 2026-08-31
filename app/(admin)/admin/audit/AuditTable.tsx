@@ -69,14 +69,18 @@ export function AuditTable({ entries }: { entries: AuditLog[] }) {
         rowKey={(e) => e.id}
         stickyHeader
         caption="Append-only privileged-action audit log"
-        emptyIcon="search"
-        emptyTitle="No matching entries"
-        emptyDescription={`Nothing in the audit log matches “${query}”. Try a different actor, action, or target.`}
+        emptyIcon={entries.length === 0 ? "lock" : "search"}
+        emptyTitle={entries.length === 0 ? "No privileged actions recorded yet" : "No matching entries"}
+        emptyDescription={
+          entries.length === 0
+            ? "The ledger is genuinely empty — it is read directly from the workspace record, and no privileged action has been written to it yet."
+            : `Nothing in the audit log matches “${query}”. Try a different actor, action, or target.`
+        }
       />
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Badge tone="sub" icon="lock">Append-only · immutable</Badge>
-        <span className="text-[12px] text-faint">{rows.length} of {entries.length} entries</span>
+        <span className="text-[12px] tabular-nums text-faint">{rows.length} of {entries.length} entries</span>
       </div>
     </div>
   );

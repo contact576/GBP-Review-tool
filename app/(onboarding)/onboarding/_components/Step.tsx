@@ -18,6 +18,7 @@ export function Step({
   continueLabel = "Continue",
   skipHref,
   skipLabel = "Skip for now",
+  stepDone,
 }: {
   current: number;
   title: string;
@@ -27,13 +28,15 @@ export function Step({
   continueLabel?: string;
   skipHref?: string;
   skipLabel?: string;
+  /** Real per-step completion from `buildSetupChecklist` (index 0 = step 1). */
+  stepDone?: boolean[];
 }) {
   const meta = ONBOARDING_STEPS[current - 1];
 
   return (
     <div className="flex min-h-[calc(100dvh-57px)] flex-col">
       <div className="flex-1 space-y-6 pb-6 pt-6">
-        <StepTimeline current={current} />
+        <StepTimeline current={current} stepDone={stepDone} />
 
         {/* Numbered step card — warm-tinted panel */}
         <div className="rounded-card border border-hairline bg-primary-wash/50 p-4">

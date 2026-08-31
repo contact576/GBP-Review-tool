@@ -15,6 +15,13 @@ import { ReviewCard, Stars } from "@/components/review/ReviewCard";
 import { PublicGoogleReviewLink } from "@/components/review/PublicGoogleReviewLink";
 import { postReplyAction } from "@/lib/actions";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
+import {
+  isOwnedGoogleReviewId,
+  replyPublishBlockNote,
+  type OwnerReplyCapability,
+  type OwnerReplyPublishBlock,
+  type ReplyPublishState,
+} from "@/lib/google/content-publishing";
 import { formatRelative, initials } from "@/lib/utils/format";
 import type { Review, ReplyTone, DraftVariant } from "@/lib/data/types";
 
@@ -24,6 +31,14 @@ interface BusinessLite {
   reviewCount: number;
   /** Google "write a review" deep link — the public link kept at parity on the 1–3★ cut. */
   reviewUrl: string;
+}
+
+/** Locally-tracked outcome of a reply posted in this session. */
+interface LocalReply {
+  text: string;
+  tone: ReplyTone;
+  /** Only true when Google returned the reply on a read-back. */
+  publishedToGoogle: boolean;
 }
 
 const REPLY_TONES: ReplyTone[] = ["warm", "professional", "brief"];
@@ -59,18 +74,35 @@ function InkStars({ rating }: { rating: number }) {
   );
 }
 
+const TOAST_TONE: Record<ReplyPublishState, "success" | "info" | "warning" | "danger"> = {
+  published: "success",
+  verification_pending: "warning",
+  saved_locally: "info",
+  failed: "danger",
+};
+
+const TOAST_ICON: Record<ReplyPublishState, "check-circle" | "clock" | "shield" | "alert"> = {
+  published: "check-circle",
+  verification_pending: "clock",
+  saved_locally: "shield",
+  failed: "alert",
+};
+
 export function ReviewsInbox({
   reviews,
   business,
+  replyCapability,
 }: {
   reviews: Review[];
   business: BusinessLite;
+  /** Server-decided: can THIS workspace write owner replies to Google right now? */
+  replyCapability: OwnerReplyCapability;
 }) {
   const { toast } = useToast();
   const [pending, start] = useTransition();
 
   // Optimistic replies keyed by review id.
-  const [repliedText, setRepliedText] = useState<Record<string, string>>({});
+  const [repliedText, setRepliedText] = useState<Record<string, LocalReply>>({});
 
   const [tab, setTab] = useState("all");
   const [sort, setSort] = useState<{ key: string; direction: SortDirection }>({
@@ -85,19 +117,20 @@ export function ReviewsInbox({
   const [variants, setVariants] = useState<DraftVariant[]>([]);
   const [toneIndex, setToneIndex] = useState(0);
   const [loadingDraft, setLoadingDraft] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const [aiSource, setAiSource] = useState<string>("");
 
   // Merge optimistic replies onto a review for display.
   const merged = useMemo(() => reviews.map((review): Review => {
-    const text = repliedText[review.id];
-    if (!text) return review;
+    const local = repliedText[review.id];
+    if (!local) return review;
     return {
       ...review,
       needsReply: false,
       reply: {
         id: `rpl_local_${review.id}`,
-        text,
-        tone: "warm",
+        text: local.text,
+        tone: local.tone,
         source: "human",
         postedAt: new Date().toISOString(),
         approvedBy: "You",
@@ -168,13 +201,14 @@ export function ReviewsInbox({
     { key: "vanished", label: "Vanished", count: counts.vanished },
   ];
 
-  async function openReply(review: Review) {
-    setActive(review);
-    setDraft("");
-    setVariants([]);
-    setToneIndex(0);
-    setAiSource("");
-    setLoadingDraft(true);
+  /**
+   * Request the 3 tone variants. `keepTone` re-rolls in place (the regenerate
+   * control) and re-selects the tone the owner was already on; without it this
+   * is the first load when the drawer opens.
+   */
+  async function requestVariants(review: Review, keepTone?: string) {
+    const setBusy = keepTone ? setRegenerating : setLoadingDraft;
+    setBusy(true);
     try {
       const res = await fetch("/api/ai/reply-draft", {
         method: "POST",
@@ -188,14 +222,31 @@ export function ReviewsInbox({
       });
       const json = (await res.json()) as { variants?: DraftVariant[]; source?: string };
       const vs = json.variants ?? [];
+      const found = keepTone ? vs.findIndex((v) => v.tone === keepTone) : -1;
+      const index = found >= 0 ? found : 0;
       setVariants(vs);
-      setDraft(vs[0]?.text ?? "");
+      setToneIndex(index);
+      setDraft(vs[index]?.text ?? "");
       setAiSource(json.source ?? "");
     } catch {
       toast("Couldn't load a draft — write your own reply", "warning", "alert");
     } finally {
-      setLoadingDraft(false);
+      setBusy(false);
     }
+  }
+
+  async function openReply(review: Review) {
+    setActive(review);
+    setDraft("");
+    setVariants([]);
+    setToneIndex(0);
+    setAiSource("");
+    await requestVariants(review);
+  }
+
+  function regenerate() {
+    if (!active || regenerating || loadingDraft) return;
+    void requestVariants(active, variants[toneIndex]?.tone);
   }
 
   function pickTone(i: number) {
@@ -204,15 +255,32 @@ export function ReviewsInbox({
     if (v) setDraft(v.text);
   }
 
+  // Honest gate for the OPEN review: workspace readiness, then the per-review
+  // check (only an imported Business Profile review has a reply endpoint).
+  const replyBlock: OwnerReplyPublishBlock | null = !replyCapability.ready
+    ? replyCapability.block
+    : active && !isOwnedGoogleReviewId(active.id)
+      ? "review_not_imported"
+      : null;
+  const canPublish = replyBlock === null;
+
   function post() {
     const review = active;
-    if (!review || !draft.trim()) return;
+    const text = draft.trim();
+    if (!review || !text) return;
     const tone = toReplyTone(variants[toneIndex]?.tone ?? "warm");
     start(async () => {
-      await postReplyAction({ reviewId: review.id, text: draft.trim(), tone });
-      setRepliedText((prev) => ({ ...prev, [review.id]: draft.trim() }));
-      toast("Reply saved in Foundly — it was not posted to Google", "success", "check-circle");
-      setActive(null);
+      const result = await postReplyAction({ reviewId: review.id, text, tone });
+      if (result.saved) {
+        setRepliedText((prev) => ({
+          ...prev,
+          [review.id]: { text, tone, publishedToGoogle: result.publishedToGoogle },
+        }));
+      }
+      toast(result.message, TOAST_TONE[result.state], TOAST_ICON[result.state]);
+      // A failed publish keeps the drawer open so the reply can be retried; the
+      // text is already saved either way.
+      if (result.state !== "failed") setActive(null);
     });
   }
 
@@ -273,6 +341,7 @@ export function ReviewsInbox({
           replied={isReplied(r)}
           needsReply={needsReplyNow(r)}
           detected={isDetected(r)}
+          publishedToGoogle={Boolean(repliedText[r.id]?.publishedToGoogle)}
         />
       ),
     },
@@ -408,13 +477,25 @@ export function ReviewsInbox({
 
             {/* Tone options */}
             <div>
-              <div className="mb-2 text-[13px] font-bold text-sub">Choose a tone</div>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="text-[13px] font-bold text-sub">Choose a tone</div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon="refresh"
+                  onClick={regenerate}
+                  loading={regenerating}
+                  disabled={loadingDraft}
+                >
+                  Regenerate
+                </Button>
+              </div>
               {loadingDraft ? (
                 <div className="text-[14px] text-faint">Drafting a reply…</div>
               ) : variants.length ? (
                 <div className="flex flex-wrap gap-2">
                   {variants.map((v, i) => (
-                    <Chip key={i} selected={i === toneIndex} onClick={() => pickTone(i)}>
+                    <Chip key={i} selected={i === toneIndex} onClick={() => pickTone(i)} disabled={regenerating}>
                       {TONE_LABEL[v.tone] ?? v.tone}
                     </Chip>
                   ))}
@@ -422,6 +503,13 @@ export function ReviewsInbox({
               ) : (
                 <div className="text-[14px] text-faint">Write your reply below.</div>
               )}
+              <p className="mt-2 text-[13px] text-faint">
+                {regenerating
+                  ? "Drafting fresh options…"
+                  : aiSource === "template"
+                    ? "Starter templates are fixed — regenerate returns the same three until an AI key is configured."
+                    : "Regenerate re-drafts all three tones and keeps you on the one you picked."}
+              </p>
             </div>
 
             {/* Editable draft */}
@@ -435,12 +523,34 @@ export function ReviewsInbox({
               />
               <p className="mt-1.5 text-[13px] text-faint">{MICROCOPY.aiDraftDisclaimer}</p>
             </div>
+
+            {/* What will actually happen when the button is pressed. */}
+            {replyBlock ? (
+              <div className="flex items-start gap-2 rounded-btn border border-hairline bg-paper px-3 py-2">
+                <Icon name="shield" size={16} className="mt-0.5 shrink-0 text-sub" />
+                <p className="text-[13px] text-sub">{replyPublishBlockNote(replyBlock)}</p>
+              </div>
+            ) : (
+              <div className="flex items-start gap-2 rounded-btn border border-primary/25 bg-primary-wash px-3 py-2">
+                <Icon name="google" size={16} className="mt-0.5 shrink-0 text-primary-dark" />
+                <p className="text-[13px] text-sub">
+                  This posts publicly on your Google Business Profile. Foundly reads it back to
+                  confirm it landed.
+                </p>
+              </div>
+            )}
           </div>
         ) : null}
 
         <div className="mt-4 flex items-center gap-2">
-          <Button onClick={post} loading={pending} disabled={!draft.trim() || loadingDraft} icon="send" fullWidth>
-            Save reply in Foundly
+          <Button
+            onClick={post}
+            loading={pending}
+            disabled={!draft.trim() || loadingDraft || regenerating}
+            icon={canPublish ? "send" : "check"}
+            fullWidth
+          >
+            {canPublish ? "Post reply to Google" : "Save reply in Foundly"}
           </Button>
         </div>
         {aiSource === "template" ? (
@@ -461,11 +571,14 @@ function ReviewStatusPills({
   replied,
   needsReply,
   detected,
+  publishedToGoogle,
 }: {
   review: Review;
   replied: boolean;
   needsReply: boolean;
   detected: boolean;
+  /** Verified on Google by a read-back — never assumed from a local save. */
+  publishedToGoogle: boolean;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-end gap-1.5">
@@ -475,7 +588,9 @@ function ReviewStatusPills({
         <Badge tone="gold" icon="flag">At risk</Badge>
       ) : null}
       {replied ? (
-          <Badge tone="primary" icon="check-circle">Reply saved</Badge>
+          <Badge tone="primary" icon="check-circle">
+            {publishedToGoogle ? "Replied on Google" : "Reply saved"}
+          </Badge>
       ) : needsReply ? (
         <Badge tone="danger" icon="chat">Needs reply</Badge>
       ) : null}

@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
-import { getSessionAndData } from "@/lib/data";
 import { ToastProvider } from "@/components/ds";
 import { Icon } from "@/components/icons";
+import { cn } from "@/lib/utils/cn";
 import { DemoBanner } from "@/components/app/DemoBanner";
 import { StaffTabs } from "./StaffTabs";
+import { getStaffIdentity } from "./staff-identity";
 import { ServiceWorkerRegistration } from "@/components/pwa/ServiceWorkerRegistration";
 
 export const metadata: Metadata = {
@@ -22,10 +23,12 @@ export const metadata: Metadata = {
  * Full-screen, one-handed, warm-paper. No owner nav: a slim top bar + a 3-tab row.
  */
 export default async function StaffLayout({ children }: { children: React.ReactNode }) {
-  const { session, data } = await getSessionAndData();
-  const priya = data.staff.find((s) => s.id === "stf_priya") ?? data.staff[0];
-  const staffName = priya?.displayName ?? "Front desk";
-  const staffInitials = priya?.avatarInitials ?? "FD";
+  // The chrome names the person who is actually signed in — their roster row
+  // when one links to their account, otherwise their own account identity.
+  // It never borrows a teammate's name.
+  const { session, data, staff, displayName, initials } = await getStaffIdentity();
+  const onRoster = staff !== null;
+  const firstName = displayName.split(/\s+/)[0] ?? displayName;
 
   return (
     <>
@@ -45,12 +48,19 @@ export default async function StaffLayout({ children }: { children: React.ReactN
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <span className="text-[13px] font-medium text-sub">{staffName.split(" ")[0]}</span>
+              <span className="text-[13px] font-medium text-sub">{firstName}</span>
               <span
-                className="grid size-9 place-items-center rounded-chip bg-primary-tint text-[13px] font-bold text-primary-dark"
-                aria-label={`Signed in as ${staffName}`}
+                className={cn(
+                  "grid size-9 place-items-center rounded-chip text-[13px] font-bold",
+                  onRoster ? "bg-primary-tint text-primary-dark" : "bg-primary-wash text-sub",
+                )}
+                aria-label={
+                  onRoster
+                    ? `Signed in as ${displayName}`
+                    : `Signed in as ${displayName} — not on the front-desk roster`
+                }
               >
-                {staffInitials}
+                {initials}
               </span>
             </div>
           </header>

@@ -3,7 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { hasAiKey } from "@/lib/ai/model";
 import { getSession } from "@/lib/auth/session";
 import { isDbBacked } from "@/lib/data";
-import { guardPublicApi } from "@/lib/security/api";
+import { guardPublicApiAsync } from "@/lib/security/api";
 
 export const runtime = "nodejs";
 
@@ -28,7 +28,7 @@ export async function GET(req: Request) {
   if (!(await canRunDeepHealth(req))) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
-  const limited = guardPublicApi(req, "deep-health", 5, 60_000, "authorized");
+  const limited = await guardPublicApiAsync(req, "deep-health", 5, 60_000, "authorized");
   if (limited) return limited;
 
   const now = Date.now();

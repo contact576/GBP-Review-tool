@@ -114,3 +114,344 @@ export const ADDITIVE_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS \"app_user_ws_role_idx\" ON \"app_user\" (\"workspace_id\",\"role\");",
   "CREATE INDEX IF NOT EXISTS \"workspace_org_idx\" ON \"workspace\" (\"organization_id\");",
 ];
+
+// ───────────────────────────────────────────────────────────────────────────
+// Row Level Security (tenant isolation)
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * DATABASE-ENFORCED TENANT ISOLATION — DESIGN NOTES
+ *
+ * Today multi-tenant isolation is enforced *only* by application code
+ * remembering to add `WHERE workspace_id = ...`. One forgotten predicate leaks
+ * another tenant's customer list. These statements add a second, independent
+ * line of defence inside Postgres itself.
+ *
+ * ── The predicate ──────────────────────────────────────────────────────────
+ * Each tenant-scoped table gets a policy allowing only rows whose tenant key is
+ * a member of the per-connection GUC `app.workspace_ids` (a comma-separated
+ * list, so agency users legitimately holding several workspaces still work):
+ *
+ *   <tenant_col> = ANY (string_to_array(current_setting('app.workspace_ids', true), ','))
+ *
+ * It FAILS CLOSED by construction:
+ *   - GUC unset  -> current_setting(..., true) returns NULL
+ *                -> string_to_array(NULL, ',') is NULL
+ *                -> `x = ANY(NULL)` is NULL, which is not TRUE, so no row passes.
+ *   - GUC empty  -> string_to_array('', ',') is {''} which matches no real id.
+ * A caller that forgets to set the scope therefore sees ZERO rows, never
+ * another tenant's rows. That is the whole point: the failure mode is a loud,
+ * obvious empty result rather than a silent cross-tenant leak.
+ *
+ * The list is split on a bare comma with no whitespace tolerance. lib/db/rls.ts
+ * is responsible for normalising and validating ids before they reach the GUC
+ * (it rejects any id containing a comma or whitespace), which keeps the
+ * per-row policy expression cheap.
+ *
+ * ── The two bypass paths (both deliberate, one removable) ──────────────────
+ * 1. ROLE BYPASS (strong, permanent, for migrations/DDL).
+ *    Postgres does not apply RLS to a table's OWNER, nor to any role with the
+ *    BYPASSRLS attribute, UNLESS the table is also marked FORCE ROW LEVEL
+ *    SECURITY. On Neon the app usually connects as `neondb_owner`, which *is*
+ *    the table owner. This is the single most important fact about this
+ *    rollout, and it is what makes it safe:
+ *
+ *      => Applying RLS_POLICY_STATEMENTS alone is INERT for the table owner.
+ *         Policies exist and are inspectable, but nothing is enforced yet.
+ *      => RLS_FORCE_STATEMENTS is the actual switch that begins enforcement.
+ *
+ *    Run migrations and platform-admin work as the table owner (or a BYPASSRLS
+ *    role) and they keep working with FORCE on... no: FORCE applies to the
+ *    owner too. A BYPASSRLS role still bypasses. See ROLLOUT step 5.
+ *
+ * 2. GUC BYPASS (weak, temporary, REMOVABLE — this is the escape hatch).
+ *    A second permissive policy `foundly_admin_bypass` passes any row when the
+ *    connection sets `app.bypass_rls = 'on'`. Permissive policies are OR'd, so
+ *    this re-opens the table for a connection that opts in. It exists so the
+ *    rollout can be reversed instantly without DDL, and so cross-tenant code
+ *    paths (login by email, public token lookups, cron sweeps) can be migrated
+ *    one at a time instead of all at once. It is NOT a security boundary:
+ *    anyone who can run SQL can set the GUC. RLS_DROP_BYPASS_STATEMENTS
+ *    removes it, and doing so is the final step of the rollout.
+ *
+ * ── ROLLOUT ORDER (do not skip a verify) ──────────────────────────────────
+ *   1. APPLY POLICIES.  Run RLS_POLICY_STATEMENTS. Enables RLS + creates both
+ *      policies. Inert while the app connects as the table owner. Behaviour is
+ *      unchanged. Safe to re-run.
+ *   2. VERIFY INERT.    Run RLS_STATUS_QUERY: every tenant table should show
+ *      rls_enabled = true, rls_forced = false, policy_count = 2. Run
+ *      RLS_CURRENT_ROLE_QUERY and confirm the app role owns the tables (or has
+ *      BYPASSRLS). Confirm the live app still behaves identically.
+ *   3. TEACH CALLERS.   Set FOUNDLY_ENABLE_RLS=1 so lib/db/rls.ts starts
+ *      wrapping units of work in a scoped transaction (see rls.ts — this
+ *      requires callers to route through runInWorkspaceScope; a plain
+ *      `getDb()` query CANNOT carry the GUC, see the driver note in rls.ts).
+ *      Still inert at the DB, so a mistake here cannot leak or blank data.
+ *   4. ENFORCE.         Run RLS_FORCE_STATEMENTS on a STAGING database first.
+ *      Verify isolation: with `app.workspace_ids` set to tenant A, a
+ *      `SELECT * FROM customer` must return only A's rows and zero rows for B.
+ *      Verify with the GUC unset it returns zero rows, not all rows. Only then
+ *      apply to production, ideally table-by-table rather than all at once.
+ *      RLS_UNFORCE_STATEMENTS is the instant rollback and needs no data change.
+ *   5. REMOVE THE BYPASS. Once every cross-tenant code path has been migrated
+ *      to an explicit scoped unit of work, run RLS_DROP_BYPASS_STATEMENTS to
+ *      delete `foundly_admin_bypass`. After this only role-based bypass (the
+ *      migration role) remains. Migrations must then run as a BYPASSRLS role,
+ *      because FORCE ROW LEVEL SECURITY applies to the table owner too.
+ *
+ * RLS_DISABLE_STATEMENTS is the full panic rollback to today's behaviour.
+ *
+ * ── WHAT THIS DOES NOT COVER ──────────────────────────────────────────────
+ * See UNSCOPED_TABLES below. `password_reset_token` has no tenant column at
+ * all and is therefore NOT protected by any of this.
+ */
+
+/** A table protected by tenant RLS, plus the column carrying its tenant key. */
+export interface TenantScopedTable {
+  readonly table: string;
+  readonly tenantColumn: string;
+}
+
+/**
+ * Every table that carries a tenant key, generated from lib/db/schema.ts.
+ *
+ * NOTE the special case: `workspace` is the tenant root, so its own primary key
+ * `id` *is* the tenant key — it has no `workspace_id` column. Every other table
+ * below carries a denormalized `workspace_id`.
+ *
+ * When a new tenant-scoped table is added to schema.ts it MUST be added here,
+ * otherwise it silently gets no database-level isolation. The Vitest suite in
+ * lib/db/__tests__/rls.test.ts cross-checks this list against the CREATE TABLE
+ * statements above and fails if the two drift apart.
+ */
+export const TENANT_SCOPED_TABLES: readonly TenantScopedTable[] = [
+  { table: "ai_content_asset", tenantColumn: "workspace_id" },
+  { table: "app_user", tenantColumn: "workspace_id" },
+  { table: "audit_log", tenantColumn: "workspace_id" },
+  { table: "campaign", tenantColumn: "workspace_id" },
+  { table: "content_publishing_job", tenantColumn: "workspace_id" },
+  { table: "customer", tenantColumn: "workspace_id" },
+  { table: "customer_consent", tenantColumn: "workspace_id" },
+  { table: "dataset_meta", tenantColumn: "workspace_id" },
+  { table: "gbp_task", tenantColumn: "workspace_id" },
+  { table: "google_credential", tenantColumn: "workspace_id" },
+  { table: "instagram_credential", tenantColumn: "workspace_id" },
+  { table: "location", tenantColumn: "workspace_id" },
+  { table: "monitoring_run", tenantColumn: "workspace_id" },
+  { table: "notification", tenantColumn: "workspace_id" },
+  { table: "organization", tenantColumn: "workspace_id" },
+  { table: "private_feedback", tenantColumn: "workspace_id" },
+  { table: "profile_mutation_job", tenantColumn: "workspace_id" },
+  { table: "qr_asset", tenantColumn: "workspace_id" },
+  { table: "review", tenantColumn: "workspace_id" },
+  { table: "review_draft", tenantColumn: "workspace_id" },
+  { table: "review_reply", tenantColumn: "workspace_id" },
+  { table: "review_request", tenantColumn: "workspace_id" },
+  { table: "staff_invite", tenantColumn: "workspace_id" },
+  { table: "staff_member", tenantColumn: "workspace_id" },
+  { table: "subscription", tenantColumn: "workspace_id" },
+  // Tenant root: its primary key IS the tenant key.
+  { table: "workspace", tenantColumn: "id" },
+];
+
+/**
+ * Tables deliberately left OUT of tenant RLS, with the reason. Anything listed
+ * here is still protected by application code alone — be explicit about it
+ * rather than letting it hide.
+ *
+ * `password_reset_token` genuinely has no tenant column: a reset is looked up
+ * by `token_hash` before any workspace is known, and the row only references
+ * `user_id`. Giving it real isolation requires an additive `workspace_id`
+ * column plus a backfill, which is out of scope for this additive-only change.
+ * Until then it is protected by the unguessability of the hashed token.
+ */
+export const UNSCOPED_TABLES: readonly { table: string; reason: string }[] = [
+  {
+    table: "password_reset_token",
+    reason:
+      "No workspace_id column; looked up by token_hash before the tenant is " +
+      "known. Needs an additive workspace_id + backfill before it can be " +
+      "covered. Currently protected only by token unguessability.",
+  },
+];
+
+/** Session GUC holding the comma-separated workspace ids visible to a unit of work. */
+export const RLS_SCOPE_GUC = "app.workspace_ids";
+
+/** Session GUC that, when set to 'on', activates the removable bypass policy. */
+export const RLS_BYPASS_GUC = "app.bypass_rls";
+
+/** Name of the real tenant-isolation policy. */
+export const RLS_TENANT_POLICY = "foundly_tenant_isolation";
+
+/** Name of the removable platform-admin/migration bypass policy. */
+export const RLS_BYPASS_POLICY = "foundly_admin_bypass";
+
+/**
+ * The row-visibility expression, as it appears in the policy. Exported so tests
+ * and operators can assert on the exact predicate rather than a paraphrase.
+ */
+export function rlsTenantPredicate(tenantColumn: string): string {
+  return (
+    `"${tenantColumn}" = ANY (string_to_array(` +
+    `current_setting('${RLS_SCOPE_GUC}', true), ','))`
+  );
+}
+
+/** The bypass-policy expression. See design notes: NOT a security boundary. */
+export const RLS_BYPASS_PREDICATE = `current_setting('${RLS_BYPASS_GUC}', true) = 'on'`;
+
+/**
+ * Wraps DDL in a plpgsql DO block that no-ops when the table is absent.
+ *
+ * A DO block is a single statement, so the DROP POLICY / CREATE POLICY pair
+ * inside it is atomic — there is never an instant where RLS is enabled but the
+ * policy is missing (which would blank the table for every reader). This is
+ * what makes the statements safe to re-run against a live database.
+ */
+function guardedDo(table: string, body: string): string {
+  return [
+    "DO $foundly_rls$",
+    "BEGIN",
+    `  IF to_regclass('public."${table}"') IS NULL THEN`,
+    `    RAISE NOTICE 'foundly-rls: table % is absent, skipping', '${table}';`,
+    "    RETURN;",
+    "  END IF;",
+    body,
+    "END",
+    "$foundly_rls$;",
+  ].join("\n");
+}
+
+/**
+ * STAGE 1 — enable RLS and (re)create both policies on every tenant table.
+ *
+ * Idempotent: ENABLE ROW LEVEL SECURITY is a no-op when already set, and each
+ * policy is dropped-then-created atomically inside a DO block, so re-running
+ * also repairs a policy whose definition has drifted.
+ *
+ * SAFE TO APPLY TO PRODUCTION AHEAD OF ENFORCEMENT: while the connecting role
+ * owns the tables (the Neon default) and FORCE is not set, these policies are
+ * not applied to any query. Nothing changes until RLS_FORCE_STATEMENTS runs.
+ */
+export const RLS_POLICY_STATEMENTS: readonly string[] = TENANT_SCOPED_TABLES.map(
+  ({ table, tenantColumn }) => {
+    const tenant = rlsTenantPredicate(tenantColumn);
+    return guardedDo(
+      table,
+      [
+        "",
+        `  ALTER TABLE public."${table}" ENABLE ROW LEVEL SECURITY;`,
+        "",
+        `  DROP POLICY IF EXISTS "${RLS_TENANT_POLICY}" ON public."${table}";`,
+        `  CREATE POLICY "${RLS_TENANT_POLICY}" ON public."${table}"`,
+        "    FOR ALL",
+        "    TO PUBLIC",
+        `    USING (${tenant})`,
+        `    WITH CHECK (${tenant});`,
+        "",
+        `  DROP POLICY IF EXISTS "${RLS_BYPASS_POLICY}" ON public."${table}";`,
+        `  CREATE POLICY "${RLS_BYPASS_POLICY}" ON public."${table}"`,
+        "    FOR ALL",
+        "    TO PUBLIC",
+        `    USING (${RLS_BYPASS_PREDICATE})`,
+        `    WITH CHECK (${RLS_BYPASS_PREDICATE});`,
+      ].join("\n"),
+    );
+  },
+);
+
+/**
+ * STAGE 2 — THE SWITCH. Makes the policies apply to the table owner too.
+ *
+ * Until this runs, the app (connecting as the Neon table owner) is exempt and
+ * nothing above has any effect. After it runs, every query on these tables must
+ * carry a workspace scope or it returns zero rows.
+ *
+ * Apply to staging first, then production table-by-table. Idempotent.
+ */
+export const RLS_FORCE_STATEMENTS: readonly string[] = TENANT_SCOPED_TABLES.map(
+  ({ table }) =>
+    guardedDo(table, `  ALTER TABLE public."${table}" FORCE ROW LEVEL SECURITY;`),
+);
+
+/**
+ * ROLLBACK for stage 2 — stop enforcing without dropping anything. This is the
+ * fast, no-data-change "undo" if enforcement misbehaves in production. Policies
+ * survive so the rollout can be retried.
+ */
+export const RLS_UNFORCE_STATEMENTS: readonly string[] = TENANT_SCOPED_TABLES.map(
+  ({ table }) =>
+    guardedDo(table, `  ALTER TABLE public."${table}" NO FORCE ROW LEVEL SECURITY;`),
+);
+
+/**
+ * STAGE 5 — remove the removable bypass, once every cross-tenant code path has
+ * been migrated. After this, only a BYPASSRLS role can read across tenants.
+ * Run this LAST, and make sure migrations run as a BYPASSRLS role first.
+ */
+export const RLS_DROP_BYPASS_STATEMENTS: readonly string[] =
+  TENANT_SCOPED_TABLES.map(({ table }) =>
+    guardedDo(
+      table,
+      `  DROP POLICY IF EXISTS "${RLS_BYPASS_POLICY}" ON public."${table}";`,
+    ),
+  );
+
+/**
+ * FULL PANIC ROLLBACK — return to today's behaviour (application-only
+ * isolation). Disables RLS and drops both policies on every tenant table.
+ */
+export const RLS_DISABLE_STATEMENTS: readonly string[] = TENANT_SCOPED_TABLES.map(
+  ({ table }) =>
+    guardedDo(
+      table,
+      [
+        "",
+        `  ALTER TABLE public."${table}" NO FORCE ROW LEVEL SECURITY;`,
+        `  ALTER TABLE public."${table}" DISABLE ROW LEVEL SECURITY;`,
+        `  DROP POLICY IF EXISTS "${RLS_TENANT_POLICY}" ON public."${table}";`,
+        `  DROP POLICY IF EXISTS "${RLS_BYPASS_POLICY}" ON public."${table}";`,
+      ].join("\n"),
+    ),
+);
+
+/**
+ * VERIFY query (read-only). Per public table: is RLS enabled, is it FORCEd,
+ * who owns it, and how many of our policies exist.
+ *
+ * Expected after stage 1: rls_enabled = true, rls_forced = false, policy_count = 2.
+ * Expected after stage 4: rls_forced = true.
+ * Expected after stage 5: bypass_policy_count = 0.
+ */
+export const RLS_STATUS_QUERY = `
+SELECT c.relname                        AS table_name,
+       c.relrowsecurity                 AS rls_enabled,
+       c.relforcerowsecurity            AS rls_forced,
+       pg_get_userbyid(c.relowner)      AS table_owner,
+       (SELECT count(*) FROM pg_policy p
+         WHERE p.polrelid = c.oid
+           AND p.polname IN ('${RLS_TENANT_POLICY}', '${RLS_BYPASS_POLICY}')) AS policy_count,
+       (SELECT count(*) FROM pg_policy p
+         WHERE p.polrelid = c.oid
+           AND p.polname = '${RLS_BYPASS_POLICY}') AS bypass_policy_count
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE n.nspname = 'public'
+   AND c.relkind = 'r'
+ ORDER BY c.relname`.trim();
+
+/**
+ * VERIFY query (read-only). Does the connecting role bypass RLS today?
+ *
+ * If `bypasses_rls` or `is_superuser` is true, or the role owns the tables and
+ * FORCE is not set, then the policies are INERT for this connection. Confirm
+ * this BEFORE stage 1 (it is why stage 1 is safe) and re-confirm it is no
+ * longer the case after stage 4 (or enforcement is not really on).
+ */
+export const RLS_CURRENT_ROLE_QUERY = `
+SELECT current_user      AS role_name,
+       r.rolsuper        AS is_superuser,
+       r.rolbypassrls    AS bypasses_rls
+  FROM pg_roles r
+ WHERE r.rolname = current_user`.trim();

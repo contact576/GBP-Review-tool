@@ -3,16 +3,19 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ds/Card";
-import { Badge } from "@/components/ds/misc";
+import { Badge, EmptyState } from "@/components/ds/misc";
 import { Toggle } from "@/components/ds/form";
 import { useToast } from "@/components/ds/Toast";
 import { setFeatureFlagAction } from "@/lib/actions";
 import type { FeatureFlag } from "@/lib/data/types";
 
+// `rollout` is a label stored on the flag record, not an enforced audience —
+// nothing in this deployment fans a toggle out to other tenants. The copy says
+// "tagged" so the chip cannot be read as a claim about who is receiving it.
 const ROLLOUT: Record<FeatureFlag["rollout"], { tone: "primary" | "gold" | "sub"; label: string }> = {
-  all: { tone: "primary", label: "GA · all tenants" },
-  beta: { tone: "gold", label: "Beta" },
-  internal: { tone: "sub", label: "Internal only" },
+  all: { tone: "primary", label: "Tagged GA" },
+  beta: { tone: "gold", label: "Tagged beta" },
+  internal: { tone: "sub", label: "Tagged internal" },
 };
 
 export function FlagsTable({ flags }: { flags: FeatureFlag[] }) {
@@ -37,6 +40,19 @@ export function FlagsTable({ flags }: { flags: FeatureFlag[] }) {
         toast(`Couldn't update ${f.key}`, "danger", "alert");
       }
     });
+  }
+
+  if (flags.length === 0) {
+    // Genuinely zero, not unmeasured: this reads the workspace's own record.
+    return (
+      <Card padded={false}>
+        <EmptyState
+          icon="flag"
+          title="No feature flags on this workspace"
+          description="The workspace record carries no flag entries, so there is nothing to toggle. Flags appear here once they are seeded onto the record."
+        />
+      </Card>
+    );
   }
 
   return (

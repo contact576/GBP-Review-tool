@@ -32,13 +32,18 @@ export function CaptureForm({
   attributeSeeds,
   rank,
   totalStaff,
+  notice,
 }: {
   locationId: string;
   region: Region;
-  staffId: string;
+  /** The signed-in person's roster row; undefined when they have none. */
+  staffId?: string;
   attributeSeeds: string[];
+  /** 1-based rank on the team board; 0 when unattributed. */
   rank: number;
   totalStaff: number;
+  /** Honest roster state, rendered above the form when the account is unlinked. */
+  notice?: React.ReactNode;
 }) {
   const labels = consentLabels(region);
   const { toast } = useToast();
@@ -234,6 +239,9 @@ export function CaptureForm({
       ) : null}
 
       <div className="mx-auto w-full max-w-[540px] px-4 pb-44 pt-4">
+        {/* Honest roster state — shown only when this account has no staff row. */}
+        {notice ? <div className="mb-4">{notice}</div> : null}
+
         {/* Stats strip */}
         <div className="flex items-center gap-2">
           <div className="flex flex-1 items-center gap-2 rounded-card border border-hairline bg-card px-3 py-2 shadow-sm">
@@ -245,18 +253,30 @@ export function CaptureForm({
               <div className="text-[11px] text-faint">captured today</div>
             </div>
           </div>
-          <div className="flex flex-1 items-center gap-2 rounded-card border border-hairline bg-card px-3 py-2 shadow-sm">
-            <span className="grid size-8 place-items-center rounded-chip bg-gold-tint text-gold-deep">
-              <Icon name="trophy" size={16} />
-            </span>
-            <div className="leading-tight">
-              <div className="text-[16px] font-extrabold tabular-nums text-ink">
-                #{rank}
-                <span className="text-[12px] font-medium text-faint"> / {totalStaff}</span>
+          {staffId ? (
+            <div className="flex flex-1 items-center gap-2 rounded-card border border-hairline bg-card px-3 py-2 shadow-sm">
+              <span className="grid size-8 place-items-center rounded-chip bg-gold-tint text-gold-deep">
+                <Icon name="trophy" size={16} />
+              </span>
+              <div className="leading-tight">
+                <div className="text-[16px] font-extrabold tabular-nums text-ink">
+                  #{rank}
+                  <span className="text-[12px] font-medium text-faint"> / {totalStaff}</span>
+                </div>
+                <div className="text-[11px] text-faint">my rank</div>
               </div>
-              <div className="text-[11px] text-faint">my rank</div>
             </div>
-          </div>
+          ) : (
+            <div className="flex flex-1 items-center gap-2 rounded-card border border-hairline bg-card px-3 py-2 shadow-sm">
+              <span className="grid size-8 place-items-center rounded-chip bg-primary-wash text-sub">
+                <Icon name="users" size={16} />
+              </span>
+              <div className="leading-tight">
+                <div className="text-[16px] font-extrabold text-ink">&mdash;</div>
+                <div className="text-[11px] text-faint">not credited</div>
+              </div>
+            </div>
+          )}
           <Link
             href="/staff/qr"
             className="grid min-h-[44px] place-items-center rounded-card border border-hairline bg-card px-3 text-primary shadow-sm transition-all hover:bg-primary-wash active:scale-[0.98]"

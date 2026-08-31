@@ -6,6 +6,8 @@
  * definition of "complete" and "approved".
  */
 
+import { assertNotNameField } from "./lints";
+
 export type CapabilityStatus =
   | "complete"
   | "partial"
@@ -130,6 +132,13 @@ const MEDIUM_RISK = new Set<ProfileChangeTarget>([
   "qna_answer",
 ]);
 
+/**
+ * Targets no automated write may ever touch, no matter who approved it.
+ * The business name is Google-policy protected: a keyword-stuffed name risks
+ * suspension, so it stays a human-only edit inside Google Business Profile.
+ */
+const NEVER_EXECUTABLE = new Set<ProfileChangeTarget>(["business_title"]);
+
 /** No profile mutation may run before a human approves its exact diff. */
 export function approvalPolicyFor(target: ProfileChangeTarget): ApprovalPolicy {
   const risk: ChangeRisk = HIGH_RISK.has(target)
@@ -141,7 +150,7 @@ export function approvalPolicyFor(target: ProfileChangeTarget): ApprovalPolicy {
     risk,
     requiresExplicitApproval: true,
     requiresFactConfirmation: risk === "high",
-    canExecuteAfterApproval: true,
+    canExecuteAfterApproval: !NEVER_EXECUTABLE.has(target),
   };
 }
 
@@ -152,6 +161,12 @@ export function assertApprovedForExecution(input: {
   factsConfirmed?: boolean;
 }): void {
   const policy = approvalPolicyFor(input.target);
+  if (!policy.canExecuteAfterApproval) {
+    // The name rule lives in one place (`assertNotNameField`) and throws its own
+    // plain-language explanation; the fallback covers any future blocked target.
+    assertNotNameField(input.target);
+    throw new Error("This change can never be published automatically.");
+  }
   if (!input.approvedAt || !input.approvedBy) {
     throw new Error("An explicit owner or manager approval is required before publication.");
   }

@@ -44,6 +44,25 @@ export interface SendEmailInput {
   replyTo?: string;
   /** Use this workspace's saved sender instead of the env fallback. */
   workspaceId?: string;
+  /**
+   * Adds RFC 8058 one-click unsubscribe headers. Gmail and Yahoo require these
+   * on bulk mail, and without them marketing sends land in spam regardless of
+   * the in-body link. Set this for every commercial message.
+   */
+  listUnsubscribeUrl?: string;
+}
+
+/**
+ * RFC 8058 one-click unsubscribe headers, shared by both backends — the
+ * requirement is about what lands in the recipient's inbox, so it cannot
+ * depend on whether this workspace sends through Resend or its own mailbox.
+ */
+function listHeaders(url?: string): Record<string, string> | undefined {
+  if (!url) return undefined;
+  return {
+    "List-Unsubscribe": `<${url}>`,
+    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+  };
 }
 
 export type SendEmailResult =
@@ -77,6 +96,7 @@ async function sendViaResend(
         html: input.html,
         text: input.text,
         reply_to: input.replyTo ?? config.replyTo,
+        headers: listHeaders(input.listUnsubscribeUrl),
       }),
       cache: "no-store",
     });
@@ -124,6 +144,7 @@ async function sendViaSmtp(
       html: input.html,
       text: input.text,
       replyTo: input.replyTo ?? config.replyTo,
+      headers: listHeaders(input.listUnsubscribeUrl),
     });
     return { ok: true, id: info.messageId ?? "sent" };
   } catch (err) {

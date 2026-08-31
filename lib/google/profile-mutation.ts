@@ -10,6 +10,10 @@ import {
   assertApprovedForExecution,
   type ProfileChangeTarget,
 } from "@/lib/compliance/product-policy";
+import {
+  assertNotNameField,
+  assertPayloadWritesNoNameField,
+} from "@/lib/compliance/lints";
 
 export type ProfileMutationSurface = "location" | "attributes";
 
@@ -23,8 +27,11 @@ export interface PreparedProfileMutation {
   requestBody: Record<string, unknown>;
 }
 
+/**
+ * Writable location fields. The business name (`title`) is deliberately absent:
+ * it is never an automated edit target, only a finding a human acts on.
+ */
 const LOCATION_FIELDS: Partial<Record<AuditFindingTarget, string>> = {
-  business_title: "title",
   primary_category: "categories.primaryCategory",
   additional_categories: "categories.additionalCategories",
   address: "storefrontAddress",
@@ -45,6 +52,9 @@ export function prepareProfileMutation(
   suggestion: ProfileSuggestion,
   snapshot: GbpProfileSnapshot,
 ): PreparedProfileMutation {
+  // Google-policy protection first: the business name is never writable here,
+  // whatever the approval state of the suggestion.
+  assertNotNameField(suggestion.target);
   if (!suggestion.exactPreviewReady || suggestion.proposedValue === undefined) {
     throw new Error("The exact proposed value must be previewed before approval.");
   }
@@ -61,7 +71,7 @@ export function prepareProfileMutation(
 
   if (suggestion.target === "attributes") {
     const attributes = requireAttributes(suggestion.proposedValue);
-    return {
+    return assertPlanWritesNoName({
       target: suggestion.target,
       surface: "attributes",
       locationResource: snapshot.locationResource,
@@ -71,7 +81,7 @@ export function prepareProfileMutation(
       ),
       proposedValue: attributes,
       requestBody: { attributes },
-    };
+    });
   }
 
   const field = LOCATION_FIELDS[suggestion.target];
@@ -79,7 +89,7 @@ export function prepareProfileMutation(
     throw new Error(`Google mutation support is not available for ${suggestion.target}.`);
   }
   const proposedValue = validateLocationValue(suggestion.target, suggestion.proposedValue);
-  return {
+  return assertPlanWritesNoName({
     target: suggestion.target,
     surface: "location",
     locationResource: snapshot.locationResource,
@@ -87,7 +97,21 @@ export function prepareProfileMutation(
     beforeValue: valueForTarget(suggestion.target, snapshot.location),
     proposedValue,
     requestBody: requestBodyForTarget(suggestion.target, proposedValue),
-  };
+  });
+}
+
+/**
+ * Last gate before a plan can exist: whatever the target claimed to be, the
+ * finished mask and body must not touch the Google business name. This is what
+ * catches a name change smuggled through another target or a nested field.
+ */
+function assertPlanWritesNoName(plan: PreparedProfileMutation): PreparedProfileMutation {
+  assertNotNameField(plan.target);
+  if (plan.surface === "location") {
+    for (const maskPath of plan.updateMask) assertNotNameField(maskPath);
+  }
+  assertPayloadWritesNoNameField(plan.requestBody);
+  return plan;
 }
 
 export function verifiedValueForPlan(
@@ -132,7 +156,7 @@ function toPolicyTarget(target: AuditFindingTarget): ProfileChangeTarget {
 }
 
 function validateLocationValue(target: AuditFindingTarget, value: unknown): unknown {
-  if (["business_title", "website", "description"].includes(target)) {
+  if (["website", "description"].includes(target)) {
     if (typeof value !== "string" || !value.trim()) throw new Error(`${target} requires non-empty exact text.`);
     return value.trim();
   }
@@ -160,7 +184,7 @@ function validateLocationValue(target: AuditFindingTarget, value: unknown): unkn
 
 function requestBodyForTarget(target: AuditFindingTarget, value: unknown): Record<string, unknown> {
   switch (target) {
-    case "business_title": return { title: value };
+    // No `business_title` case on purpose: nothing here may build a name write.
     case "primary_category": return { categories: { primaryCategory: value } };
     case "additional_categories": return { categories: { additionalCategories: value } };
     case "address": return { storefrontAddress: value };

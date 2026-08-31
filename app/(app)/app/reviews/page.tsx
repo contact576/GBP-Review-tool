@@ -1,4 +1,5 @@
-import { getData } from "@/lib/data";
+import { getSessionAndData, getProviderFor } from "@/lib/data";
+import { resolveOwnerReplyCapability } from "@/lib/google/content-publishing";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge } from "@/components/ds/misc";
 import { PageHeader } from "@/components/app/PageHeader";
@@ -8,8 +9,20 @@ import { ReviewsInbox } from "./ReviewsInbox";
 import { ResolveFeedback } from "./ResolveFeedback";
 
 export default async function ReviewsPage() {
-  const data = await getData();
+  const { session, data } = await getSessionAndData();
   const unresolvedFeedback = data.privateFeedback.filter((f) => !f.resolved);
+
+  // Whether owner replies can genuinely reach Google is decided server-side by
+  // the same helper the action uses, so the button label can never promise
+  // something the action would then refuse to do. Demo sessions never even ask
+  // for a credential.
+  const provider = await getProviderFor(session);
+  const credential = session.isDemo ? null : await provider.getGoogleCredential(session.workspaceId);
+  const replyCapability = resolveOwnerReplyCapability({
+    isDemo: session.isDemo,
+    hasGoogleCredential: Boolean(credential),
+    snapshot: data.location.gbpSnapshot,
+  });
 
   return (
     <div className="space-y-5">
@@ -49,6 +62,7 @@ export default async function ReviewsPage() {
 
       <ReviewsInbox
         reviews={data.reviews}
+        replyCapability={replyCapability}
         business={{
           name: data.location.name,
           rating: data.location.rating,

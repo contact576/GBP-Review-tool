@@ -1,4 +1,5 @@
-import { and, eq, gt, isNotNull, isNull, like, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, like, lte, or, sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { nanoid } from "nanoid";
 import { getDb, type FoundlyDb } from "../db/client";
 import { ensureSchema } from "../db/ensure";
@@ -8,6 +9,7 @@ import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { canonicalPhone } from "@/lib/sms/phone";
 import { PLANS, normalizePlan } from "@/lib/billing/plans";
 import { mergeSuggestionInbox } from "@/lib/suggestions/inbox";
+import { buildAudienceSnapshot } from "@/lib/campaigns/audience";
 import {
   buildGooglePublicUpdate,
   upsertSnapshot,
@@ -15,6 +17,14 @@ import {
   PUBLIC_REVIEW_ID_PREFIX,
   GBP_REVIEW_ID_PREFIX,
 } from "@/lib/google/public-sync";
+import { isAssetEffectivelyDegraded } from "@/lib/qr/degrade";
+import type { QrScanContext } from "@/lib/qr/types";
+import { reconcileReviewImport, type ReviewImportPlan } from "@/lib/reviews/durability";
+import {
+  applyReviewMatches,
+  confidentlyPostedRequestIds,
+  matchReviewsToRequests,
+} from "@/lib/reviews/matching";
 import type {
   DataProvider,
   CaptureCustomerInput,
@@ -55,6 +65,7 @@ import type {
   ReviewDraft,
   GbpTask,
   Campaign,
+  CampaignStats,
   Subscription,
   PrivateFeedback,
   Notification,
@@ -441,7 +452,14 @@ function mapTask(row: TaskRow): GbpTask {
   };
 }
 
+/**
+ * The delivery record lives INSIDE the `stats` jsonb column rather than in
+ * columns of its own, so campaigns gained a frozen audience and per-recipient
+ * outcomes without a schema migration. This pair of functions is the only
+ * place that knows: everything above `Campaign.delivery` sees a normal field.
+ */
 function mapCampaign(row: CampaignRow): Campaign {
+  const { delivery, ...stats } = row.stats;
   return {
     id: row.id,
     locationId: row.locationId,
@@ -457,9 +475,16 @@ function mapCampaign(row: CampaignRow): Campaign {
     audienceTotal: row.audienceTotal,
     audienceConsented: row.audienceConsented,
     excluded: row.excluded,
-    stats: row.stats,
+    stats,
+    delivery,
     createdAt: row.createdAt,
   };
+}
+
+function campaignStatsColumn(campaign: Campaign): CampaignStats {
+  return campaign.delivery
+    ? { ...campaign.stats, delivery: campaign.delivery }
+    : { ...campaign.stats };
 }
 
 function mapSubscription(row: SubscriptionRow): Subscription {
@@ -809,6 +834,130 @@ function buildDraftRow(
   };
 }
 
+// ── Review import: upsert-with-diff + attribution ───────────
+/**
+ * Apply a durability plan.
+ *
+ * The one rule this function exists to enforce: a review that we imported
+ * before is NEVER deleted just because Google stopped returning it. It is
+ * updated in place and flagged, because the row's continued existence is the
+ * evidence. Only `plan.removed` deletes anything, and the planner only ever
+ * fills that for the rotating public sample, where absence means nothing.
+ */
+async function applyReviewImportPlan(
+  db: FoundlyDb,
+  workspaceId: string,
+  plan: ReviewImportPlan,
+): Promise<void> {
+  if (plan.removed.length) {
+    const ids = plan.removed.map((review) => review.id);
+    await db
+      .delete(t.review)
+      .where(and(eq(t.review.workspaceId, workspaceId), inArray(t.review.id, ids)));
+  }
+  if (plan.inserts.length) {
+    await db
+      .insert(t.review)
+      .values(plan.inserts.map((review, index) => buildReviewRow(review, workspaceId, front() - index)));
+  }
+  for (const review of [...plan.updates, ...plan.vanished]) {
+    await db
+      .update(t.review)
+      .set({
+        author: review.author,
+        rating: review.rating,
+        text: review.text,
+        publishedAt: review.publishedAt,
+        durability: review.durability,
+        vanishedAt: review.vanishedAt ?? null,
+        needsReply: review.needsReply,
+      })
+      .where(and(eq(t.review.id, review.id), eq(t.review.workspaceId, workspaceId)));
+  }
+}
+
+/** Request states a detected match is allowed to advance. */
+const FLIPPABLE_REQUEST_STATUSES = new Set<ReviewRequest["status"]>([
+  "sent",
+  "delivered",
+  "opened",
+  "clicked",
+]);
+
+/**
+ * Re-run review↔request attribution across the whole workspace and persist it.
+ *
+ * Runs over EVERY stored review (not just the ones this sync touched) so the
+ * 1:1 assignment stays globally consistent, and it is idempotent: re-syncing
+ * recomputes the same matches and writes nothing new.
+ */
+async function reconcileReviewAttribution(
+  db: FoundlyDb,
+  workspaceId: string,
+): Promise<{ matched: number; requestsAdvanced: number }> {
+  const [reviewRows, requestRows] = await Promise.all([
+    db.select().from(t.review).where(eq(t.review.workspaceId, workspaceId)),
+    db.select().from(t.reviewRequest).where(eq(t.reviewRequest.workspaceId, workspaceId)),
+  ]);
+  const reviews = reviewRows.map((row) => mapReview(row, undefined));
+  const requests = requestRows.map(mapRequest);
+  const outcome = matchReviewsToRequests({ reviews, requests });
+  const attributed = applyReviewMatches(reviews, outcome);
+
+  for (let index = 0; index < attributed.length; index += 1) {
+    const next = attributed[index];
+    const prior = reviews[index];
+    if (!next || !prior) continue;
+    if (
+      (next.matchedRequestId ?? null) === (prior.matchedRequestId ?? null) &&
+      (next.matchConfidence ?? null) === (prior.matchConfidence ?? null)
+    ) {
+      continue;
+    }
+    await db
+      .update(t.review)
+      .set({
+        matchedRequestId: next.matchedRequestId ?? null,
+        matchConfidence: next.matchConfidence ?? null,
+      })
+      .where(and(eq(t.review.id, next.id), eq(t.review.workspaceId, workspaceId)));
+  }
+
+  // Only a HIGH-confidence match advances the funnel — this writes to the staff
+  // leaderboard and the usage counter, so the bar is deliberately above the one
+  // for showing a "Detected" chip. A request that already reached a terminal
+  // state (posted, private feedback, suppressed) is left alone, which also makes
+  // the counter bumps below safe to re-run on every sync.
+  const byId = new Map(requests.map((request) => [request.id, request]));
+  let requestsAdvanced = 0;
+  for (const requestId of confidentlyPostedRequestIds(outcome)) {
+    const request = byId.get(requestId);
+    if (!request || !FLIPPABLE_REQUEST_STATUSES.has(request.status)) continue;
+    const now = nowIso();
+    await db
+      .update(t.reviewRequest)
+      .set({ status: "posted_google", clickedAt: request.clickedAt ?? now })
+      .where(and(eq(t.reviewRequest.id, request.id), eq(t.reviewRequest.workspaceId, workspaceId)));
+    await db
+      .update(t.customer)
+      .set({ lifecycleStage: "reviewed", sentiment: "happy" })
+      .where(and(eq(t.customer.id, request.customerId), eq(t.customer.workspaceId, workspaceId)));
+    if (request.staffId) {
+      await db
+        .update(t.staffMember)
+        .set({ detectedReviews: sql`${t.staffMember.detectedReviews} + 1` })
+        .where(and(eq(t.staffMember.id, request.staffId), eq(t.staffMember.workspaceId, workspaceId)));
+    }
+    await bumpUsage(db, workspaceId, (usage) => ({
+      ...usage,
+      reviewsCaptured: usage.reviewsCaptured + 1,
+    }));
+    requestsAdvanced += 1;
+  }
+
+  return { matched: outcome.matches.length, requestsAdvanced };
+}
+
 function buildTaskRow(
   tk: GbpTask,
   workspaceId: string,
@@ -852,7 +1001,7 @@ function buildCampaignRow(
     audienceTotal: c.audienceTotal,
     audienceConsented: c.audienceConsented,
     excluded: c.excluded,
-    stats: c.stats,
+    stats: campaignStatsColumn(c),
     createdAt: c.createdAt,
     seq,
   };
@@ -2630,27 +2779,16 @@ export const drizzleProvider: DataProvider = {
     const ctx = await loadContext(db, workspaceId);
     const now = nowIso();
 
-    const customerRows = await db
-      .select()
-      .from(t.customer)
-      .where(eq(t.customer.workspaceId, workspaceId));
-    const consentRows = await db
-      .select()
-      .from(t.customerConsent)
-      .where(eq(t.customerConsent.workspaceId, workspaceId));
-    const consentByCustomer = new Map<string, ConsentRow>(
-      consentRows.map((c) => [c.customerId, c]),
-    );
-
-    const pool = customerRows.filter((c) => {
-      const cons = consentByCustomer.get(c.id);
-      if (!cons) return false;
-      return input.consentBasis === "marketing"
-        ? cons.marketingConsent && !cons.withdrawnAt
-        : cons.serviceConsent;
+    // Resolved by the same pure function the send path uses, so the number the
+    // composer shows is the number that will actually be contacted — channel,
+    // suppression and withdrawal included, not raw consent flags.
+    const data = await drizzleProvider.getData(workspaceId);
+    const snapshot = buildAudienceSnapshot({
+      customers: data?.customers ?? [],
+      suppression: data?.suppression ?? [],
+      consentBasis: input.consentBasis,
+      channel: input.channel,
     });
-    const total = customerRows.length;
-    const consented = pool.length;
 
     const campaign: Campaign = {
       id: id("camp"),
@@ -2662,19 +2800,11 @@ export const drizzleProvider: DataProvider = {
       channel: input.channel,
       subject: input.subject,
       body: input.body,
-      status: "draft",
+      status: input.scheduledAt ? "scheduled" : "draft",
       scheduledAt: input.scheduledAt,
-      audienceTotal: total,
-      audienceConsented: consented,
-      excluded: [
-        {
-          reason:
-            input.consentBasis === "marketing"
-              ? "Not opted in to marketing"
-              : "No service consent",
-          count: total - consented,
-        },
-      ],
+      audienceTotal: snapshot.total,
+      audienceConsented: snapshot.eligible,
+      excluded: snapshot.excluded,
       stats: { sent: 0, opened: 0, clicked: 0 },
       createdAt: now,
     };
@@ -2691,6 +2821,87 @@ export const drizzleProvider: DataProvider = {
       .where(
         and(eq(t.campaign.id, campaignId), eq(t.campaign.workspaceId, workspaceId)),
       );
+  },
+
+  async getCampaign(workspaceId, campaignId) {
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(t.campaign)
+      .where(and(eq(t.campaign.id, campaignId), eq(t.campaign.workspaceId, workspaceId)))
+      .limit(1);
+    const row = rows[0];
+    return row ? mapCampaign(row) : null;
+  },
+
+  async recordCampaignDelivery(workspaceId, campaignId, patch) {
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(t.campaign)
+      .where(and(eq(t.campaign.id, campaignId), eq(t.campaign.workspaceId, workspaceId)))
+      .limit(1);
+    const row = rows[0];
+    if (!row) return null;
+
+    const current = mapCampaign(row);
+    const next: Campaign = {
+      ...current,
+      status: patch.status ?? current.status,
+      scheduledAt:
+        patch.scheduledAt === undefined
+          ? current.scheduledAt
+          : (patch.scheduledAt ?? undefined),
+      stats: patch.stats ? { ...current.stats, ...patch.stats } : current.stats,
+      delivery: patch.delivery ?? current.delivery,
+      audienceTotal: patch.audienceTotal ?? current.audienceTotal,
+      audienceConsented: patch.audienceConsented ?? current.audienceConsented,
+      excluded: patch.excluded ?? current.excluded,
+    };
+
+    await db
+      .update(t.campaign)
+      .set({
+        status: next.status,
+        scheduledAt: next.scheduledAt ?? null,
+        stats: campaignStatsColumn(next),
+        audienceTotal: next.audienceTotal,
+        audienceConsented: next.audienceConsented,
+        excluded: next.excluded,
+      })
+      .where(and(eq(t.campaign.id, campaignId), eq(t.campaign.workspaceId, workspaceId)));
+
+    // Credits are consumed in the same call as the outcome so a crash can
+    // never leave "40 sent" next to an untouched allowance.
+    if (patch.consumeSmsCredits) {
+      const subRows = await db
+        .select({ usage: t.subscription.usage })
+        .from(t.subscription)
+        .where(eq(t.subscription.workspaceId, workspaceId))
+        .limit(1);
+      const usage = subRows[0]?.usage;
+      if (usage) {
+        await db
+          .update(t.subscription)
+          .set({
+            usage: { ...usage, smsCreditsUsed: usage.smsCreditsUsed + patch.consumeSmsCredits },
+          })
+          .where(eq(t.subscription.workspaceId, workspaceId));
+      }
+    }
+
+    return next;
+  },
+
+  async listDueCampaigns(nowIso, limit = 50) {
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(t.campaign)
+      .where(and(eq(t.campaign.status, "scheduled"), lte(t.campaign.scheduledAt, nowIso)))
+      .orderBy(t.campaign.scheduledAt)
+      .limit(limit);
+    return rows.map((row) => ({ workspaceId: row.workspaceId, campaign: mapCampaign(row) }));
   },
 
   async updateConsent(workspaceId, customerId, consent) {
@@ -2772,19 +2983,31 @@ export const drizzleProvider: DataProvider = {
       .limit(1);
     const asset = assetRows[0];
     if (!asset) return null;
-    if (asset.degraded) return null;
     const ws = asset.workspaceId;
     const now = nowIso();
     const seq = front();
 
-    // Atomic in-database increments — no read-modify-write race.
+    // Every resolution of a printed code is a scan — including scans of a
+    // degraded code, which are exactly the signal that tells a returning owner
+    // their print is still in the wild. Atomic in-database increment — no
+    // read-modify-write race. `pageOpens` is deliberately NOT touched here:
+    // minting is not proof a person reached the review page (see
+    // `recordQrPageOpen` below and lib/qr/scan-signal.ts).
     await db
       .update(t.qrAsset)
-      .set({
-        scans: sql`${t.qrAsset.scans} + 1`,
-        pageOpens: sql`${t.qrAsset.pageOpens} + 1`,
-      })
+      .set({ scans: sql`${t.qrAsset.scans} + 1` })
       .where(and(eq(t.qrAsset.id, asset.id), eq(t.qrAsset.workspaceId, ws)));
+
+    // A degraded asset mints nothing; the /q/{slug} route serves the
+    // Google-review grace redirect instead of dead-ending the customer. The
+    // subscription lookup is skipped when the flag already settles it.
+    const degraded =
+      asset.degraded ||
+      isAssetEffectivelyDegraded({
+        degraded: false,
+        subscriptionStatus: await readSubscriptionStatus(db, ws),
+      });
+    if (degraded) return null;
 
     const locRows = await db
       .select()
@@ -2947,6 +3170,14 @@ export const drizzleProvider: DataProvider = {
       .where(eq(t.datasetMeta.workspaceId, workspaceId));
   },
 
+  async saveAeoSnapshot(workspaceId, snapshot) {
+    const db = getDb();
+    await db
+      .update(t.datasetMeta)
+      .set({ aeo: snapshot })
+      .where(eq(t.datasetMeta.workspaceId, workspaceId));
+  },
+
   async markAgencyReportsSent(workspaceId, locationIds, sentAt) {
     const db = getDb();
     const rows = await db
@@ -3032,6 +3263,25 @@ export const drizzleProvider: DataProvider = {
     if (patch.currentPeriodEnd !== undefined) set.currentPeriodEnd = patch.currentPeriodEnd;
     if (patch.cancelAtPeriodEnd !== undefined) set.cancelAtPeriodEnd = patch.cancelAtPeriodEnd;
     if (Object.keys(set).length === 0) return;
+    // A tier change must remap entitlement caps to the new plan (mirrors
+    // memory-provider + the creation-time seeding): a downgrade — including
+    // cancel → free — drops paid AI/SMS allotments; an upgrade raises them.
+    // Used counters are preserved.
+    if (patch.tier !== undefined) {
+      const [current] = await db
+        .select({ tier: t.subscription.tier, usage: t.subscription.usage })
+        .from(t.subscription)
+        .where(eq(t.subscription.workspaceId, workspaceId))
+        .limit(1);
+      if (current && current.tier !== patch.tier) {
+        const limits = PLANS[patch.tier].limits;
+        set.usage = {
+          ...current.usage,
+          aiDraftsLimit: limits.aiDraftsPerMonth,
+          smsCreditsTotal: limits.smsCredits,
+        };
+      }
+    }
     await db
       .update(t.subscription)
       .set(set)
@@ -3219,15 +3469,31 @@ export const drizzleProvider: DataProvider = {
       })
       .where(and(eq(t.location.id, ctx.location.id), eq(t.location.workspaceId, workspaceId)));
 
-    // 2) Replace the prior public sample (keep GBP/owner reviews).
-    await db
-      .delete(t.review)
-      .where(and(eq(t.review.workspaceId, workspaceId), like(t.review.id, `${PUBLIC_REVIEW_ID_PREFIX}%`)));
-    if (update.reviews.length) {
-      await db
-        .insert(t.review)
-        .values(update.reviews.map((r, i) => buildReviewRow(r, workspaceId, front() - i)));
-    }
+    // 2) Refresh the public sample (keep GBP/owner reviews).
+    //
+    // Sample mode: Google returns at most 5 public reviews and rotates which
+    // ones, so a review dropping out is NOT evidence it was filtered. Rows that
+    // rotate out are simply dropped, never marked vanished — only the full
+    // Business Profile import below is authoritative enough for that. Ids are
+    // content-derived, so a review that stays in the sample keeps everything we
+    // already learned about it.
+    const existingSample = (await db
+      .select()
+      .from(t.review)
+      .where(and(eq(t.review.workspaceId, workspaceId), like(t.review.id, `${PUBLIC_REVIEW_ID_PREFIX}%`))))
+      .map((row) => mapReview(row, undefined));
+    await applyReviewImportPlan(
+      db,
+      workspaceId,
+      reconcileReviewImport({
+        existing: existingSample,
+        imported: update.reviews,
+        nowIso: update.syncedAt,
+        importOk: true,
+        mode: "sample",
+      }),
+    );
+    await reconcileReviewAttribution(db, workspaceId);
 
     // 3) dataset_meta: today's score snapshot + integration status.
     const meta = one(
@@ -3331,19 +3597,37 @@ export const drizzleProvider: DataProvider = {
         .where(and(eq(t.location.id, ctx.location.id), eq(t.location.workspaceId, workspaceId)));
     }
 
-    // Full history supersedes both the public sample and any prior GBP import.
-    await db
-      .delete(t.review)
-      .where(and(eq(t.review.workspaceId, workspaceId), like(t.review.id, `${PUBLIC_REVIEW_ID_PREFIX}%`)));
-    await db
-      .delete(t.review)
-      .where(and(eq(t.review.workspaceId, workspaceId), like(t.review.id, `${GBP_REVIEW_ID_PREFIX}%`)));
     const imported = outcome.reviews ?? [];
+    // Full history supersedes the public sample — but only once it has actually
+    // returned reviews, so a blocked or empty read never wipes what we have.
     if (imported.length) {
       await db
-        .insert(t.review)
-        .values(imported.map((r, i) => buildReviewRow(r, workspaceId, front() - i)));
+        .delete(t.review)
+        .where(and(eq(t.review.workspaceId, workspaceId), like(t.review.id, `${PUBLIC_REVIEW_ID_PREFIX}%`)));
     }
+    // UPSERT-WITH-DIFF, never delete-and-reinsert. The difference between this
+    // import and the last one is the ONLY evidence that Google filtered a
+    // review, so prior rows have to survive the sync for the watchdog to have
+    // anything to compare against. `reviewsImportOk` is false whenever the
+    // payload was truncated or inconsistent with Google's own total, which
+    // disables vanish-marking for this run (see lib/reviews/durability.ts).
+    const existingGbp = (await db
+      .select()
+      .from(t.review)
+      .where(and(eq(t.review.workspaceId, workspaceId), like(t.review.id, `${GBP_REVIEW_ID_PREFIX}%`))))
+      .map((row) => mapReview(row, undefined));
+    await applyReviewImportPlan(
+      db,
+      workspaceId,
+      reconcileReviewImport({
+        existing: existingGbp,
+        imported,
+        nowIso: nowIso(),
+        importOk: outcome.reviewsImportOk ?? false,
+        mode: "authoritative",
+      }),
+    );
+    await reconcileReviewAttribution(db, workspaceId);
 
     if (outcome.snapshot || outcome.performanceSnapshots?.length) {
       const meta = one(
@@ -3837,4 +4121,91 @@ async function setProviderIntegration(
     .update(t.datasetMeta)
     .set({ integrations })
     .where(eq(t.datasetMeta.workspaceId, workspaceId));
+}
+
+// ── QR public side door (no session) ────────────────────────
+// Narrow QR-table reads/writes for the public /q/{slug} endpoint. They live
+// outside the DataProvider object because they serve the unauthenticated scan
+// path only — see lib/qr/store.ts for how they are resolved. Slug lookups are
+// global (slugs are unguessable and uniquely indexed); every row they touch is
+// then scoped by the asset's own workspace.
+
+/** Subscription status for a workspace, or null when there is no row. */
+async function readSubscriptionStatus(
+  db: FoundlyDb,
+  workspaceId: string,
+): Promise<string | null> {
+  const rows = await db
+    .select({ status: t.subscription.status })
+    .from(t.subscription)
+    .where(eq(t.subscription.workspaceId, workspaceId))
+    .limit(1);
+  return rows[0]?.status ?? null;
+}
+
+/**
+ * Degrade context for a public slug: the asset's own flag, the location's
+ * public Google review URL, and the billing dates the grace window is measured
+ * from. Three indexed lookups — never a whole-workspace load, because a
+ * churned customer's printed codes can keep taking real traffic for months.
+ */
+export async function readQrScanContext(slug: string): Promise<QrScanContext | null> {
+  const db = getDb();
+  const assetRows = await db
+    .select()
+    .from(t.qrAsset)
+    .where(eq(t.qrAsset.slug, slug))
+    .limit(1);
+  const asset = assetRows[0];
+  if (!asset) return null;
+  const ws = asset.workspaceId;
+
+  const locRows = await db
+    .select({ reviewUrl: t.location.reviewUrl })
+    .from(t.location)
+    .where(and(eq(t.location.id, asset.locationId), eq(t.location.workspaceId, ws)))
+    .limit(1);
+  const subRows = await db
+    .select({
+      status: t.subscription.status,
+      currentPeriodEnd: t.subscription.currentPeriodEnd,
+      trialEndsAt: t.subscription.trialEndsAt,
+    })
+    .from(t.subscription)
+    .where(eq(t.subscription.workspaceId, ws))
+    .limit(1);
+  const sub = subRows[0];
+
+  return {
+    slug: asset.slug,
+    assetId: asset.id,
+    locationId: asset.locationId,
+    degraded: asset.degraded,
+    reviewUrl: locRows[0]?.reviewUrl || asset.targetUrl,
+    subscription: {
+      status: sub?.status ?? null,
+      currentPeriodEnd: sub?.currentPeriodEnd ?? null,
+      trialEndsAt: sub?.trialEndsAt ?? null,
+    },
+  };
+}
+
+/**
+ * Count a review page actually reached by a real browser. Strictly a subset of
+ * `scans`, so the Studio's open rate is a real ratio rather than a tautology.
+ */
+export async function recordQrPageOpen(slug: string): Promise<boolean> {
+  const db = getDb();
+  const rows = await db
+    .select({ id: t.qrAsset.id, workspaceId: t.qrAsset.workspaceId })
+    .from(t.qrAsset)
+    .where(eq(t.qrAsset.slug, slug))
+    .limit(1);
+  const asset = rows[0];
+  if (!asset) return false;
+  await db
+    .update(t.qrAsset)
+    .set({ pageOpens: sql`${t.qrAsset.pageOpens} + 1` })
+    .where(and(eq(t.qrAsset.id, asset.id), eq(t.qrAsset.workspaceId, asset.workspaceId)));
+  return true;
 }

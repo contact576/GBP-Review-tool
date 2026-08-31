@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { getPublicProviders } from "@/lib/data";
-import { consumeRateLimit } from "@/lib/security/api";
+import { classifyQrHit } from "@/lib/qr/scan-signal";
+import { resolveQrScan } from "@/lib/qr/resolve";
+import { consumeRateLimitDistributed } from "@/lib/security/api";
 import { trustedClientIp } from "@/lib/security/client-ip";
 
 export const runtime = "nodejs";
@@ -9,25 +10,36 @@ export const dynamic = "force-dynamic";
 /**
  * Public QR scan endpoint — the URL every printed Foundly code encodes.
  *
- * Each scan mints a fresh walk-in review request (incrementing the asset's
- * scan counter) and 302-redirects into the customer flow at /r/{token}.
- * Unknown, paused, or degraded codes land on the calm /q-expired fallback —
- * a scan must never dead-end on an error page.
+ * Three outcomes, and none of them is an error page:
+ *  - active code → mints a fresh walk-in review request and 302s into the
+ *    customer flow at /r/{token};
+ *  - degraded code (explicitly flagged, or the subscription has lapsed) →
+ *    302s to the business's own public Google review page for the 90-day
+ *    grace window, so printed table tents and counter cards keep working;
+ *  - unknown code, or a grace window that has run out → the calm /q-expired
+ *    page, which tells the truth instead of pretending.
  *
- * The redirect is RELATIVE on purpose. It used to be resolved against
+ * Counting: every hit that resolves a real asset is a SCAN. Only a genuine
+ * browser navigation that is handed a live session is an OPEN — see
+ * lib/qr/scan-signal.ts for why those are not the same event.
+ *
+ * The in-app redirect is RELATIVE on purpose. It used to be resolved against
  * `appUrl()`, which is derived from environment config — so a scan arriving on
  * any other origin (a custom domain, a preview deployment, a self-hosted port)
  * was bounced to the configured host instead of staying where the customer
  * already was. With no env set that host is localhost:3000, which is a dead end
  * for a real customer. A relative Location keeps every scan on the origin the
- * customer actually reached, in every environment.
+ * customer actually reached, in every environment. The degraded case is the one
+ * exception: it points off-site to Google, so it stays absolute.
  *
  * ABUSE CONTROL: minting a request is an unauthenticated database write, so it
  * is rate-limited per slug and per client IP. Without this, a loop against any
  * known slug inflates the DB with junk requests, poisons the owner's scan/open
  * analytics, and freely mints valid review tokens (which gate the token-keyed
- * public endpoints). Over-limit scans fall through to /q-expired, so a real
- * customer never sees an error — they simply retry.
+ * public endpoints). This uses the fleet-wide limiter rather than the
+ * per-instance one — a serverless fan-out would otherwise give an attacker one
+ * fresh bucket per instance. Over-limit scans fall through to /q-expired, so a
+ * real customer never sees an error — they simply retry.
  */
 export async function GET(
   req: Request,
@@ -40,22 +52,26 @@ export async function GET(
   const expired = () => redirectTo("/q-expired");
   try {
     const { slug } = await params;
-    if (slug) {
-      const ip = trustedClientIp((name) => req.headers.get(name));
-      const bySlug = consumeRateLimit("qr-scan-slug", slug, 30, 60_000);
-      const byIp = consumeRateLimit("qr-scan-ip", ip, 60, 60_000);
-      if (!bySlug.allowed || !byIp.allowed) return expired();
+    if (!slug) return expired();
 
-      for (const provider of await getPublicProviders()) {
-        try {
-          const result = await provider.mintRequestFromQrSlug(slug);
-          if (result) {
-            return redirectTo(`/r/${encodeURIComponent(result.token)}`);
-          }
-        } catch {
-          // This store couldn't resolve the slug — try the next one.
-        }
-      }
+    const ip = trustedClientIp((name) => req.headers.get(name));
+    const [bySlug, byIp] = await Promise.all([
+      consumeRateLimitDistributed("qr-scan-slug", slug, 30, 60_000),
+      consumeRateLimitDistributed("qr-scan-ip", ip, 60, 60_000),
+    ]);
+    if (!bySlug.allowed || !byIp.allowed) return expired();
+
+    const destination = await resolveQrScan({
+      slug,
+      hit: classifyQrHit({ method: req.method, headers: req.headers }),
+    });
+
+    if (destination.kind === "review_session") {
+      return redirectTo(`/r/${encodeURIComponent(destination.token)}`);
+    }
+    if (destination.kind === "google_review") {
+      // Absolute, off-site and already protocol-checked in lib/qr/degrade.
+      return NextResponse.redirect(destination.url, 302);
     }
   } catch {
     // Fall through to the expired page.

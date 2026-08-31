@@ -3,8 +3,9 @@
  * Google capabilities are unlocked by the current environment.
  *
  * Everything is optional: without credentials the app degrades honestly
- * (manual entry in onboarding, "not configured" states in settings, and
- * the free score tool stays on its clearly-labelled synthetic path).
+ * (manual entry in onboarding, "not configured" states in settings, and the
+ * free score tool declines to score rather than inventing one — it never
+ * shows an estimated or synthetic result).
  *
  * Only read server-side (route handlers / server components). None of these
  * values are ever shipped to the client — pages pass booleans down as props.

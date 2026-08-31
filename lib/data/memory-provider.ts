@@ -5,6 +5,9 @@ import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { canonicalPhone } from "@/lib/sms/phone";
 import { PLANS } from "@/lib/billing/plans";
 import { mergeSuggestionInbox } from "@/lib/suggestions/inbox";
+import { buildAudienceSnapshot } from "@/lib/campaigns/audience";
+import { isAssetEffectivelyDegraded } from "@/lib/qr/degrade";
+import type { QrScanContext } from "@/lib/qr/types";
 import type {
   DataProvider,
   CaptureCustomerInput,
@@ -31,9 +34,16 @@ import {
   buildGooglePublicUpdate,
   upsertSnapshot,
   isPublicSampleReview,
+  isGbpReview,
   isImportedGoogleReview,
   friendlyPlacesError,
 } from "@/lib/google/public-sync";
+import { reconcileReviewImport } from "@/lib/reviews/durability";
+import {
+  applyReviewMatches,
+  confidentlyPostedRequestIds,
+  matchReviewsToRequests,
+} from "@/lib/reviews/matching";
 import type {
   FoundlyData,
   Customer,
@@ -158,6 +168,47 @@ function nowIso() {
 }
 function id(prefix: string) {
   return `${prefix}_${nanoid()}`;
+}
+
+// ── Review import: upsert-with-diff + attribution ───────────
+/** Request states a detected match is allowed to advance. */
+const FLIPPABLE_REQUEST_STATUSES = new Set<ReviewRequest["status"]>([
+  "sent",
+  "delivered",
+  "opened",
+  "clicked",
+]);
+
+/**
+ * Re-run review↔request attribution across the whole workspace and persist it.
+ * Mirrors `reconcileReviewAttribution` in drizzle-provider.ts exactly, including
+ * its idempotency: a request that already reached a terminal state is never
+ * advanced (and therefore never re-counted) a second time.
+ */
+function reconcileReviewAttribution(data: FoundlyData): {
+  matched: number;
+  requestsAdvanced: number;
+} {
+  const outcome = matchReviewsToRequests({ reviews: data.reviews, requests: data.requests });
+  data.reviews = applyReviewMatches(data.reviews, outcome);
+
+  let requestsAdvanced = 0;
+  for (const requestId of confidentlyPostedRequestIds(outcome)) {
+    const request = data.requests.find((candidate) => candidate.id === requestId);
+    if (!request || !FLIPPABLE_REQUEST_STATUSES.has(request.status)) continue;
+    request.status = "posted_google";
+    request.clickedAt ??= nowIso();
+    const customer = data.customers.find((c) => c.id === request.customerId);
+    if (customer) {
+      customer.lifecycleStage = "reviewed";
+      customer.sentiment = "happy";
+    }
+    const staff = data.staff.find((s) => s.id === request.staffId);
+    if (staff) staff.detectedReviews += 1;
+    data.subscription.usage.reviewsCaptured += 1;
+    requestsAdvanced += 1;
+  }
+  return { matched: outcome.matches.length, requestsAdvanced };
 }
 
 function toAuthUser(u: StoredUser, isDemo = false): AuthUser {
@@ -836,13 +887,15 @@ export const memoryProvider: DataProvider = {
 
   async createCampaign(workspaceId, input: CreateCampaignInput) {
     const data = mustDb(workspaceId);
-    const pool = data.customers.filter((c) =>
-      input.consentBasis === "marketing"
-        ? c.consent.marketingConsent && !c.consent.withdrawnAt
-        : c.consent.serviceConsent,
-    );
-    const total = data.customers.length;
-    const consented = pool.length;
+    // Eligibility is resolved by the same pure function the send path uses, so
+    // the number on the composer is the number that will actually be contacted
+    // — it accounts for channel, suppression and withdrawal, not consent alone.
+    const snapshot = buildAudienceSnapshot({
+      customers: data.customers,
+      suppression: data.suppression,
+      consentBasis: input.consentBasis,
+      channel: input.channel,
+    });
     const campaign: Campaign = {
       id: id("camp"),
       locationId: data.location.id,
@@ -853,16 +906,11 @@ export const memoryProvider: DataProvider = {
       channel: input.channel,
       subject: input.subject,
       body: input.body,
-      status: "draft",
+      status: input.scheduledAt ? "scheduled" : "draft",
       scheduledAt: input.scheduledAt,
-      audienceTotal: total,
-      audienceConsented: consented,
-      excluded: [
-        {
-          reason: input.consentBasis === "marketing" ? "Not opted in to marketing" : "No service consent",
-          count: total - consented,
-        },
-      ],
+      audienceTotal: snapshot.total,
+      audienceConsented: snapshot.eligible,
+      excluded: snapshot.excluded,
       stats: { sent: 0, opened: 0, clicked: 0 },
       createdAt: nowIso(),
     };
@@ -874,6 +922,43 @@ export const memoryProvider: DataProvider = {
     const data = mustDb(workspaceId);
     const campaign = data.campaigns.find((c) => c.id === campaignId);
     if (campaign) campaign.status = status;
+  },
+
+  async getCampaign(workspaceId, campaignId) {
+    const data = db(workspaceId);
+    return data?.campaigns.find((c) => c.id === campaignId) ?? null;
+  },
+
+  async recordCampaignDelivery(workspaceId, campaignId, patch) {
+    const data = mustDb(workspaceId);
+    const campaign = data.campaigns.find((c) => c.id === campaignId);
+    if (!campaign) return null;
+
+    if (patch.status !== undefined) campaign.status = patch.status;
+    if (patch.scheduledAt !== undefined) {
+      campaign.scheduledAt = patch.scheduledAt ?? undefined;
+    }
+    if (patch.stats) campaign.stats = { ...campaign.stats, ...patch.stats };
+    if (patch.delivery) campaign.delivery = patch.delivery;
+    if (patch.audienceTotal !== undefined) campaign.audienceTotal = patch.audienceTotal;
+    if (patch.audienceConsented !== undefined) campaign.audienceConsented = patch.audienceConsented;
+    if (patch.excluded !== undefined) campaign.excluded = patch.excluded;
+    if (patch.consumeSmsCredits) {
+      data.subscription.usage.smsCreditsUsed += patch.consumeSmsCredits;
+    }
+    return campaign;
+  },
+
+  async listDueCampaigns(nowIso, limit = 50) {
+    const due: { workspaceId: string; campaign: Campaign }[] = [];
+    for (const data of allWorkspaces()) {
+      for (const campaign of data.campaigns) {
+        if (campaign.status !== "scheduled" || !campaign.scheduledAt) continue;
+        if (campaign.scheduledAt > nowIso) continue;
+        due.push({ workspaceId: data.workspace.id, campaign });
+      }
+    }
+    return due.sort((a, b) => (a.campaign.scheduledAt ?? "").localeCompare(b.campaign.scheduledAt ?? "")).slice(0, limit);
   },
 
   async updateConsent(workspaceId, customerId, consent) {
@@ -896,9 +981,22 @@ export const memoryProvider: DataProvider = {
     for (const data of allWorkspaces()) {
       const asset = data.qrAssets.find((q) => q.slug === slug);
       if (!asset) continue;
-      if (asset.degraded) return null;
+
+      // Every resolution of a printed code is a scan — including scans of a
+      // degraded code, which are exactly the signal that tells a returning
+      // owner their print is still in the wild.
       asset.scans += 1;
-      asset.pageOpens += 1;
+
+      // A degraded asset mints nothing; the /q/{slug} route serves the
+      // Google-review grace redirect instead of dead-ending the customer.
+      if (
+        isAssetEffectivelyDegraded({
+          degraded: asset.degraded,
+          subscriptionStatus: data.subscription.status,
+        })
+      ) {
+        return null;
+      }
 
       const customer: Customer = {
         id: id("cus"),
@@ -945,6 +1043,10 @@ export const memoryProvider: DataProvider = {
     }
     return null;
   },
+
+  // NOTE: the QR *open* counter is not written here. Minting a session is not
+  // proof that a person reached the review page — see `recordQrPageOpen` at
+  // the bottom of this file and lib/qr/scan-signal.ts.
 
   // ── Workspace configuration ───────────────────────────────
   async updateIndustry(workspaceId, industryKey, config?: IndustryConfig) {
@@ -994,6 +1096,11 @@ export const memoryProvider: DataProvider = {
     data.rankScans = [scan, ...data.rankScans.filter((item) => item.id !== scan.id)].slice(0, 24);
   },
 
+  async saveAeoSnapshot(workspaceId, snapshot) {
+    const data = mustDb(workspaceId);
+    data.aeo = snapshot;
+  },
+
   async markAgencyReportsSent(workspaceId, locationIds, sentAt) {
     const data = mustDb(workspaceId);
     const selected = new Set(locationIds);
@@ -1018,6 +1125,7 @@ export const memoryProvider: DataProvider = {
   // ── Billing / subscription ────────────────────────────────
   async setSubscription(workspaceId, patch) {
     const data = mustDb(workspaceId);
+    const previousTier = data.subscription.tier;
     if (patch.status !== undefined) data.subscription.status = patch.status;
     if (patch.tier !== undefined) data.subscription.tier = patch.tier;
     if (patch.interval !== undefined) data.subscription.interval = patch.interval;
@@ -1026,6 +1134,15 @@ export const memoryProvider: DataProvider = {
     if (patch.stripePriceId !== undefined) data.subscription.stripePriceId = patch.stripePriceId;
     if (patch.currentPeriodEnd !== undefined) data.subscription.currentPeriodEnd = patch.currentPeriodEnd;
     if (patch.cancelAtPeriodEnd !== undefined) data.subscription.cancelAtPeriodEnd = patch.cancelAtPeriodEnd;
+    // A tier change must remap entitlement caps to the new plan (mirrors the
+    // creation-time seeding above). Without this a downgrade — including
+    // cancel → free — keeps paid AI/SMS allotments, and an upgrade stays capped
+    // at the old plan. Used counters are deliberately left untouched.
+    if (patch.tier !== undefined && patch.tier !== previousTier) {
+      const limits = PLANS[patch.tier].limits;
+      data.subscription.usage.aiDraftsLimit = limits.aiDraftsPerMonth;
+      data.subscription.usage.smsCreditsTotal = limits.smsCredits;
+    }
   },
 
   async setIntegrationStatus(workspaceId, provider, status, detail) {
@@ -1066,11 +1183,24 @@ export const memoryProvider: DataProvider = {
     const update = buildGooglePublicUpdate(res.details, data.location, nowIso());
     data.location.rating = update.rating;
     data.location.reviewCount = update.reviewCount;
-    // Replace the prior public sample; keep GBP-imported + owner reviews.
+    // Refresh the public sample; keep GBP-imported + owner reviews.
+    //
+    // Sample mode: Google returns at most 5 public reviews and rotates which
+    // ones, so a review dropping out is NOT evidence it was filtered. Rows that
+    // rotate out are dropped, never marked vanished — only the full Business
+    // Profile import is authoritative enough for that.
+    const samplePlan = reconcileReviewImport({
+      existing: data.reviews.filter((r) => isPublicSampleReview(r.id)),
+      imported: update.reviews,
+      nowIso: update.syncedAt,
+      importOk: true,
+      mode: "sample",
+    });
     data.reviews = [
-      ...update.reviews,
+      ...samplePlan.merged,
       ...data.reviews.filter((r) => !isPublicSampleReview(r.id)),
     ];
+    reconcileReviewAttribution(data);
     data.metrics = upsertSnapshot(data.metrics, update.snapshot);
     // The public audit is the fallback, never an overwrite: a Business Profile
     // snapshot sees posts, Q&A, replies and services that Places cannot, so its
@@ -1141,11 +1271,26 @@ export const memoryProvider: DataProvider = {
     if (typeof outcome.rating === "number") data.location.rating = outcome.rating;
     if (typeof outcome.reviewCount === "number") data.location.reviewCount = outcome.reviewCount;
     const imported = outcome.reviews ?? [];
-    // Full history supersedes both the public sample and any prior GBP import.
-    data.reviews = [
-      ...imported,
-      ...data.reviews.filter((r) => !isImportedGoogleReview(r.id)),
-    ];
+    // UPSERT-WITH-DIFF, never replace. The difference between this import and
+    // the last one is the ONLY evidence that Google filtered a review, so prior
+    // rows have to survive the sync for the watchdog to have anything to compare
+    // against. `reviewsImportOk` is false whenever the payload was truncated or
+    // inconsistent with Google's own total, which disables vanish-marking for
+    // this run (see lib/reviews/durability.ts).
+    const plan = reconcileReviewImport({
+      existing: data.reviews.filter((r) => isGbpReview(r.id)),
+      imported,
+      nowIso: nowIso(),
+      importOk: outcome.reviewsImportOk ?? false,
+      mode: "authoritative",
+    });
+    // The full history supersedes the public sample — but only once it has
+    // actually returned reviews, so a blocked or empty read never wipes it.
+    const keep = imported.length
+      ? data.reviews.filter((r) => !isImportedGoogleReview(r.id))
+      : data.reviews.filter((r) => !isGbpReview(r.id));
+    data.reviews = [...plan.merged, ...keep];
+    reconcileReviewAttribution(data);
     for (const snapshot of outcome.performanceSnapshots ?? []) {
       data.metrics = upsertSnapshot(data.metrics, snapshot);
     }
@@ -1445,4 +1590,48 @@ function updateMemoryIntegration(
     detail,
     ...(status === "connected" ? { lastSyncAt: nowIso() } : {}),
   });
+}
+
+// ── QR public side door (no session) ────────────────────────
+// Narrow QR-table reads/writes for the public /q/{slug} endpoint. They live
+// outside the DataProvider object because they serve the unauthenticated scan
+// path only — see lib/qr/store.ts for how they are resolved.
+
+/**
+ * Degrade context for a public slug: the asset's own flag, the location's
+ * public Google review URL, and the billing dates the grace window is measured
+ * from. Never loads a whole workspace.
+ */
+export async function readQrScanContext(slug: string): Promise<QrScanContext | null> {
+  for (const data of allWorkspaces()) {
+    const asset = data.qrAssets.find((q) => q.slug === slug);
+    if (!asset) continue;
+    return {
+      slug: asset.slug,
+      assetId: asset.id,
+      locationId: asset.locationId,
+      degraded: asset.degraded,
+      reviewUrl: data.location.reviewUrl || asset.targetUrl,
+      subscription: {
+        status: data.subscription.status,
+        currentPeriodEnd: data.subscription.currentPeriodEnd ?? null,
+        trialEndsAt: data.subscription.trialEndsAt ?? null,
+      },
+    };
+  }
+  return null;
+}
+
+/**
+ * Count a review page actually reached by a real browser. Strictly a subset of
+ * `scans`, so the Studio's open rate is a real ratio rather than a tautology.
+ */
+export async function recordQrPageOpen(slug: string): Promise<boolean> {
+  for (const data of allWorkspaces()) {
+    const asset = data.qrAssets.find((q) => q.slug === slug);
+    if (!asset) continue;
+    asset.pageOpens += 1;
+    return true;
+  }
+  return false;
 }

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getData } from "@/lib/data";
 import { Card } from "@/components/ds/Card";
 import { LinkButton } from "@/components/ds/Button";
@@ -5,13 +6,33 @@ import { Badge, EmptyState } from "@/components/ds/misc";
 import { PageHeader } from "@/components/app/PageHeader";
 import { Icon, type IconName } from "@/components/icons";
 import { Funnel } from "@/components/charts";
-import { formatNumber } from "@/lib/utils/format";
-import type { Campaign, Channel } from "@/lib/data/types";
+import { formatNumber, formatDate } from "@/lib/utils/format";
+import { emailEnabled } from "@/lib/email";
+import { smsEnabled } from "@/lib/sms/twilio";
+import type { Campaign, CampaignDeliveryState, Channel } from "@/lib/data/types";
 
 const CHANNEL_ICON: Record<Channel, IconName> = {
   email: "mail",
   sms: "message",
   whatsapp: "message",
+};
+
+const STATE_LABEL: Record<CampaignDeliveryState, string> = {
+  not_configured: "Not sent — delivery offline",
+  blocked: "Not sent — blocked",
+  held: "Held for quiet hours",
+  scheduled: "Scheduled",
+  delivered: "Delivered",
+  partial: "Partly delivered",
+};
+
+const STATE_TONE: Record<CampaignDeliveryState, "primary" | "danger" | "gold" | "neutral"> = {
+  not_configured: "gold",
+  blocked: "danger",
+  held: "gold",
+  scheduled: "neutral",
+  delivered: "primary",
+  partial: "gold",
 };
 
 export default async function CampaignsPage() {
@@ -20,13 +41,40 @@ export default async function CampaignsPage() {
   const oneOff = data.campaigns.filter((c) => !c.isAutomation);
   const hasCampaigns = data.campaigns.length > 0;
 
+  // Read from the real env, so the page never claims a capability the deploy
+  // does not have — and never withholds one it does.
+  const emailReady = emailEnabled();
+  const smsReady = smsEnabled();
+  const anyReady = emailReady || smsReady;
+
   return (
     <div className="space-y-5">
       <PageHeader
         title="Campaigns"
-        sub="Prepare consent-safe campaign drafts. Delivery is not connected yet."
+        sub={
+          anyReady
+            ? "Consent-safe sends over your connected providers."
+            : "Prepare consent-safe drafts. Connect a provider to send."
+        }
         actions={<LinkButton href="/app/campaigns/new" icon="plus">New campaign</LinkButton>}
       />
+
+      {/* Provider readiness — stated once, plainly, at the top. */}
+      <div className="flex flex-col gap-2 rounded-card border border-hairline bg-card p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone={emailReady ? "primary" : "gold"} icon="mail">
+            Email {emailReady ? "connected" : "not connected"}
+          </Badge>
+          <Badge tone={smsReady ? "primary" : "gold"} icon="message">
+            SMS {smsReady ? "connected" : "not connected"}
+          </Badge>
+        </div>
+        <p className="text-[13px] text-sub">
+          {anyReady
+            ? "Sends go out over the connected channels. Scheduled campaigns drain once a day."
+            : "Drafts save and schedules hold, but nothing leaves until a provider key is set."}
+        </p>
+      </div>
 
       {/* Always-on automation rules */}
       {automations.length ? (
@@ -34,7 +82,7 @@ export default async function CampaignsPage() {
           <SectionHeader
             icon="refresh"
             title="Automations"
-            sub="Saved automation concepts. They do not send until delivery is connected."
+            sub="Recurring sends against a consent-filtered audience."
           />
           <div className="space-y-4">
             {automations.map((c) => (
@@ -50,7 +98,7 @@ export default async function CampaignsPage() {
           <SectionHeader
             icon="send"
             title="One-off campaigns"
-            sub="Drafts for a consented audience."
+            sub="Drafts, schedules and completed sends."
           />
           <div className="space-y-4">
             {oneOff.map((c) => (
@@ -65,7 +113,7 @@ export default async function CampaignsPage() {
           <EmptyState
             icon="megaphone"
             title="No campaigns yet"
-            description="Create a consent-safe automation to keep customers coming back."
+            description="Create a consent-safe campaign to keep customers coming back."
           />
         </Card>
       ) : null}
@@ -109,6 +157,8 @@ function CampaignCard({ c }: { c: Campaign }) {
   const isMarketing = c.consentBasis === "marketing";
   const basisLabel = isMarketing ? "marketing" : "service messages";
   const rate = c.stats.sent > 0 ? Math.round((c.stats.opened / c.stats.sent) * 100) : 0;
+  const failed = c.stats.failed ?? 0;
+  const skipped = c.stats.skipped ?? 0;
 
   // Real performance funnel — only the stages we have honest counts for.
   const funnelStages = [
@@ -129,15 +179,25 @@ function CampaignCard({ c }: { c: Campaign }) {
               {isMarketing ? "Marketing consent" : "Service consent"}
             </Badge>
             {c.isAutomation ? <Badge tone="neutral" icon="refresh">Automation</Badge> : null}
-            <Badge tone={c.status === "active" ? "primary" : "sub"}>
+            <Badge tone={c.status === "active" || c.status === "sent" ? "primary" : "sub"}>
               {c.status === "active" ? "Active" : c.status.charAt(0).toUpperCase() + c.status.slice(1)}
             </Badge>
           </div>
-          <h3 className="text-[17px] font-bold text-ink">{c.name}</h3>
+          <h3 className="text-[17px] font-bold text-ink">
+            <Link href={`/app/campaigns/${c.id}`} className="hover:text-primary">
+              {c.name}
+            </Link>
+          </h3>
           <p className="mt-1 text-[14px] text-sub">{c.body}</p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
-          <Badge tone="neutral" icon="clock">Delivery offline</Badge>
+          {c.delivery ? (
+            <Badge tone={STATE_TONE[c.delivery.state]} icon="send">
+              {STATE_LABEL[c.delivery.state]}
+            </Badge>
+          ) : (
+            <Badge tone="neutral" icon="file">Draft</Badge>
+          )}
           <div className="flex items-center gap-1 text-[12px] text-faint">
             <Icon name={CHANNEL_ICON[c.channel]} size={14} />
             <span className="capitalize">{c.channel}</span>
@@ -145,9 +205,24 @@ function CampaignCard({ c }: { c: Campaign }) {
         </div>
       </div>
 
+      {/* What actually happened on the last attempt. */}
+      {c.delivery ? (
+        <div className="mt-3 flex items-start gap-2 rounded-btn border border-hairline bg-paper px-3 py-2">
+          <Icon name="send" size={14} className="mt-0.5 shrink-0 text-sub" />
+          <p className="text-[13px] text-sub">{c.delivery.note}</p>
+        </div>
+      ) : null}
+
+      {c.scheduledAt && c.status === "scheduled" ? (
+        <div className="mt-2 flex items-center gap-2 rounded-btn border border-hairline bg-paper px-3 py-2 text-[13px] text-sub">
+          <Icon name="clock" size={14} className="shrink-0 text-primary" />
+          Goes out on the first daily send run after {formatDate(c.scheduledAt)}
+        </div>
+      ) : null}
+
       {/* Live consent-basis eligibility line — only when audience data exists */}
       {c.audienceTotal > 0 ? (
-        <div className="mt-3 flex items-start gap-2 rounded-btn border border-hairline bg-paper px-3 py-2">
+        <div className="mt-2 flex items-start gap-2 rounded-btn border border-hairline bg-paper px-3 py-2">
           <Icon name="shield" size={14} className="mt-0.5 shrink-0 text-primary" />
           <p className="text-[13px] text-sub">
             Audience includes <span className="font-semibold tabular-nums text-ink">{formatNumber(c.audienceConsented)}</span> of{" "}
@@ -162,15 +237,27 @@ function CampaignCard({ c }: { c: Campaign }) {
         <div className="mt-4 border-t border-hairline pt-4">
           <div className="mb-3 flex items-center justify-between gap-2">
             <span className="kicker">Performance to date</span>
-            <span className="data-chip text-sub">{rate}% open rate</span>
+            <span className="data-chip tabular-nums text-sub">{rate}% open rate</span>
           </div>
           <Funnel stages={funnelStages} orientation="horizontal" title={`${c.name} performance`} />
+          {failed > 0 || skipped > 0 ? (
+            <p className="mt-3 text-[13px] text-sub">
+              <span className="tabular-nums font-semibold text-ink">{formatNumber(failed)}</span> failed ·{" "}
+              <span className="tabular-nums font-semibold text-ink">{formatNumber(skipped)}</span> skipped
+            </p>
+          ) : null}
         </div>
       ) : (
         <div className="mt-3 rounded-btn border border-hairline bg-paper px-3 py-2.5 text-[13px] text-faint">
           No sends yet — performance appears here after the first message goes out.
         </div>
       )}
+
+      <div className="mt-4 flex justify-end">
+        <LinkButton href={`/app/campaigns/${c.id}`} variant="ghost" size="sm" iconRight="chevron-right">
+          Delivery detail
+        </LinkButton>
+      </div>
     </Card>
   );
 }
