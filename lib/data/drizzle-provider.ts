@@ -1,7 +1,13 @@
 import { and, eq, gt, inArray, isNotNull, isNull, like, lte, or, sql } from "drizzle-orm";
+import {
+  aggregatePlatform,
+  type DeliveryFailureRow,
+  type DurabilityRow,
+  type PlatformWorkspaceRow,
+} from "@/lib/platform/aggregate";
 import type { BatchItem } from "drizzle-orm/batch";
 import { nanoid } from "nanoid";
-import { getDb, type FoundlyDb } from "../db/client";
+import { getDb, getSql, type FoundlyDb } from "../db/client";
 import { ensureSchema } from "../db/ensure";
 import * as t from "../db/schema";
 import { emptyFoundlyData, makeSlug } from "./empty";
@@ -1684,6 +1690,51 @@ export const drizzleProvider: DataProvider = {
         reviewCount: row.reviewCount,
         growthScore: trustedScore ? latest?.growthScore ?? null : null,
       };
+    });
+  },
+
+  async getPlatformSnapshot() {
+    // Every real tenant: demo workspaces and the ops team's own workspace
+    // (any workspace holding a platform_admin user) are not customers.
+    const pg = getSql();
+    const now = new Date();
+    const iso = (daysAgo: number) => new Date(now.getTime() - daysAgo * 86_400_000).toISOString();
+    const workspaces = await pg<PlatformWorkspaceRow[]>`
+      select w.id as "workspaceId", w.organization_id as "organizationId",
+             coalesce(o.name, '') as "organizationName", l.name as "locationName",
+             w.vertical, w.region, s.tier, s.interval, s.status, w.created_at as "createdAt",
+             (select u.email from app_user u where u.workspace_id = w.id
+                and u.role in ('owner','agency_admin') order by u.created_at nulls last limit 1) as "ownerEmail"
+      from workspace w
+      join location l on l.workspace_id = w.id
+      join subscription s on s.workspace_id = w.id
+      left join organization o on o.workspace_id = w.id
+      where w.is_demo = false
+        and not exists (select 1 from app_user pa where pa.workspace_id = w.id and pa.role = 'platform_admin')
+      order by w.created_at`;
+    const deliveryFailures = await pg<DeliveryFailureRow[]>`
+      select workspace_id as "workspaceId", channel, status, count(*)::int as count, max(created_at) as "latestAt"
+      from review_request
+      where status in ('failed','suppressed') and is_test = false and created_at >= ${iso(30)}
+      group by 1, 2, 3`;
+    const durability = await pg<DurabilityRow[]>`
+      select workspace_id as "workspaceId",
+             count(*)::int as posted,
+             count(*) filter (where durability <> 'vanished' and published_at <= ${iso(30)})::int as "survived30d",
+             count(*) filter (where durability <> 'vanished' and published_at <= ${iso(60)})::int as "survived60d",
+             count(*) filter (where durability = 'vanished')::int as vanished
+      from review
+      group by 1`;
+    const weekly = await pg<{ count: number }[]>`
+      select count(*)::int as count from review r
+      join workspace w on w.id = r.workspace_id
+      where w.is_demo = false and r.published_at >= ${iso(7)}`;
+    return aggregatePlatform({
+      workspaces,
+      deliveryFailures,
+      durability,
+      reviewsLast7d: weekly[0]?.count ?? 0,
+      now,
     });
   },
 

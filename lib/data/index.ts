@@ -102,7 +102,7 @@ export async function getSessionAndData(): Promise<{ session: Session; data: Fou
 /**
  * The agency's OWN workspace for this session.
  *
- * While an agency admin is working inside a client (`agencyWorkspaceId` set —
+ * While an agency admin is working inside a client (`homeWorkspaceId` set —
  * see lib/auth/jwt.ts) the session's `workspaceId` is the client's. The agency
  * console must still describe the agency, so everything under /agency resolves
  * its workspace through here rather than from `session.workspaceId`. This is
@@ -110,10 +110,22 @@ export async function getSessionAndData(): Promise<{ session: Session; data: Fou
  * actions, never a side effect of rendering a page (a prefetched GET that
  * rewrote the session cookie once silently kicked admins out of the client).
  */
-export function agencyHomeWorkspaceId(session: Session): string {
-  return session.role === "agency_admin" && session.agencyWorkspaceId
-    ? session.agencyWorkspaceId
+export function homeWorkspaceIdFor(session: Session): string {
+  return (session.role === "agency_admin" || session.role === "platform_admin") && session.homeWorkspaceId
+    ? session.homeWorkspaceId
     : session.workspaceId;
+}
+
+/**
+ * Platform-wide numbers for the ops console, computed from the database now.
+ * Independent of which workspace the session points at, so it keeps working
+ * while a platform admin is inside a tenant.
+ */
+export async function getPlatformSnapshot(): Promise<FoundlyData["platform"]> {
+  const session = await getSession();
+  if (!session) redirect("/sign-in");
+  const provider = await getProviderFor(session);
+  return provider.getPlatformSnapshot(homeWorkspaceIdFor(session));
 }
 
 /** Session + the AGENCY's data, for every /agency surface. */
@@ -121,7 +133,7 @@ export async function getAgencySessionAndData(): Promise<{ session: Session; dat
   const session = await getSession();
   if (!session) redirect("/sign-in");
   const provider = await getProviderFor(session);
-  const data = await loadWorkspaceData(provider, agencyHomeWorkspaceId(session));
+  const data = await loadWorkspaceData(provider, homeWorkspaceIdFor(session));
   if (!data) redirect("/sign-in?expired=1");
   return { session, data };
 }
@@ -136,7 +148,7 @@ export async function getAgencyClients(): Promise<FoundlyData["agency"]["clients
   const session = await getSession();
   if (!session) redirect("/sign-in");
   const provider = await getProviderFor(session);
-  return provider.listAgencyClients(agencyHomeWorkspaceId(session));
+  return provider.listAgencyClients(homeWorkspaceIdFor(session));
 }
 
 /** Public token lookup across stores (customer review flow — no session). */

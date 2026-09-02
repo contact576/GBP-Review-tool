@@ -193,21 +193,7 @@ export function emptyFoundlyData(input: NewWorkspaceInput): FoundlyData {
     // Nothing in this deployment aggregates platform-wide numbers: this blob is
     // written once, at workspace creation, and never recomputed. The zeros are
     // "we have not measured", not "we measured and it is zero".
-    platform: {
-      tenants: [],
-      deliveryIncidents: [],
-      fraudFlags: [],
-      durability: [],
-      kpis: {
-        totalTenants: 0,
-        activeLocations: 0,
-        mrr: 0,
-        trialConversion: 0,
-        logoChurn: 0,
-        nrr: 0,
-        weeklyDetectedReviews: 0,
-      },
-    },
+    platform: emptyPlatform(),
   };
 }
 
@@ -227,7 +213,28 @@ export function emptyFoundlyData(input: NewWorkspaceInput): FoundlyData {
  * measured values, including honest zeros for the sub-signals that are
  * genuinely clear.
  */
+/** The never-measured platform blob: zeros that mean "not measured", not "zero". */
+export function emptyPlatform(): FoundlyData["platform"] {
+  return {
+    tenants: [],
+    deliveryIncidents: [],
+    fraudFlags: [],
+    durability: [],
+    kpis: {
+      totalTenants: 0,
+      activeLocations: 0,
+      mrr: 0,
+      trialConversion: 0,
+      logoChurn: 0,
+      nrr: 0,
+      weeklyDetectedReviews: 0,
+    },
+  };
+}
+
 export function hasNoPlatformTelemetry(platform: FoundlyData["platform"]): boolean {
+  // A snapshot computed live is measured even when every count is zero.
+  if (platform.measuredAt) return false;
   const rosterEmpty =
     platform.tenants.length === 0 &&
     platform.deliveryIncidents.length === 0 &&

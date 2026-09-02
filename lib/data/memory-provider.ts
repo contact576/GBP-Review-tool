@@ -1,6 +1,6 @@
 import { buildSeed } from "./seed";
 import { nanoid } from "nanoid";
-import { emptyFoundlyData, makeSlug } from "./empty";
+import { emptyFoundlyData, emptyPlatform, makeSlug } from "./empty";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { canonicalPhone } from "@/lib/sms/phone";
 import { PLANS } from "@/lib/billing/plans";
@@ -249,6 +249,11 @@ export const memoryProvider: DataProvider = {
           growthScore: trustedScore ? latest?.growthScore ?? null : null,
         };
       });
+  },
+
+  async getPlatformSnapshot(workspaceId) {
+    // The demo fixture, exactly as seeded — labelled as such by the console.
+    return db(workspaceId)?.platform ?? emptyPlatform();
   },
 
   async listAgencyClients(workspaceId) {

@@ -1,4 +1,4 @@
-import { getSessionAndData } from "@/lib/data";
+import { getPlatformSnapshot, getSessionAndData } from "@/lib/data";
 import { PageHeader } from "@/components/app/PageHeader";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge } from "@/components/ds/misc";
@@ -18,9 +18,9 @@ import { SubscriptionsTable } from "./SubscriptionsTable";
 const KPI_LABELS = ["Total MRR", "ARPA", "Trial conversion", "Active accounts"] as const;
 
 export default async function AdminBillingPage() {
-  const { session, data } = await getSessionAndData();
-  const telemetry = readPlatformTelemetry(data.platform, session.isDemo);
-  const { tenants, kpis } = data.platform;
+  const [{ session }, platform] = await Promise.all([getSessionAndData(), getPlatformSnapshot()]);
+  const telemetry = readPlatformTelemetry(platform, session.isDemo);
+  const { tenants, kpis } = platform;
 
   const totalMrr = tenants.reduce((a, t) => a + t.mrr, 0);
   const active = tenants.filter((t) => t.status === "active");

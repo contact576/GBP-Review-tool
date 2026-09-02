@@ -54,10 +54,11 @@ export async function middleware(req: NextRequest) {
     // instead. No loop is possible: /agency admits agency_admin and /admin
     // admits platform_admin, so each redirect terminates on the next hop.
     if (pathname.startsWith("/app")) {
-      // The one legitimate way an agency admin reaches /app: they opened a
-      // client workspace from the agency console, and the session says so.
-      const actingInClient = role === "agency_admin" && Boolean(claims.agencyWorkspaceId);
-      if ((role === "agency_admin" && !actingInClient) || role === "platform_admin") {
+      // The one legitimate way an agency or platform admin reaches /app: they
+      // opened a client (or tenant) workspace from their own console, and the
+      // session says so (`homeWorkspaceId`).
+      const acting = Boolean(claims.homeWorkspaceId);
+      if ((role === "agency_admin" || role === "platform_admin") && !acting) {
         const url = req.nextUrl.clone();
         url.pathname = role === "agency_admin" ? "/agency" : "/admin";
         return applySecurityHeaders(NextResponse.redirect(url), pathname);

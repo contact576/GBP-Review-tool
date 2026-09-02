@@ -11,12 +11,12 @@ const base = {
   sessionVersion: 0,
 };
 
-describe("agencyWorkspaceId session claim", () => {
+describe("homeWorkspaceId session claim", () => {
   it("round-trips through sign and verify while acting inside a client", async () => {
-    const token = await signSession({ ...base, agencyWorkspaceId: "ws_agency" });
+    const token = await signSession({ ...base, homeWorkspaceId: "ws_agency" });
     const claims = await verifySession(token);
     expect(claims?.workspaceId).toBe("ws_client");
-    expect(claims?.agencyWorkspaceId).toBe("ws_agency");
+    expect(claims?.homeWorkspaceId).toBe("ws_agency");
     expect(claims?.role).toBe("agency_admin");
   });
 
@@ -24,6 +24,6 @@ describe("agencyWorkspaceId session claim", () => {
     const token = await signSession(base);
     const claims = await verifySession(token);
     expect(claims).not.toBeNull();
-    expect("agencyWorkspaceId" in (claims ?? {})).toBe(false);
+    expect("homeWorkspaceId" in (claims ?? {})).toBe(false);
   });
 });

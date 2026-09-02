@@ -12,7 +12,7 @@ import {
   type SessionRole,
   type Session,
 } from "@/lib/auth/session";
-import { agencyHomeWorkspaceId, getProviderFor, getPublicProviders, getRealProvider, type DataProvider } from "@/lib/data";
+import { homeWorkspaceIdFor, getProviderFor, getPublicProviders, getRealProvider, type DataProvider } from "@/lib/data";
 import { hashPassword, validatePasswordStrength } from "@/lib/auth/password";
 import { isPlausibleNameMatch, searchBusinesses } from "@/lib/google/places";
 import { createEmailVerificationToken } from "@/lib/auth/email-verification";
@@ -122,10 +122,13 @@ async function requireSession(): Promise<Session> {
 async function requireRole(...allowed: SessionRole[]): Promise<Session> {
   const session = await requireSession();
   if (allowed.includes(session.role)) return session;
-  // An agency admin working inside a client workspace acts as that client's
-  // owner: every owner action is theirs to take, on the client's data only.
-  // The session still says agency_admin, so nothing here changes who they are.
-  if (session.role === "agency_admin" && session.agencyWorkspaceId && allowed.includes("owner")) {
+  // An agency admin inside a client workspace, or a platform admin inside a
+  // tenant they opened from the ops console, acts as that workspace's owner:
+  // every owner action is theirs to take, on that workspace's data only. The
+  // session keeps its real role, so nothing here changes who they are.
+  const acting =
+    (session.role === "agency_admin" || session.role === "platform_admin") && Boolean(session.homeWorkspaceId);
+  if (acting && allowed.includes("owner")) {
     return session;
   }
   throw new Error("Forbidden");
@@ -139,14 +142,14 @@ async function scoped(...allowed: SessionRole[]) {
 
 /**
  * Like `scoped`, but `ws` is the AGENCY's own workspace even while the admin is
- * working inside a client (see `agencyHomeWorkspaceId`). Every action that
+ * working inside a client (see `homeWorkspaceIdFor`). Every action that
  * edits the agency itself — its clients, white-label, reports — goes through
  * here so it can never land on whichever client happens to be open.
  */
 async function agencyScoped(...allowed: SessionRole[]) {
   const session = await requireRole(...allowed);
   const provider = await getProviderFor(session);
-  return { session, provider, ws: agencyHomeWorkspaceId(session) };
+  return { session, provider, ws: homeWorkspaceIdFor(session) };
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -2640,7 +2643,7 @@ export async function createOrganizationWorkspaceAction(
  * The target must be a sibling workspace in the agency's organization — the
  * same proof `switchWorkspaceAction` demands — and is looked up by location id
  * because that is what the client book carries. The session keeps the
- * agency_admin role and records where to return (`agencyWorkspaceId`), which
+ * agency_admin role and records where to return (`homeWorkspaceId`), which
  * is what lets the middleware admit this session to /app at all.
  */
 export async function enterClientWorkspaceAction(
@@ -2657,18 +2660,54 @@ export async function enterClientWorkspaceAction(
   if (!target || target.workspaceId === home) {
     return { ok: false, error: "That client is not part of this agency." };
   }
-  await createSession({ ...session, workspaceId: target.workspaceId, agencyWorkspaceId: home });
+  await createSession({ ...session, workspaceId: target.workspaceId, homeWorkspaceId: home });
   redirect("/app");
 }
 
-/** Leave the client workspace and go back to the agency console. */
-export async function returnToAgencyAction(): Promise<void> {
+/**
+ * Open a tenant's workspace from the ops console, as Foundly support.
+ *
+ * Full owner access, not read-only — support needs to press the same buttons
+ * the owner would. Every session is written to the TENANT's audit log before
+ * it starts (operator, workspace, time), so the owner can see it happened.
+ */
+export async function openTenantWorkspaceAction(
+  workspaceId: string,
+): Promise<{ ok: false; error: string }> {
+  const { provider, session, ws: home } = await agencyScoped("platform_admin");
+  const target = String(workspaceId ?? "").trim();
+  if (!target || target === home) return { ok: false, error: "Pick a tenant workspace to open." };
+  const data = await provider.getData(target);
+  if (!data) return { ok: false, error: "That workspace no longer exists." };
+  if (data.workspace.isDemo) return { ok: false, error: "The demo workspace is not a tenant." };
+  await provider.appendAuditLog(target, {
+    id: `aud_${randomBytes(8).toString("hex")}`,
+    workspaceId: target,
+    actor: session.email || "Foundly support",
+    action: "support.session_opened",
+    targetType: "workspace",
+    targetId: target,
+    at: new Date().toISOString(),
+    meta: { operator: session.email, role: "platform_admin", access: "full" },
+  });
+  await createSession({ ...session, workspaceId: target, homeWorkspaceId: home });
+  redirect("/app");
+}
+
+/** Leave the client (or tenant) workspace and go back to your own console. */
+export async function returnHomeAction(): Promise<void> {
   const session = await requireSession();
-  if (session.role === "agency_admin" && session.agencyWorkspaceId) {
-    const { agencyWorkspaceId, ...rest } = session;
-    await createSession({ ...rest, workspaceId: agencyWorkspaceId });
+  const console = session.role === "platform_admin" ? "/admin" : "/agency";
+  if ((session.role === "agency_admin" || session.role === "platform_admin") && session.homeWorkspaceId) {
+    const { homeWorkspaceId, ...rest } = session;
+    await createSession({ ...rest, workspaceId: homeWorkspaceId });
   }
-  redirect("/agency");
+  redirect(console);
+}
+
+/** @deprecated name kept for the agency banner; same as `returnHomeAction`. */
+export async function returnToAgencyAction(): Promise<void> {
+  return returnHomeAction();
 }
 
 export interface CreateAgencyClientResult {

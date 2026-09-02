@@ -340,6 +340,12 @@ export interface DataProvider {
   getData(workspaceId: string): Promise<FoundlyData | null>;
   listOrganizationWorkspaces(workspaceId: string): Promise<OrganizationWorkspaceSummary[]>;
   listAgencyClients(workspaceId: string): Promise<AgencyClient[]>;
+  /**
+   * Platform-wide roster and KPIs for the ops console. The DB provider
+   * computes it across every real tenant; the memory provider returns the
+   * demo fixture stored on the caller's workspace.
+   */
+  getPlatformSnapshot(workspaceId: string): Promise<FoundlyData["platform"]>;
   createOrganizationWorkspace(
     workspaceId: string,
     input: CreateOrganizationWorkspaceInput,

@@ -1,4 +1,4 @@
-import { getSessionAndData } from "@/lib/data";
+import { getPlatformSnapshot, getSessionAndData } from "@/lib/data";
 import { PageHeader } from "@/components/app/PageHeader";
 import { Icon } from "@/components/icons";
 import { sevRank } from "../../_components/Severity";
@@ -7,13 +7,19 @@ import {
   NotMeasuredPanel,
   TelemetrySourceBadge,
   readPlatformTelemetry,
+  sectionMeasured,
 } from "../../_components/telemetry";
 import { FraudQueue } from "./FraudQueue";
 
 export default async function AdminFraudPage() {
-  const { session, data } = await getSessionAndData();
-  const telemetry = readPlatformTelemetry(data.platform, session.isDemo);
-  const flags = [...data.platform.fraudFlags].sort((a, b) => sevRank[a.severity] - sevRank[b.severity]);
+  const [{ session }, platform] = await Promise.all([getSessionAndData(), getPlatformSnapshot()]);
+  const baseTelemetry = readPlatformTelemetry(platform, session.isDemo);
+  // No detector runs in this deployment: the live snapshot says so per section,
+  // and this page must report "not measured", never an empty (clean) queue.
+  const telemetry = sectionMeasured(platform, baseTelemetry, "fraud")
+    ? baseTelemetry
+    : { measured: false as const, source: "unavailable" as const };
+  const flags = [...platform.fraudFlags].sort((a, b) => sevRank[a.severity] - sevRank[b.severity]);
   const high = flags.filter((f) => f.severity === "high").length;
 
   return (

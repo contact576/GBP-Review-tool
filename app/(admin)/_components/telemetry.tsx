@@ -21,7 +21,7 @@ import type { FoundlyData } from "@/lib/data/types";
 
 type Platform = FoundlyData["platform"];
 
-export type TelemetrySource = "unavailable" | "demo_fixture" | "stored_snapshot";
+export type TelemetrySource = "unavailable" | "demo_fixture" | "stored_snapshot" | "live_aggregate";
 
 export interface PlatformTelemetry {
   /** False → the console has no platform telemetry and must say so. */
@@ -32,7 +32,19 @@ export interface PlatformTelemetry {
 /** Classify a workspace's platform blob into the three states above. */
 export function readPlatformTelemetry(platform: Platform, isDemo: boolean): PlatformTelemetry {
   if (hasNoPlatformTelemetry(platform)) return { measured: false, source: "unavailable" };
+  if (platform.measuredAt && !isDemo) return { measured: true, source: "live_aggregate" };
   return { measured: true, source: isDemo ? "demo_fixture" : "stored_snapshot" };
+}
+
+/** Per-section coverage. A live snapshot says which sections it computes. */
+export function sectionMeasured(
+  platform: Platform,
+  telemetry: PlatformTelemetry,
+  section: keyof NonNullable<Platform["coverage"]>,
+): boolean {
+  if (!telemetry.measured) return false;
+  if (!platform.coverage) return true; // fixtures and stored blobs cover everything they carry
+  return platform.coverage[section];
 }
 
 // ── Canonical wording (one place, so every panel says the same thing) ──
@@ -58,6 +70,13 @@ export function TelemetrySourceBadge({ telemetry }: { telemetry: PlatformTelemet
     return (
       <Badge tone="gold" icon="eye">
         Demo sample data
+      </Badge>
+    );
+  }
+  if (telemetry.source === "live_aggregate") {
+    return (
+      <Badge tone="primary" icon="refresh">
+        Live · computed from the database now
       </Badge>
     );
   }

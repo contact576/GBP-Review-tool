@@ -14,16 +14,24 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const provider = await getProviderFor(session);
   const locations = await provider.listOrganizationWorkspaces(session.workspaceId);
   // An agency admin inside a client workspace: name the agency they act for.
+  // A platform admin inside a tenant: name the support session honestly.
   const agencyHome =
-    session.role === "agency_admin" && session.agencyWorkspaceId
-      ? await provider.getData(session.agencyWorkspaceId)
+    session.role === "agency_admin" && session.homeWorkspaceId
+      ? await provider.getData(session.homeWorkspaceId)
       : null;
-  const actingFor = agencyHome ? agencyHome.agency.whiteLabel.brandName : null;
+  const actingFor = agencyHome
+    ? agencyHome.agency.whiteLabel.brandName
+    : session.role === "platform_admin" && session.homeWorkspaceId
+      ? "Foundly support"
+      : null;
+  const actingMode = session.role === "platform_admin" ? "support" : "agency";
 
   return (
     <>
       {session.isDemo ? <DemoBanner /> : null}
-      {actingFor ? <AgencyActingBanner client={data.location.name} brandName={actingFor} /> : null}
+      {actingFor ? (
+        <AgencyActingBanner client={data.location.name} brandName={actingFor} mode={actingMode} />
+      ) : null}
       <AppShell
         business={data.location.name}
         ownerName={data.owner.name}

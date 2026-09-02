@@ -19,7 +19,7 @@ function consoleFor(role: SessionRole, pathname: string, actingInClient = false)
   if (pathname.startsWith("/agency") && role !== "agency_admin" && role !== "owner") return "/app";
   if (pathname.startsWith("/app")) {
     if (role === "agency_admin" && !actingInClient) return "/agency";
-    if (role === "platform_admin") return "/admin";
+    if (role === "platform_admin" && !actingInClient) return "/admin";
   }
   return null;
 }
@@ -75,8 +75,9 @@ describe("console role routing", () => {
     expect(consoleFor("agency_admin", "/app", true)).toBeNull();
     expect(consoleFor("agency_admin", "/app/visibility", true)).toBeNull();
     expect(consoleFor("agency_admin", "/app", false)).toBe("/agency");
-    // A platform admin never gets the owner console, acting or not.
-    expect(consoleFor("platform_admin", "/app", true)).toBe("/admin");
+    // A platform admin gets it the same way: only while inside a tenant they opened.
+    expect(consoleFor("platform_admin", "/app", true)).toBeNull();
+    expect(consoleFor("platform_admin", "/app", false)).toBe("/admin");
   });
 
   it("keeps the agency console reachable while acting — it reads the agency's own workspace", () => {

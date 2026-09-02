@@ -1,4 +1,4 @@
-import { getSessionAndData } from "@/lib/data";
+import { getPlatformSnapshot, getSessionAndData } from "@/lib/data";
 import { PageHeader } from "@/components/app/PageHeader";
 import {
   MonitoringCallout,
@@ -9,8 +9,8 @@ import {
 import { ImpersonationNotice, TenantsTable } from "./TenantsTable";
 
 export default async function AdminTenantsPage() {
-  const { session, data } = await getSessionAndData();
-  const telemetry = readPlatformTelemetry(data.platform, session.isDemo);
+  const [{ session }, platform] = await Promise.all([getSessionAndData(), getPlatformSnapshot()]);
+  const telemetry = readPlatformTelemetry(platform, session.isDemo);
 
   return (
     <div className="space-y-5">
@@ -25,11 +25,17 @@ export default async function AdminTenantsPage() {
       />
 
       {telemetry.measured ? null : <MonitoringCallout subject="the tenant roster" />}
+      {platform.testAccountsExcluded ? (
+        <p className="text-[12px] text-faint">
+          {platform.testAccountsExcluded} automated test account{platform.testAccountsExcluded === 1 ? "" : "s"} (reserved
+          test domains) left out of this roster and every figure on the console.
+        </p>
+      ) : null}
 
       <ImpersonationNotice />
 
       {telemetry.measured ? (
-        <TenantsTable tenants={data.platform.tenants} />
+        <TenantsTable tenants={platform.tenants} canOpen={!session.isDemo} />
       ) : (
         <NotMeasuredPanel
           title="Tenant roster not measured"

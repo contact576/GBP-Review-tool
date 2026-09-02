@@ -1243,6 +1243,26 @@ export interface PlatformTenant {
   locations: number;
   status: "trialing" | "active" | "past_due" | "free";
   region: Region;
+  /** The tenant's main workspace — what "Open tenant" enters. Absent on seeded fixtures. */
+  primaryWorkspaceId?: string;
+  /** Account holder, for the ops roster. Absent on seeded fixtures. */
+  ownerEmail?: string;
+  createdAt?: string;
+}
+
+/**
+ * Which parts of the platform snapshot are actually measured. A section that
+ * is not covered renders "Not measured", never a zero — the console must be
+ * able to say "we do not compute this" per section, not just per page.
+ */
+export interface PlatformCoverage {
+  tenants: boolean;
+  billing: boolean;
+  delivery: boolean;
+  durability: boolean;
+  fraud: boolean;
+  /** Logo churn and net revenue retention need month-over-month history. */
+  retention: boolean;
 }
 
 export interface DeliveryIncident {
@@ -1320,5 +1340,12 @@ export interface FoundlyData {
       nrr: number;
       weeklyDetectedReviews: number;
     };
+    /** Set when the snapshot was computed live from the database. */
+    measuredAt?: string;
+    coverage?: PlatformCoverage;
+    /** Workspaces owned by reserved test domains, left out of every figure. */
+    testAccountsExcluded?: number;
   };
 }
+
+export type PlatformSnapshot = FoundlyData["platform"];
