@@ -37,6 +37,7 @@ export default async function AgencyRollupPage() {
       <PageHeader
         title="Clients"
         sub={`Every location ${whiteLabel.brandName} manages, at a glance — attention first, economics on the right.`}
+        actions={<LinkButton href="/agency/clients" icon="plus">Add client</LinkButton>}
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

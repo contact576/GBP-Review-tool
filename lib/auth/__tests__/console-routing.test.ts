@@ -14,11 +14,16 @@ import type { SessionRole } from "@/lib/auth/session";
  * Kept as a table so the intended destination is stated once and the no-loop
  * property below is checkable rather than argued.
  */
-function consoleFor(role: SessionRole, pathname: string): string | null {
+function consoleFor(role: SessionRole, pathname: string, actingInClient = false): string | null {
   if (pathname.startsWith("/admin") && role !== "platform_admin") return "/app";
   if (pathname.startsWith("/agency") && role !== "agency_admin" && role !== "owner") return "/app";
+  // An agency admin whose session is pointed at a client workspace is bounced
+  // through /agency/return, which restores their own workspace first.
+  if (pathname.startsWith("/agency") && pathname !== "/agency/return" && role === "agency_admin" && actingInClient) {
+    return "/agency/return";
+  }
   if (pathname.startsWith("/app")) {
-    if (role === "agency_admin") return "/agency";
+    if (role === "agency_admin" && !actingInClient) return "/agency";
     if (role === "platform_admin") return "/admin";
   }
   return null;
@@ -69,5 +74,20 @@ describe("console role routing", () => {
         expect(consoleFor(role, at)).toBeNull();
       }
     }
+  });
+
+  it("admits an agency admin to the owner console only while acting inside a client", () => {
+    expect(consoleFor("agency_admin", "/app", true)).toBeNull();
+    expect(consoleFor("agency_admin", "/app/visibility", true)).toBeNull();
+    expect(consoleFor("agency_admin", "/app", false)).toBe("/agency");
+    // A platform admin never gets the owner console, acting or not.
+    expect(consoleFor("platform_admin", "/app", true)).toBe("/admin");
+  });
+
+  it("returns an acting agency admin to their own workspace before showing the agency console", () => {
+    expect(consoleFor("agency_admin", "/agency", true)).toBe("/agency/return");
+    expect(consoleFor("agency_admin", "/agency/clients", true)).toBe("/agency/return");
+    expect(consoleFor("agency_admin", "/agency/return", true)).toBeNull();
+    expect(consoleFor("agency_admin", "/agency", false)).toBeNull();
   });
 });

@@ -13,6 +13,7 @@ export function AddAgencyClient({ enabled }: { enabled: boolean }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [businessName, setBusinessName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [industryKey, setIndustryKey] = useState("professional_services");
@@ -35,6 +36,11 @@ export function AddAgencyClient({ enabled }: { enabled: boolean }) {
         setError(result.error);
         return;
       }
+      setNotice(
+        result.google
+          ? `${businessName} added and matched to its Google listing: ${result.google.name}, ${result.google.city} — ${result.google.rating.toFixed(1)}★ from ${result.google.reviewCount} reviews.`
+          : `${businessName} added. No confident Google match was found — open the client workspace and link its listing under Settings → Business.`,
+      );
       setBusinessName("");
       setContactEmail("");
       setCity("");
@@ -45,8 +51,9 @@ export function AddAgencyClient({ enabled }: { enabled: boolean }) {
 
   if (!open) {
     return (
-      <div className="flex justify-end">
-        <Button icon="plus" onClick={() => setOpen(true)} disabled={!enabled}>
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        {notice ? <p role="status" className="text-[13px] font-medium text-sub">{notice}</p> : null}
+        <Button icon="plus" onClick={() => { setNotice(null); setOpen(true); }} disabled={!enabled}>
           Add client
         </Button>
       </div>

@@ -45,6 +45,22 @@ export async function middleware(req: NextRequest) {
       url.pathname = "/app";
       return applySecurityHeaders(NextResponse.redirect(url), pathname);
     }
+    // An agency admin who is inside a client workspace (see `agencyWorkspaceId`
+    // in lib/auth/jwt.ts) has a session pointing at the CLIENT. Rendering the
+    // agency console against that session would show the client's own agency
+    // blob, so bounce through /agency/return, which restores the agency's
+    // workspace and comes back here. /agency/return itself must pass.
+    if (
+      pathname.startsWith("/agency") &&
+      pathname !== "/agency/return" &&
+      role === "agency_admin" &&
+      claims.agencyWorkspaceId
+    ) {
+      const url = req.nextUrl.clone();
+      url.pathname = "/agency/return";
+      url.search = "";
+      return applySecurityHeaders(NextResponse.redirect(url), pathname);
+    }
     // /app is the owner console, and it used to be the one prefix with no role
     // gate — every role could walk in. The pages rendered fine, so it looked
     // harmless, but each one's server actions call requireRole(), which THROWS
@@ -54,7 +70,10 @@ export async function middleware(req: NextRequest) {
     // instead. No loop is possible: /agency admits agency_admin and /admin
     // admits platform_admin, so each redirect terminates on the next hop.
     if (pathname.startsWith("/app")) {
-      if (role === "agency_admin" || role === "platform_admin") {
+      // The one legitimate way an agency admin reaches /app: they opened a
+      // client workspace from the agency console, and the session says so.
+      const actingInClient = role === "agency_admin" && Boolean(claims.agencyWorkspaceId);
+      if ((role === "agency_admin" && !actingInClient) || role === "platform_admin") {
         const url = req.nextUrl.clone();
         url.pathname = role === "agency_admin" ? "/agency" : "/admin";
         return applySecurityHeaders(NextResponse.redirect(url), pathname);

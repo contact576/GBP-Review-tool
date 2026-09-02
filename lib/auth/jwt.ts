@@ -17,6 +17,13 @@ export interface SessionClaims {
   /** Revocation counter (V8). Compared against the user's stored value on real
    * sessions; a mismatch invalidates the token. Absent → treated as 0. */
   sessionVersion?: number;
+  /**
+   * Set while an agency admin is working INSIDE one of their client
+   * workspaces: `workspaceId` is then the client's, and this is the agency's
+   * own workspace to return to. Absent for every other session. The role stays
+   * `agency_admin` so the audit trail and the shell both know who is acting.
+   */
+  agencyWorkspaceId?: string;
 }
 
 const FALLBACK_SECRET = "foundly-dev-secret-set-AUTH_SECRET-in-production";
@@ -68,6 +75,9 @@ export async function verifySession(token: string): Promise<SessionClaims | null
       email: typeof payload.email === "string" ? payload.email : "",
       sessionVersion:
         typeof payload.sessionVersion === "number" ? payload.sessionVersion : 0,
+      ...(typeof payload.agencyWorkspaceId === "string" && payload.agencyWorkspaceId
+        ? { agencyWorkspaceId: payload.agencyWorkspaceId }
+        : {}),
     };
   } catch {
     return null;

@@ -38,6 +38,7 @@ export function AppShell({
   currentWorkspaceId,
   agencyMode,
   isDemo,
+  hasBanner,
 }: {
   children: React.ReactNode;
   business: string;
@@ -49,6 +50,8 @@ export function AppShell({
   currentWorkspaceId: string;
   agencyMode?: boolean;
   isDemo?: boolean;
+  /** A 40px strip (demo, or agency acting-as) sits above the shell. */
+  hasBanner?: boolean;
 }) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
@@ -60,7 +63,7 @@ export function AppShell({
         <aside
           className={cn(
             "on-hero fixed bottom-0 left-0 z-30 hidden w-[248px] flex-col overflow-hidden bg-hero text-white shadow-[10px_0_35px_rgba(6,45,37,.08)] lg:flex",
-            isDemo ? "top-10" : "top-0",
+            hasBanner || isDemo ? "top-10" : "top-0",
           )}
         >
           <div className="flex h-[88px] items-center px-7">

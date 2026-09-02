@@ -19,6 +19,7 @@ import {
   type DataProvider,
 } from "@/lib/data";
 import { hashPassword, validatePasswordStrength } from "@/lib/auth/password";
+import { isPlausibleNameMatch, searchBusinesses } from "@/lib/google/places";
 import { createEmailVerificationToken } from "@/lib/auth/email-verification";
 import {
   stripeEnabled,
@@ -125,10 +126,14 @@ async function requireSession(): Promise<Session> {
 
 async function requireRole(...allowed: SessionRole[]): Promise<Session> {
   const session = await requireSession();
-  if (!allowed.includes(session.role)) {
-    throw new Error("Forbidden");
+  if (allowed.includes(session.role)) return session;
+  // An agency admin working inside a client workspace acts as that client's
+  // owner: every owner action is theirs to take, on the client's data only.
+  // The session still says agency_admin, so nothing here changes who they are.
+  if (session.role === "agency_admin" && session.agencyWorkspaceId && allowed.includes("owner")) {
+    return session;
   }
-  return session;
+  throw new Error("Forbidden");
 }
 
 async function scoped(...allowed: SessionRole[]) {
@@ -2622,6 +2627,50 @@ export async function createOrganizationWorkspaceAction(
   return { ok: true, workspaceId: result.workspace.workspaceId };
 }
 
+/**
+ * Enter one of the agency's client workspaces as its owner.
+ *
+ * The target must be a sibling workspace in the agency's organization — the
+ * same proof `switchWorkspaceAction` demands — and is looked up by location id
+ * because that is what the client book carries. The session keeps the
+ * agency_admin role and records where to return (`agencyWorkspaceId`), which
+ * is what lets the middleware admit this session to /app at all.
+ */
+export async function enterClientWorkspaceAction(
+  locationId: string,
+): Promise<{ ok: false; error: string }> {
+  const { provider, session } = await scoped("agency_admin", "owner");
+  const home = session.agencyWorkspaceId ?? session.workspaceId;
+  const data = await provider.getData(home);
+  if (!data || (session.role !== "agency_admin" && data.subscription.tier !== "agency")) {
+    return { ok: false, error: "Client workspaces require the Agency plan." };
+  }
+  const wanted = String(locationId ?? "").trim();
+  const siblings = await provider.listOrganizationWorkspaces(home);
+  const target = siblings.find((workspace) => workspace.locationId === wanted);
+  if (!target || target.workspaceId === home) {
+    return { ok: false, error: "That client is not part of this agency." };
+  }
+  await createSession({ ...session, workspaceId: target.workspaceId, agencyWorkspaceId: home });
+  redirect("/app");
+}
+
+/** Leave the client workspace and go back to the agency console. */
+export async function returnToAgencyAction(): Promise<void> {
+  const session = await requireSession();
+  if (session.role === "agency_admin" && session.agencyWorkspaceId) {
+    const { agencyWorkspaceId, ...rest } = session;
+    await createSession({ ...rest, workspaceId: agencyWorkspaceId });
+  }
+  redirect("/agency");
+}
+
+export interface CreateAgencyClientResult {
+  ok: true;
+  /** The Google listing the new client was matched to, when one was found. */
+  google: { name: string; city: string; rating: number; reviewCount: number } | null;
+}
+
 export async function createAgencyClientAction(input: {
   businessName: string;
   contactEmail: string;
@@ -2630,7 +2679,7 @@ export async function createAgencyClientAction(input: {
   region: Region;
   city?: string;
   address?: string;
-}): Promise<{ ok: true } | { ok: false; error: string }> {
+}): Promise<CreateAgencyClientResult | { ok: false; error: string }> {
   const { provider, ws, session } = await scoped("owner", "agency_admin");
   const data = await provider.getData(ws);
   if (!data || (session.role !== "agency_admin" && data.subscription.tier !== "agency")) {
@@ -2652,8 +2701,41 @@ export async function createAgencyClientAction(input: {
     address: input.address?.trim().slice(0, 180),
   });
   if (!result.ok) return result;
+
+  // Match the new client to its real Google listing so the book shows its
+  // actual rating and review count from the first render, the way
+  // `db:provision` does for a new tenant. Guarded by the same name check as
+  // /score: Places always returns a confident best effort, and a client called
+  // "Tune Epicenter" once came back as a music class in another country. A
+  // failed or implausible match leaves the client unlinked rather than wrong.
+  let google: CreateAgencyClientResult["google"] = null;
+  if (!session.isDemo) {
+    try {
+      const city = input.city?.trim();
+      const found = await searchBusinesses(city ? `${businessName} ${city}` : businessName, input.region);
+      const place = found.ok
+        ? found.places.find((candidate) => isPlausibleNameMatch(businessName, candidate.name))
+        : undefined;
+      if (place) {
+        const childWs = result.workspace.workspaceId;
+        await provider.updateLocationGoogle(childWs, {
+          placeId: place.placeId,
+          name: place.name,
+          address: place.address,
+          city: place.city,
+          category: place.category,
+          rating: place.rating,
+          reviewCount: place.reviewCount,
+        });
+        await provider.syncGooglePublic(childWs).catch(() => undefined);
+        google = { name: place.name, city: place.city, rating: place.rating, reviewCount: place.reviewCount };
+      }
+    } catch {
+      google = null;
+    }
+  }
   revalidatePath("/agency", "layout");
-  return { ok: true };
+  return { ok: true, google };
 }
 
 export async function changePlanAction(tier: PlanTier) {
