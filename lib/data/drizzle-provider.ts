@@ -1489,10 +1489,22 @@ export const drizzleProvider: DataProvider = {
         .from(t.location)
         .where(eq(t.location.workspaceId, workspaceId))
         .limit(1),
+      // The workspace's principal account. Usually the owner — but an agency
+      // or platform admin's own workspace has no separate owner row: the admin
+      // IS the account holder. Demanding role = "owner" here 500'd every page
+      // for those consoles ("Foundly DB is missing owner", 2026-09-03).
       db
         .select()
         .from(t.appUser)
-        .where(and(eq(t.appUser.workspaceId, workspaceId), eq(t.appUser.role, "owner")))
+        .where(
+          and(
+            eq(t.appUser.workspaceId, workspaceId),
+            inArray(t.appUser.role, ["owner", "agency_admin", "platform_admin"]),
+          ),
+        )
+        .orderBy(
+          sql`case ${t.appUser.role} when 'owner' then 0 when 'agency_admin' then 1 else 2 end`,
+        )
         .limit(1),
       db
         .select()
@@ -2021,9 +2033,15 @@ export const drizzleProvider: DataProvider = {
     const rows = await getDb()
       .select({ emailVerified: t.appUser.emailVerified })
       .from(t.appUser)
-      .where(and(eq(t.appUser.workspaceId, workspaceId), eq(t.appUser.role, "owner")))
+      .where(
+        and(
+          eq(t.appUser.workspaceId, workspaceId),
+          inArray(t.appUser.role, ["owner", "agency_admin", "platform_admin"]),
+        ),
+      )
+      .orderBy(sql`case ${t.appUser.role} when 'owner' then 0 when 'agency_admin' then 1 else 2 end`)
       .limit(1);
-    // Fail open when there is no owner row to check.
+    // Fail open when there is no principal row to check.
     return rows[0] ? rows[0].emailVerified : true;
   },
 
