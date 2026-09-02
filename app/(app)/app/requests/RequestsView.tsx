@@ -15,11 +15,12 @@ import { Icon, type IconName } from "@/components/icons";
 import { Funnel } from "@/components/charts";
 import { funnelCounts } from "@/lib/data/selectors";
 import { canSendService } from "@/lib/compliance/consent";
+import { retryCandidatesByCustomer } from "@/lib/requests/retry";
 import { formatRelative, initials, pluralize } from "@/lib/utils/format";
 import { sendRequestAction } from "@/lib/actions";
 import type { ReviewRequest, RequestStatus, Customer, Channel } from "@/lib/data/types";
 
-type TabKey = "all" | "notasked" | "sent" | "opened" | "reviewed" | "suppressed";
+type TabKey = "all" | "notasked" | "sent" | "opened" | "reviewed" | "failed" | "suppressed";
 
 const BUCKET: Record<RequestStatus, Exclude<TabKey, "all">> = {
   queued: "notasked",
@@ -30,7 +31,7 @@ const BUCKET: Record<RequestStatus, Exclude<TabKey, "all">> = {
   posted_google: "reviewed",
   private_feedback: "reviewed",
   suppressed: "suppressed",
-  failed: "suppressed",
+  failed: "failed",
 };
 
 const STATUS_META: Record<RequestStatus, { label: string; tone: "neutral" | "primary" | "gold" | "danger" | "sub" }> = {
@@ -137,7 +138,7 @@ export function RequestsView({
 
   const counts = useMemo(() => {
     const base: Record<Exclude<TabKey, "all">, number> = {
-      notasked: 0, sent: 0, opened: 0, reviewed: 0, suppressed: 0,
+      notasked: 0, sent: 0, opened: 0, reviewed: 0, failed: 0, suppressed: 0,
     };
     for (const r of requests) base[BUCKET[r.status]] += 1;
     return base;
@@ -149,6 +150,7 @@ export function RequestsView({
     { key: "sent", label: "Sent", count: counts.sent },
     { key: "opened", label: "Opened", count: counts.opened },
     { key: "reviewed", label: "Reviewed", count: counts.reviewed },
+    { key: "failed", label: "Didn't arrive", count: counts.failed },
     { key: "suppressed", label: "Suppressed", count: counts.suppressed },
   ];
 
@@ -174,6 +176,32 @@ export function RequestsView({
     const asked = new Set(requests.map((r) => r.customerId));
     return customers.filter((c) => !asked.has(c.id) && !c.suppressedReason);
   }, [requests, customers]);
+
+  /**
+   * Customers whose message never arrived. Without this the composer's
+   * "haven't asked yet" rule made a delivery failure permanent — the customer
+   * dropped out of the eligible list with no way to try the other channel.
+   */
+  const retryById = useMemo(() => retryCandidatesByCustomer(requests, customers), [requests, customers]);
+  const retries = useMemo(() => [...retryById.values()], [retryById]);
+
+  /**
+   * A row offers a retry only when it IS the customer's latest failed attempt,
+   * so the button on a row and the customer in the composer can never disagree.
+   */
+  function retryFor(request: ReviewRequest) {
+    const candidate = retryById.get(request.customerId);
+    return candidate && candidate.requestId === request.id ? candidate : undefined;
+  }
+
+  /** Open the composer aimed at one failed request, on the channel worth trying. */
+  function openRetry(customerId: string) {
+    const candidate = retryById.get(customerId);
+    if (!candidate) return;
+    setPickedCustomer(customerId);
+    setChannel(candidate.suggestedChannel);
+    setDrawerOpen(true);
+  }
 
   function send() {
     if (!pickedCustomer) return;
@@ -261,8 +289,17 @@ export function RequestsView({
       key: "status",
       header: "Status",
       align: "right",
-      width: "150px",
-      render: (r) => <Badge tone={STATUS_META[r.status].tone}>{STATUS_META[r.status].label}</Badge>,
+      width: "170px",
+      render: (r) => (
+        <div className="flex flex-col items-end gap-1.5">
+          <Badge tone={STATUS_META[r.status].tone}>{STATUS_META[r.status].label}</Badge>
+          {retryFor(r) ? (
+            <Button variant="ghost" size="sm" icon="send" onClick={() => openRetry(r.customerId)}>
+              Send again
+            </Button>
+          ) : null}
+        </div>
+      ),
     },
   ];
 
@@ -285,7 +322,15 @@ export function RequestsView({
             </div>
             <p className="mt-3 border-t border-hairline pt-3 text-[12px] text-faint">
               <span className="font-semibold text-sub tabular-nums">{requestable.length}</span>{" "}
-              {pluralize(requestable.length, "customer")} eligible to ask.
+              {pluralize(requestable.length, "customer")} eligible to ask
+              {retries.length ? (
+                <>
+                  , plus{" "}
+                  <span className="font-semibold text-sub tabular-nums">{retries.length}</span> whose message
+                  didn&apos;t reach them
+                </>
+              ) : null}
+              .
             </p>
           </Card>
         </aside>
@@ -348,6 +393,18 @@ export function RequestsView({
                         {r.rating ? <InkStars rating={r.rating} /> : null}
                       </div>
 
+                      {retryFor(r) ? (
+                        <div className="mt-3 flex items-center justify-between gap-3 rounded-btn border border-hairline bg-paper px-3 py-2">
+                          <p className="text-[13px] text-sub">
+                            This never reached them. Try{" "}
+                            <span className="font-semibold text-ink">{retryFor(r)!.suggestedChannel}</span>.
+                          </p>
+                          <Button variant="secondary" size="sm" icon="send" onClick={() => openRetry(r.customerId)}>
+                            Send again
+                          </Button>
+                        </div>
+                      ) : null}
+
                       {r.status === "suppressed" && r.suppressedReason ? (
                         <div className="mt-2 flex items-start gap-2 rounded-btn border border-hairline bg-paper px-3 py-2">
                           <Icon name="shield" size={14} className="mt-0.5 shrink-0 text-faint" />
@@ -385,15 +442,32 @@ export function RequestsView({
         }
       >
         <div className="space-y-4">
-          <Field label="Customer" hint="Only customers you haven't asked yet appear here.">
+          <Field
+            label="Customer"
+            hint="Customers you haven't asked yet, plus anyone whose message failed to reach them."
+          >
             <Select value={pickedCustomer} onChange={(e) => setPickedCustomer(e.target.value)}>
               <option value="">Choose a customer…</option>
-              {requestable.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                  {canSendService(c) ? "" : " (no service consent)"}
-                </option>
-              ))}
+              {requestable.length ? (
+                <optgroup label="Not asked yet">
+                  {requestable.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                      {canSendService(c) ? "" : " (no service consent)"}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+              {retries.length ? (
+                <optgroup label="Didn't reach them">
+                  {retries.map((candidate) => (
+                    <option key={candidate.customer.id} value={candidate.customer.id}>
+                      {candidate.customer.name} ({candidate.failedChannel} failed)
+                      {canSendService(candidate.customer) ? "" : " · no service consent"}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
             </Select>
           </Field>
 
@@ -430,8 +504,19 @@ export function RequestsView({
             </div>
           ) : null}
 
-          {requestable.length === 0 ? (
+          {requestable.length === 0 && retries.length === 0 ? (
             <p className="text-[14px] text-faint">Everyone eligible has already been asked. Nice work.</p>
+          ) : null}
+
+          {pickedCustomer && retryById.has(pickedCustomer) ? (
+            <div className="flex items-start gap-2 rounded-btn border border-hairline bg-paper px-3 py-2">
+              <Icon name="send" size={16} className="mt-0.5 shrink-0 text-faint" />
+              <p className="text-[13px] text-sub">
+                Their last request went out by{" "}
+                <span className="font-medium text-ink">{retryById.get(pickedCustomer)!.failedChannel}</span> and
+                never reached them. This sends a fresh request with its own link.
+              </p>
+            </div>
           ) : null}
         </div>
       </Drawer>

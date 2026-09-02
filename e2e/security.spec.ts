@@ -19,6 +19,17 @@ test.describe("security boundaries", () => {
     expect(new URL(page.url()).pathname).toBe("/sign-in");
   });
 
+  // The basemap proxy exists so GOOGLE_MAPS_API_KEY never reaches a browser.
+  // If it ever answered an anonymous caller it would become a free, public
+  // Static Maps relay billed to us, so the closed door is asserted here.
+  test("the rank grid basemap proxy refuses anonymous callers", async ({ request }) => {
+    const anonymous = await request.get(
+      "/api/rank-grid/basemap?lat=43.65&lng=-79.38&zoom=13&w=640&h=640",
+    );
+    expect(anonymous.status()).toBe(401);
+    expect(await anonymous.text()).not.toContain("maps.googleapis.com");
+  });
+
   test("paid owner AI and deep health routes reject anonymous callers", async ({ request }) => {
     const reply = await request.post("/api/ai/reply-draft", {
       data: { reviewText: "Great", rating: 5, business: "Example" },

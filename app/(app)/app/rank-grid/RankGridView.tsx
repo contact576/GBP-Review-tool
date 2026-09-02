@@ -5,6 +5,9 @@ import { cn } from "@/lib/utils/cn";
 import { Icon } from "@/components/icons";
 import { Badge } from "@/components/ds/misc";
 import { intensityFill } from "@/components/charts/tokens";
+import { buildRankGridInsights } from "@/lib/google/rank-insights";
+import { RankGridMap } from "./RankGridMap";
+import { RankGridInsightsPanel } from "./RankGridInsightsPanel";
 import type { RankGridPoint, RankGridResult, RankGridScan } from "@/lib/data/types";
 
 /**
@@ -68,7 +71,9 @@ export function RankGridView({
   businessName?: string;
   businessPlaceId?: string;
 }) {
-  const [view, setView] = useState<"grid" | "table">("grid");
+  // "map" leads: it is the only view that answers "where", which is the whole
+  // point of a geo-grid. The lattice stays available for scanning ranks quickly.
+  const [view, setView] = useState<"map" | "grid" | "table">("map");
   const size = scan.gridSize;
   const points = useMemo(() => scan.points ?? [], [scan.points]);
   const middle = Math.floor(size / 2);
@@ -95,6 +100,13 @@ export function RankGridView({
   const selectedPoint = cellAt(selected.row, selected.col);
   const selectedResults = selectedPoint?.results ?? [];
   const selectedOffset = selectedPoint ? offsetLabel(scan.center, selectedPoint) : null;
+
+  // One reading of the scan, shared by the map (competitor pins) and the
+  // explanation panel below it, so the two can never disagree.
+  const insights = useMemo(
+    () => buildRankGridInsights({ scan, businessName, businessPlaceId }),
+    [scan, businessName, businessPlaceId],
+  );
 
   const competitors = useMemo<CompetitorRow[]>(() => {
     const tally = new Map<string, CompetitorRow>();
@@ -144,6 +156,17 @@ export function RankGridView({
         <div className="inline-flex rounded-chip border border-hairline bg-card p-0.5">
           <button
             type="button"
+            onClick={() => setView("map")}
+            aria-pressed={view === "map"}
+            className={cn(
+              "inline-flex min-h-[36px] items-center gap-1.5 rounded-chip px-3 py-1.5 text-[13px] font-semibold",
+              view === "map" ? "bg-ink text-white" : "text-sub",
+            )}
+          >
+            <Icon name="map-pin" size={15} /> Map
+          </button>
+          <button
+            type="button"
             onClick={() => setView("grid")}
             aria-pressed={view === "grid"}
             className={cn(
@@ -151,7 +174,7 @@ export function RankGridView({
               view === "grid" ? "bg-ink text-white" : "text-sub",
             )}
           >
-            <Icon name="grid" size={15} /> Map
+            <Icon name="grid" size={15} /> Grid
           </button>
           <button
             type="button"
@@ -186,7 +209,16 @@ export function RankGridView({
         </div>
       </div>
 
-      {view === "grid" ? (
+      {view === "map" ? (
+        <RankGridMap
+          scan={scan}
+          competitors={insights.competitors}
+          businessName={businessName}
+          businessPlaceId={businessPlaceId}
+          selected={selected}
+          onSelect={setSelected}
+        />
+      ) : view === "grid" ? (
         <div className="overflow-x-auto">
           <div className="rounded-card border border-hairline bg-primary-wash/40 p-3 sm:p-4">
             <div
@@ -300,7 +332,7 @@ export function RankGridView({
       {!hasResults ? (
         backfillHint
       ) : (
-        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+        <div className="mt-5 space-y-4">
           {/* ── Who ranks at the selected point ─────────────────── */}
           <section className="rounded-card border border-hairline bg-card p-4">
             <div className="flex flex-wrap items-start justify-between gap-2">
@@ -374,68 +406,12 @@ export function RankGridView({
             )}
           </section>
 
-          {/* ── Who beats you most often, grid-wide ─────────────── */}
-          <section className="rounded-card border border-hairline bg-card p-4">
-            <div className="kicker mb-1">Competitors</div>
-            <h3 className="text-[16px] font-bold text-ink">Who outranks you most often</h3>
-            <p className="mt-0.5 text-[12px] text-faint">
-              Across {withResults.length} of {points.length} scanned points.
-            </p>
-
-            {competitors.length === 0 ? (
-              <p className="mt-3 text-[13px] text-sub">
-                No business outranked you at any point that returned results.
-              </p>
-            ) : (
-              <ul className="mt-3 space-y-1.5">
-                {competitors.map((row) => {
-                  const meta = ratingLabel(row);
-                  const share = Math.round((row.outranks / Math.max(1, withResults.length)) * 100);
-                  return (
-                    <li
-                      key={row.key}
-                      className="rounded-btn border border-hairline bg-paper/60 px-3 py-2"
-                    >
-                      <div className="flex items-baseline justify-between gap-3">
-                        <span className="min-w-0 truncate text-[14px] font-semibold text-ink">
-                          {row.name}
-                        </span>
-                        <span className="data-chip shrink-0 text-sub">
-                          {row.outranks}/{withResults.length}
-                        </span>
-                      </div>
-                      <div
-                        aria-hidden="true"
-                        className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-hairline/70"
-                      >
-                        <div
-                          className="h-full rounded-full"
-                          style={{
-                            width: `${Math.max(4, share)}%`,
-                            backgroundColor: intensityFill(row.outranks / Math.max(1, withResults.length)),
-                          }}
-                        />
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[12px] text-faint">
-                        <span>Beats you at {share}% of points</span>
-                        <span aria-hidden="true">·</span>
-                        <span className="tabular-nums">Best position #{row.bestPosition}</span>
-                        {meta ? (
-                          <>
-                            <span aria-hidden="true">·</span>
-                            <span className="inline-flex items-center gap-1 tabular-nums">
-                              <Icon name="star-fill" size={12} className="text-gold" />
-                              {meta}
-                            </span>
-                          </>
-                        ) : null}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
+          {/* ── The reading: distance reach, direction, and who wins where ── */}
+          <RankGridInsightsPanel
+            insights={insights}
+            keyword={scan.keyword}
+            businessName={businessName}
+          />
         </div>
       )}
     </div>

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { upgradeFor } from "../lib/billing/plans";
 import { enterDemo } from "./helpers";
 
 test.describe("commercial surfaces", () => {
@@ -30,7 +31,13 @@ test.describe("commercial surfaces", () => {
     await enterDemo(page, "Owner");
     await page.goto("/app/rank-grid");
 
-    await expect(page.getByRole("heading", { level: 1, name: "Rank Grid Pro" })).toBeVisible();
+    // The badge names the plan that actually unlocks the feature, read from the
+    // entitlement catalog. Derived here the same way rather than hardcoded, so
+    // renaming a plan cannot leave this test asserting a name the app dropped.
+    const rankGridPlan = upgradeFor("rank_grid");
+    await expect(
+      page.getByRole("heading", { level: 1, name: `Rank Grid ${rankGridPlan.name} and up` }),
+    ).toBeVisible();
     await expect(page.getByText(/Source: Google Places Text Search/)).toBeVisible();
     await expect(page.getByText(/Scan cost: 25 checks/)).toBeVisible();
     await expect(page.getByText(/relevance-ranked Google Places visibility/).first()).toBeVisible();

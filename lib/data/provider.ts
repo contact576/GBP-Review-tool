@@ -36,6 +36,7 @@ import type {
   MonitoringRun,
   AiContentAsset,
   AuditLog,
+  Milestone,
   Notification,
   BusinessDetailsPatch,
 } from "./types";
@@ -579,8 +580,17 @@ export interface DataProvider {
   ): Promise<StaffInvite | { error: string }>;
   addStaffMember(workspaceId: string, displayName: string): Promise<StaffMember>;
 
+  // Milestones
+  /**
+   * Record an earned milestone. Idempotent on id — the award pass runs on every
+   * sync, so re-offering an existing milestone must not duplicate it.
+   */
+  appendMilestone(workspaceId: string, milestone: Milestone): Promise<void>;
+
   // Notifications
   markNotificationsRead(workspaceId: string): Promise<void>;
+  /** Mark a single notification read. Unknown ids are a no-op, never an error. */
+  markNotificationRead(workspaceId: string, notificationId: string): Promise<void>;
 
   // Demo
   resetDemo(): Promise<void>;

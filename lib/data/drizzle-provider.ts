@@ -3426,6 +3426,29 @@ export const drizzleProvider: DataProvider = {
     return member;
   },
 
+  // ── Milestones ────────────────────────────────────────────
+  async appendMilestone(workspaceId, milestone) {
+    const db = getDb();
+    // Same tenancy guard as appendNotification: a milestone carrying another
+    // workspace's location id is a bug, not a row to store.
+    const ctx = await loadContext(db, workspaceId);
+    if (milestone.locationId !== ctx.location.id) throw new Error("Milestone location mismatch.");
+    const rows = await db
+      .select({ milestones: t.datasetMeta.milestones })
+      .from(t.datasetMeta)
+      .where(eq(t.datasetMeta.workspaceId, workspaceId))
+      .limit(1);
+    const current = rows[0]?.milestones;
+    if (!current) return;
+    // Idempotent on id AND kind, matching the memory provider: the award pass
+    // re-offers earned milestones on every sync and must never duplicate one.
+    if (current.some((m) => m.id === milestone.id || m.kind === milestone.kind)) return;
+    await db
+      .update(t.datasetMeta)
+      .set({ milestones: [milestone, ...current] })
+      .where(eq(t.datasetMeta.workspaceId, workspaceId));
+  },
+
   // ── Notifications ─────────────────────────────────────────
   async markNotificationsRead(workspaceId) {
     const db = getDb();
@@ -3433,6 +3456,16 @@ export const drizzleProvider: DataProvider = {
       .update(t.notification)
       .set({ read: true })
       .where(eq(t.notification.workspaceId, workspaceId));
+  },
+
+  async markNotificationRead(workspaceId, notificationId) {
+    const db = getDb();
+    // Workspace-scoped as well as id-scoped: an id from another tenant must not
+    // be writable even though notification ids are globally unique.
+    await db
+      .update(t.notification)
+      .set({ read: true })
+      .where(and(eq(t.notification.workspaceId, workspaceId), eq(t.notification.id, notificationId)));
   },
 
   // ── Google data sync ──────────────────────────────────────

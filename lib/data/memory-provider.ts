@@ -1573,10 +1573,26 @@ export const memoryProvider: DataProvider = {
     return member;
   },
 
+  // ── Milestones ────────────────────────────────────────────
+  async appendMilestone(workspaceId, milestone) {
+    const data = mustDb(workspaceId);
+    if (milestone.locationId !== data.location.id) throw new Error("Milestone location mismatch.");
+    // Idempotent on id: the award pass re-offers earned milestones every sync.
+    if (data.milestones.some((m) => m.id === milestone.id || m.kind === milestone.kind)) return;
+    data.milestones.unshift(milestone);
+  },
+
   // ── Notifications ─────────────────────────────────────────
   async markNotificationsRead(workspaceId) {
     const data = mustDb(workspaceId);
     for (const n of data.notifications) n.read = true;
+  },
+
+  async markNotificationRead(workspaceId, notificationId) {
+    const data = mustDb(workspaceId);
+    const found = data.notifications.find((n) => n.id === notificationId);
+    // An unknown id is a no-op: the row may have been read on another device.
+    if (found) found.read = true;
   },
 
   // ── Demo ──────────────────────────────────────────────────

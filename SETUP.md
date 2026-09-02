@@ -147,6 +147,19 @@ FOUNDLY_OPENAI_IMAGE_MODEL=gpt-image-2
 
 OpenAI API billing is separate from ChatGPT subscriptions. The selected API project must have available billing or credits. Generated text and images remain private until the owner reviews the exact proposal; approval creates an idempotent Google publishing job and read-after-write verification.
 
+### AI Visibility engines
+
+AI Visibility puts the same buying questions to every answer engine that has a key, and shows the answers side by side:
+
+```text
+OPENAI_API_KEY=sk-proj-...        # ChatGPT (model knowledge, via the API)
+ANTHROPIC_API_KEY=sk-ant-...      # Claude (model knowledge)
+GOOGLE_AI_API_KEY=AIza...         # Gemini API (model knowledge — not AI Overviews)
+PERPLEXITY_API_KEY=pplx-...       # Perplexity (searches the live web)
+```
+
+Optional per-engine model overrides: `FOUNDLY_AEO_OPENAI_MODEL`, `FOUNDLY_AEO_ANTHROPIC_MODEL`, `FOUNDLY_AEO_GEMINI_MODEL`, `FOUNDLY_AEO_PERPLEXITY_MODEL`. An engine with no key appears in the report as "not connected" and is never counted as a miss. One question on one engine is one paid API call; runs are metered per month by plan.
+
 ## 7. Continuous monitoring
 
 `vercel.json` calls `GET /api/cron/monitor` hourly. Each connected workspace is processed at most once per UTC day, failed windows can retry, and large tenant sets drain in bounded batches. Configure `DATABASE_URL`, `CRON_SECRET`, and optionally `MONITORING_BATCH_SIZE` (default 15). Any other scheduler must send `Authorization: Bearer $CRON_SECRET`.

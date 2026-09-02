@@ -1,7 +1,6 @@
 "use client";
 
 import { useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
 import { resetDemoAction, signOutAction } from "@/lib/actions";
 
@@ -10,14 +9,16 @@ import { resetDemoAction, signOutAction } from "@/lib/actions";
  * session is active — the honest boundary between sample and real data.
  */
 export function DemoBanner() {
-  const router = useRouter();
   const [resetting, startReset] = useTransition();
   const [exiting, startExit] = useTransition();
 
   function resetDemo() {
+    // No router.refresh() here. The action revalidates the root layout, so its
+    // own response carries the re-rendered tree; refreshing on top of that left
+    // the transition pending forever and the button stuck on "Resetting…" —
+    // which meant the demo could only ever be reset once per session.
     startReset(async () => {
       await resetDemoAction();
-      router.refresh();
     });
   }
 

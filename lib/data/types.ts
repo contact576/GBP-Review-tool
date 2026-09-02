@@ -1003,6 +1003,28 @@ export interface AeoQueryResult {
   notCheckedReason?: string;
 }
 
+/**
+ * One answer engine's slice of a multi-engine run.
+ *
+ * `state: "not_connected"` rows carry no queries and are stored precisely so
+ * the report can say "ChatGPT was not asked" instead of leaving the reader to
+ * infer that from a missing column.
+ */
+export interface AeoEngineSnapshot {
+  /** Stable engine id (see lib/aeo/engines.ts). Stored as text for tolerance. */
+  engineId: string;
+  productName: string;
+  vendor: string;
+  /** How the engine answers: from a live web search, or from model knowledge. */
+  grounding: "web_search" | "model_knowledge";
+  /** The exact model asked; null when the engine was not connected. */
+  model: string | null;
+  state: "answered" | "not_connected";
+  /** Exactly what was missing, when not connected. */
+  missing: string | null;
+  queries: AeoQueryResult[];
+}
+
 export interface AeoSnapshot {
   locationId: LocationId;
   date: string;
@@ -1015,6 +1037,13 @@ export interface AeoSnapshot {
   /** Which assistant produced this sample, so the claim stays attributable. */
   provider?: string;
   model?: string;
+  /**
+   * Every engine the run covered, connected or not. When present, this is the
+   * authoritative result set and `queries`/`namedFraction`/`provider`/`model`
+   * above are the FIRST answered engine's slice, kept for readers that predate
+   * multi-engine runs. Absent on snapshots written before engines existed.
+   */
+  engines?: AeoEngineSnapshot[];
 }
 
 /** One business Google actually returned at a grid coordinate. */

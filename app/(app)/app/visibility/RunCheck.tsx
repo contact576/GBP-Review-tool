@@ -20,15 +20,27 @@ import { blockerSentence, type AeoBlocker } from "@/lib/aeo/queries";
  */
 const VISIBILITY_PLAN_NAME = upgradeFor("ai_visibility").name;
 
+/** One engine as the server reports it — connected or not, with what's missing. */
+export interface EngineStatus {
+  id: string;
+  productName: string;
+  connected: boolean;
+  model: string | null;
+  missing: string | null;
+}
+
 interface RunResponse {
   ok?: boolean;
   persisted?: boolean;
   error?: string;
-  /** The exact questions the run sent to the model. Authoritative. */
+  /** The exact questions the run sent to every engine. Authoritative. */
   asked?: string[];
   blockers?: AeoBlocker[];
   quota?: AeoQuota;
-  run?: { checked?: number; notChecked?: number; named?: number; results?: unknown[] };
+  run?: {
+    summary?: { enginesConnected?: number; enginesTotal?: number; answersChecked?: number; answersNamed?: number };
+    engines?: { id: string; productName: string; state: string; checked: number; named: number; notChecked: number }[];
+  };
 }
 
 /** GET /api/aeo/run — the plan recomputed server-side, no model call. */
@@ -55,9 +67,10 @@ interface LastRun {
  * The "Run check" control.
  *
  * Everything the button costs is stated before it is pressed: how many
- * questions get asked, how many runs remain this month, and — when no AI
- * provider is connected — that a run would produce no verdicts at all, so the
- * button is disabled rather than burning a run on nothing.
+ * questions get asked, across how many engines, how many runs remain this
+ * month, and — when no engine is connected — that a run would produce no
+ * verdicts at all, so the button is disabled rather than burning a run on
+ * nothing.
  *
  * The question set is never sent from here. The server derives it from the
  * workspace's own profile (see app/api/aeo/run/route.ts), which is what stops
@@ -72,13 +85,13 @@ export function RunCheck({
   queries,
   blockers,
   quota,
-  providerConfigured,
+  engines,
   demoWorkspace,
 }: {
   queries: string[];
   blockers: AeoBlocker[];
   quota: AeoQuota;
-  providerConfigured: boolean;
+  engines: EngineStatus[];
   demoWorkspace: boolean;
 }) {
   const router = useRouter();
@@ -98,9 +111,12 @@ export function RunCheck({
   }
   const plan: Plan = refreshed ?? { queries, blockers };
 
+  const connected = engines.filter((engine) => engine.connected);
+  const notConnected = engines.filter((engine) => !engine.connected);
   const outOfQuota = quota.remaining <= 0;
   const noQueries = plan.queries.length === 0;
-  const blocked = outOfQuota || noQueries || !providerConfigured || demoWorkspace;
+  const blocked = outOfQuota || noQueries || connected.length === 0 || demoWorkspace;
+  const calls = plan.queries.length * connected.length;
 
   async function run() {
     setPending(true);
@@ -161,11 +177,15 @@ export function RunCheck({
       <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0">
           <div className="kicker mb-1.5">New AI Visibility check</div>
-          <h2 className="text-[18px] font-bold text-ink">Ask an AI assistant these questions</h2>
+          <h2 className="text-[18px] font-bold text-ink">
+            Ask {connected.length === 1 ? "one AI engine" : `${connected.length} AI engines`} the same questions
+          </h2>
           <p className="mt-1 max-w-2xl text-[13px] text-sub">
-            Each question is sent to one AI assistant once, and its answer is read for whether your
-            business name appears in it. One question is one model call — this is a paid API call,
-            not a free lookup.
+            Every connected engine is asked the identical questions with the identical prompt, and
+            each answer is read for whether your business name appears in it. One question on one
+            engine is one paid API call — this run is{" "}
+            <span className="font-semibold tabular-nums text-ink">{calls}</span>{" "}
+            {calls === 1 ? "call" : "calls"}, not a free lookup.
           </p>
         </div>
         <div className="shrink-0 text-left lg:text-right">
@@ -178,6 +198,36 @@ export function RunCheck({
           </div>
         </div>
       </div>
+
+      {/* Which engines this click will and will not reach. */}
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        {engines.map((engine) => (
+          <span
+            key={engine.id}
+            className={
+              engine.connected
+                ? "inline-flex items-center gap-1.5 rounded-chip border border-primary/30 bg-primary-wash px-2.5 py-1 text-[12px] font-semibold text-primary-dark"
+                : "inline-flex items-center gap-1.5 rounded-chip border border-dashed border-hairline bg-paper px-2.5 py-1 text-[12px] font-semibold text-faint"
+            }
+            title={engine.connected ? `Model: ${engine.model ?? "default"}` : engine.missing ?? "Not connected"}
+          >
+            <Icon name={engine.connected ? "check-circle" : "x"} size={13} />
+            {engine.productName}
+            {engine.connected && engine.model ? (
+              <span className="font-normal tabular-nums text-sub">· {engine.model}</span>
+            ) : null}
+          </span>
+        ))}
+      </div>
+      {notConnected.length > 0 ? (
+        <p className="mt-2 text-[12px] text-faint">
+          {notConnected.map((engine) => engine.productName).join(", ")}{" "}
+          {notConnected.length === 1 ? "is" : "are"} not connected on this deployment and will be
+          reported as not asked — never as not naming you. Connect{" "}
+          {notConnected.length === 1 ? "it" : "them"} by setting{" "}
+          {notConnected.map((engine) => engine.missing?.replace(" is not set", "")).filter(Boolean).join(", ")}.
+        </p>
+      ) : null}
 
       {/* What the last run actually asked — reported by the run itself. This is
           shown above the preview so the real question set is never read as the
@@ -266,10 +316,10 @@ export function RunCheck({
         </div>
       ) : null}
 
-      {!providerConfigured ? (
+      {connected.length === 0 ? (
         <p className="mt-3 flex items-start gap-1.5 text-[13px] text-gold-deep">
           <Icon name="alert" size={15} className="mt-0.5 shrink-0" />
-          No AI provider is connected on this deployment, so a check would report every question as
+          No AI engine is connected on this deployment, so a check would report every question as
           not checked. Nothing is estimated in the meantime.
         </p>
       ) : null}
@@ -284,13 +334,15 @@ export function RunCheck({
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <Button icon="sparkles" onClick={run} loading={pending} disabled={blocked}>
-          {pending ? "Asking the assistant…" : "Run check"}
+          {pending ? "Asking the engines…" : "Run check"}
         </Button>
         {pending ? (
           <span role="status" className="flex items-center gap-1.5 text-[13px] text-sub">
             <Icon name="clock" size={14} />
-            Asking <span className="tabular-nums">{plan.queries.length}</span> questions — this takes
-            a few seconds per question.
+            Asking <span className="tabular-nums">{plan.queries.length}</span> questions on{" "}
+            <span className="tabular-nums">{connected.length}</span>{" "}
+            {connected.length === 1 ? "engine" : "engines"} — the engines run side by side, so this
+            takes about as long as the slowest one.
           </span>
         ) : null}
         {!pending && outOfQuota ? (
@@ -324,18 +376,28 @@ function toneClass(tone: Tone): string {
 }
 
 function successCopy(payload: RunResponse): string {
-  const checked = payload.run?.checked ?? 0;
-  const notChecked = payload.run?.notChecked ?? 0;
-  const named = payload.run?.named ?? 0;
+  const summary = payload.run?.summary;
+  const engines = payload.run?.engines ?? [];
+  const answered = engines.filter((engine) => engine.state === "answered");
+  const checked = summary?.answersChecked ?? 0;
+  const named = summary?.answersNamed ?? 0;
+  const notChecked = engines.reduce((total, engine) => total + (engine.notChecked ?? 0), 0);
   const parts: string[] = [];
   if (checked > 0) {
-    parts.push(`Checked ${checked} ${checked === 1 ? "question" : "questions"} — named in ${named}.`);
+    parts.push(
+      `${answered.length} ${answered.length === 1 ? "engine" : "engines"} answered. Across ${checked} checked ${checked === 1 ? "answer" : "answers"}, you were named in ${named}.`,
+    );
+    const perEngine = answered
+      .filter((engine) => engine.checked > 0)
+      .map((engine) => `${engine.productName} ${engine.named}/${engine.checked}`)
+      .join(", ");
+    if (perEngine) parts.push(`By engine: ${perEngine}.`);
   } else {
-    parts.push("No question could be checked in this run.");
+    parts.push("No answer could be checked in this run.");
   }
   if (notChecked > 0) {
     parts.push(
-      `${notChecked} ${notChecked === 1 ? "question" : "questions"} could not be checked and ${notChecked === 1 ? "is" : "are"} reported as such, not as "not named".`,
+      `${notChecked} ${notChecked === 1 ? "answer" : "answers"} could not be checked and ${notChecked === 1 ? "is" : "are"} reported as such, not as "not named".`,
     );
   }
   if (payload.persisted === false) {
@@ -355,7 +417,7 @@ function errorCopy(payload: RunResponse, quota: AeoQuota): string {
     case "demo_workspace":
       return "The demo workspace shows a saved sample. Run a live check from a real workspace.";
     case "provider_unavailable":
-      return "No AI provider is connected on this deployment, so there is nothing to ask. Nothing was recorded and no check was used.";
+      return "No AI engine is connected on this deployment, so there is nothing to ask. Nothing was recorded and no check was used.";
     case "no_queries": {
       const fixes = (payload.blockers ?? []).map(blockerSentence).join(" ");
       return fixes || "There isn't enough profile detail yet to write questions.";

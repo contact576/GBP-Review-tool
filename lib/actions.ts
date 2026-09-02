@@ -109,6 +109,7 @@ import {
   type ReplyPublishOutcome,
 } from "@/lib/google/content-publishing";
 import { executeContentPublication } from "@/lib/google/content-publish-runner";
+import { awardMilestones } from "@/lib/milestones/runner";
 import { createSignedContentAssetUrl } from "@/lib/security/content-asset-signature";
 import {
   normalizeOwnerServices,
@@ -1307,6 +1308,14 @@ export async function syncGoogleAction(): Promise<GoogleSyncActionResult> {
 
   const pub = await provider.syncGooglePublic(ws);
   const profile = await provider.syncGoogleProfile(ws);
+
+  // Evaluate milestones against the numbers this sync just measured, so an
+  // owner who syncs manually sees the win now rather than after the daily cron.
+  const synced = await provider.getData(ws);
+  if (synced) {
+    await awardMilestones({ provider, workspaceId: ws, data: synced, now: new Date() });
+    revalidatePath("/app/milestones");
+  }
 
   revalidatePath("/app");
   revalidatePath("/app/reviews");
@@ -2514,6 +2523,18 @@ export async function addStaffMemberAction(displayName: string) {
 export async function markNotificationsReadAction() {
   const { provider, ws } = await scoped("owner", "manager", "staff");
   await provider.markNotificationsRead(ws);
+  revalidatePath("/app", "layout");
+}
+
+/**
+ * Mark one notification read — used when the owner follows it through to the
+ * record it describes, so opening a single item does not clear the rest.
+ */
+export async function markNotificationReadAction(notificationId: string) {
+  const id = notificationId.trim();
+  if (!id) return;
+  const { provider, ws } = await scoped("owner", "manager", "staff");
+  await provider.markNotificationRead(ws, id);
   revalidatePath("/app", "layout");
 }
 

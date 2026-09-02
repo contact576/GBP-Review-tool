@@ -53,7 +53,7 @@ export default async function RankGridPage() {
               <EmptyState
                 icon="grid"
                 title="Google Places visibility scanning"
-                description="Scan 9 or 25 nearby coordinates for one search keyword on Pro."
+                description={`Scan 9 or 25 nearby coordinates for one search keyword on ${rankGridPlan.name}.`}
               />
             </Card>
           </Paywall>
@@ -70,17 +70,25 @@ export default async function RankGridPage() {
   }
 
   const points = scan.points ?? [];
-  const green = points.filter((point) => point.rank !== null && point.rank <= 3).length;
-  const amber = points.filter(
+  // A point Google never answered for is not a ranking result. Every figure here
+  // is measured-only, for the same reason the scan itself averages that way
+  // (lib/actions.ts) — otherwise a Google outage reads as a ranking collapse.
+  const measured = points.filter((point) => !point.unavailable);
+  const green = measured.filter((point) => point.rank !== null && point.rank <= 3).length;
+  const amber = measured.filter(
     (point) => point.rank !== null && point.rank > 3 && point.rank <= 10,
   ).length;
-  const red = points.filter((point) => point.rank === null || point.rank > 10).length;
-  const total = points.length;
+  // Ranking #14 is not "not found" — it is found, and beaten. The two are split
+  // so neither is reported as the other.
+  const absent = measured.filter((point) => point.rank === null).length;
+  const belowTen = measured.filter((point) => point.rank !== null && point.rank > 10).length;
+  const red = absent + belowTen;
+  const total = measured.length;
   const kpis = [
     { label: "Average rank", value: scan.avgRank.toFixed(1) },
     { label: "Top-3 coverage", value: `${Math.round(scan.shareOfLocalPack * 100)}%` },
     { label: "Top-3 points", value: `${green}/${total}` },
-    { label: "Not found", value: red },
+    { label: "Not in top 10", value: red },
   ];
 
   const overview = (

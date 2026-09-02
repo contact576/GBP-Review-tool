@@ -61,8 +61,13 @@ allOk = (await check("settings → channels", "/app/settings/channels", [
   "SMS",
 ])) && allOk;
 
-// The email panel is interactive: opening the form must reveal both providers.
-await page.getByRole("button", { name: /Connect a sender|Edit sender/ }).first().click();
+// The email panel is interactive: the form must reveal both providers. It starts
+// expanded when no sender is connected yet, so only click when it is collapsed —
+// clicking unconditionally closes it and every provider assertion below fails.
+if (!(await page.getByText("My own mailbox (SMTP)").isVisible().catch(() => false))) {
+  await page.getByRole("button", { name: /Connect a sender|Edit sender/ }).first().click();
+  await page.waitForTimeout(300);
+}
 const hasSmtp = await page.getByText("My own mailbox (SMTP)").isVisible();
 const hasResend = await page.getByText("Resend API key").first().isVisible();
 console.log(`${hasSmtp && hasResend ? "PASS" : "FAIL"}  email provider options`);
