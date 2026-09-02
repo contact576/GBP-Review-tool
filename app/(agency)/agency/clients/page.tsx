@@ -1,4 +1,4 @@
-import { getAgencyClients, getSessionAndData } from "@/lib/data";
+import { getAgencyClients, getAgencySessionAndData } from "@/lib/data";
 import type { PlanTier } from "@/lib/data/types";
 import { PageHeader } from "@/components/app/PageHeader";
 import { ClientBook } from "./ClientBook";
@@ -13,7 +13,7 @@ const PLAN_LABELS: Record<PlanTier, string> = {
 };
 
 export default async function ClientBookPage() {
-  const [{ data, session }, clients] = await Promise.all([getSessionAndData(), getAgencyClients()]);
+  const [{ data, session }, clients] = await Promise.all([getAgencySessionAndData(), getAgencyClients()]);
 
   return (
     <div className="space-y-5">

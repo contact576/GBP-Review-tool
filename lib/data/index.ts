@@ -99,12 +99,44 @@ export async function getSessionAndData(): Promise<{ session: Session; data: Fou
   return { session, data };
 }
 
+/**
+ * The agency's OWN workspace for this session.
+ *
+ * While an agency admin is working inside a client (`agencyWorkspaceId` set —
+ * see lib/auth/jwt.ts) the session's `workspaceId` is the client's. The agency
+ * console must still describe the agency, so everything under /agency resolves
+ * its workspace through here rather than from `session.workspaceId`. This is
+ * deliberately a pure read: entering and leaving a client are explicit
+ * actions, never a side effect of rendering a page (a prefetched GET that
+ * rewrote the session cookie once silently kicked admins out of the client).
+ */
+export function agencyHomeWorkspaceId(session: Session): string {
+  return session.role === "agency_admin" && session.agencyWorkspaceId
+    ? session.agencyWorkspaceId
+    : session.workspaceId;
+}
+
+/** Session + the AGENCY's data, for every /agency surface. */
+export async function getAgencySessionAndData(): Promise<{ session: Session; data: FoundlyData }> {
+  const session = await getSession();
+  if (!session) redirect("/sign-in");
+  const provider = await getProviderFor(session);
+  const data = await loadWorkspaceData(provider, agencyHomeWorkspaceId(session));
+  if (!data) redirect("/sign-in?expired=1");
+  return { session, data };
+}
+
+export async function getAgencyData(): Promise<FoundlyData> {
+  const { data } = await getAgencySessionAndData();
+  return data;
+}
+
 /** Live agency rollup, refreshed from each isolated client workspace. */
 export async function getAgencyClients(): Promise<FoundlyData["agency"]["clients"]> {
   const session = await getSession();
   if (!session) redirect("/sign-in");
   const provider = await getProviderFor(session);
-  return provider.listAgencyClients(session.workspaceId);
+  return provider.listAgencyClients(agencyHomeWorkspaceId(session));
 }
 
 /** Public token lookup across stores (customer review flow — no session). */

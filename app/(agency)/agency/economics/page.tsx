@@ -1,10 +1,10 @@
-import { getData } from "@/lib/data";
+import { getAgencyData } from "@/lib/data";
 import { currencySymbol } from "@/lib/utils/region";
 import { PageHeader } from "@/components/app/PageHeader";
 import { EconomicsCalculator } from "./EconomicsCalculator";
 
 export default async function EconomicsPage() {
-  const data = await getData();
+  const data = await getAgencyData();
   const { wholesaleRate, retailAverage, clients } = data.agency;
 
   return (

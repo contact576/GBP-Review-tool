@@ -24,7 +24,7 @@ async function step(name, fn) {
   catch (e) { problems.push(`${name}: ${e.message.split("\n")[0]}`); console.log("  ✗  ", name, "—", e.message.split("\n")[0]); }
 }
 
-await page.goto(`${base}/sign-in`, { waitUntil: "networkidle", timeout: 90_000 });
+await page.goto(`${base}/sign-in`, { waitUntil: "domcontentloaded", timeout: 90_000 });
 await page.waitForTimeout(4000);
 await page.fill('input[name="email"]', email);
 await page.fill('input[name="password"]', password);
@@ -35,51 +35,70 @@ await Promise.all([
 console.log(`[flow] signed in -> ${new URL(page.url()).pathname}`);
 
 await step("agency dashboard lists clients", async () => {
-  await page.goto(`${base}/agency`, { waitUntil: "networkidle", timeout: 90_000 });
+  await page.goto(`${base}/agency`, { waitUntil: "domcontentloaded", timeout: 90_000 });
   const text = await page.textContent("body");
   if (!/Townhill/i.test(text)) throw new Error("Townhill not on dashboard");
 });
 
 let clientHref = null;
 await step("client book has a Townhill row", async () => {
-  await page.goto(`${base}/agency/clients`, { waitUntil: "networkidle", timeout: 90_000 });
+  await page.goto(`${base}/agency/clients`, { waitUntil: "domcontentloaded", timeout: 90_000 });
   const link = page.locator('a[href^="/agency/clients/"]', { hasText: /Townhill/i }).first();
+  await link.waitFor({ timeout: 60_000 });
   clientHref = await link.getAttribute("href");
   if (!clientHref) throw new Error("no client link");
 });
 
 await step("open client workspace lands on /app with the acting banner", async () => {
-  await page.goto(`${base}${clientHref}`, { waitUntil: "networkidle", timeout: 90_000 });
+  if (!clientHref) throw new Error("no client href from the previous step");
+  await page.goto(`${base}${clientHref}`, { waitUntil: "domcontentloaded", timeout: 90_000 });
+  await page.locator('button:has-text("Open client workspace")').waitFor({ timeout: 60_000 });
+  await page.waitForTimeout(1500);
   await Promise.all([
     page.waitForURL((u) => u.pathname === "/app", { timeout: 120_000 }),
     page.click('button:has-text("Open client workspace")'),
   ]);
-  await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => {});
+  await page.locator('[data-testid="agency-acting-banner"]').waitFor({ timeout: 60_000 });
   const banner = await page.locator('[data-testid="agency-acting-banner"]').textContent();
   if (!/Townhill/i.test(banner) || !/PPC Guru/i.test(banner)) throw new Error(`banner: ${banner}`);
 });
 
 for (const route of ["/app/reviews", "/app/visibility", "/app/rank-grid", "/app/settings/business"]) {
   await step(`owner page ${route} renders as the client`, async () => {
-    const res = await page.goto(`${base}${route}`, { waitUntil: "networkidle", timeout: 90_000 });
+    const res = await page.goto(`${base}${route}`, { waitUntil: "domcontentloaded", timeout: 90_000 });
     if (!res || res.status() >= 400) throw new Error(`HTTP ${res?.status()}`);
     if (new URL(page.url()).pathname !== route) throw new Error(`redirected to ${new URL(page.url()).pathname}`);
+    await page.locator("main, h1").first().waitFor({ timeout: 60_000 });
     const body = await page.textContent("body");
     if (/This page hit a problem/i.test(body)) throw new Error("error boundary");
     if (!(await page.locator('[data-testid="agency-acting-banner"]').count())) throw new Error("banner missing");
   });
 }
 
-await step("navigating to /agency while acting bounces through /agency/return", async () => {
-  await page.goto(`${base}/agency/clients`, { waitUntil: "networkidle", timeout: 90_000 });
-  if (new URL(page.url()).pathname !== "/agency/clients") throw new Error(`landed on ${new URL(page.url()).pathname}`);
+await step("the agency console stays reachable while acting, and reads the agency (not the client)", async () => {
+  await page.goto(`${base}/agency/clients`, { waitUntil: "domcontentloaded", timeout: 90_000 });
+  await page.waitForURL((u) => u.pathname === "/agency/clients", { timeout: 60_000 });
+  await page.locator("h1").first().waitFor({ timeout: 60_000 });
   const body = await page.textContent("body");
   if (!/Client book/i.test(body)) throw new Error("agency console did not render");
+  if (!/Townhill/i.test(body)) throw new Error("client book lost its clients — it rendered the client's own agency blob");
+});
+
+await step("viewing the agency console did not end the acting session", async () => {
+  await page.goto(`${base}/app`, { waitUntil: "domcontentloaded", timeout: 90_000 });
+  await page.locator('[data-testid="agency-acting-banner"]').waitFor({ timeout: 60_000 });
+});
+
+await step("Back to agency ends the acting session", async () => {
+  await Promise.all([
+    page.waitForURL((u) => u.pathname === "/agency", { timeout: 120_000 }),
+    page.click('[data-testid="agency-acting-banner"] button'),
+  ]);
 });
 
 await step("back in the agency, /app is refused again", async () => {
-  await page.goto(`${base}/app`, { waitUntil: "networkidle", timeout: 90_000 });
-  if (new URL(page.url()).pathname !== "/agency") throw new Error(`landed on ${new URL(page.url()).pathname}`);
+  await page.goto(`${base}/app`, { waitUntil: "domcontentloaded", timeout: 90_000 });
+  await page.waitForURL((u) => u.pathname === "/agency", { timeout: 60_000 });
 });
 
 await browser.close();

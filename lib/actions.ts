@@ -12,12 +12,7 @@ import {
   type SessionRole,
   type Session,
 } from "@/lib/auth/session";
-import {
-  getProviderFor,
-  getPublicProviders,
-  getRealProvider,
-  type DataProvider,
-} from "@/lib/data";
+import { agencyHomeWorkspaceId, getProviderFor, getPublicProviders, getRealProvider, type DataProvider } from "@/lib/data";
 import { hashPassword, validatePasswordStrength } from "@/lib/auth/password";
 import { isPlausibleNameMatch, searchBusinesses } from "@/lib/google/places";
 import { createEmailVerificationToken } from "@/lib/auth/email-verification";
@@ -140,6 +135,18 @@ async function scoped(...allowed: SessionRole[]) {
   const session = await requireRole(...allowed);
   const provider = await getProviderFor(session);
   return { session, provider, ws: session.workspaceId };
+}
+
+/**
+ * Like `scoped`, but `ws` is the AGENCY's own workspace even while the admin is
+ * working inside a client (see `agencyHomeWorkspaceId`). Every action that
+ * edits the agency itself — its clients, white-label, reports — goes through
+ * here so it can never land on whichever client happens to be open.
+ */
+async function agencyScoped(...allowed: SessionRole[]) {
+  const session = await requireRole(...allowed);
+  const provider = await getProviderFor(session);
+  return { session, provider, ws: agencyHomeWorkspaceId(session) };
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -2378,7 +2385,7 @@ export async function runRankGridAction(input: {
 }
 
 export async function updateWhiteLabelAction(config: WhiteLabelConfig) {
-  const { provider, ws, session } = await scoped("owner", "agency_admin");
+  const { provider, ws, session } = await agencyScoped("owner", "agency_admin");
   const data = await provider.getData(ws);
   if (session.role !== "agency_admin" && data?.subscription.tier !== "agency") {
     throw new Error("White-label settings require the Agency plan.");
@@ -2398,7 +2405,7 @@ export type AgencyReportSendResult = {
 export async function sendAgencyReportsAction(
   locationIds?: string[],
 ): Promise<AgencyReportSendResult> {
-  const { provider, ws, session } = await scoped("owner", "agency_admin");
+  const { provider, ws, session } = await agencyScoped("owner", "agency_admin");
   const data = await provider.getData(ws);
   if (!data || (session.role !== "agency_admin" && data.subscription.tier !== "agency")) {
     return { ok: false, sent: 0, skipped: 0, failed: 0, message: "Agency reporting requires the Agency plan." };
@@ -2639,8 +2646,7 @@ export async function createOrganizationWorkspaceAction(
 export async function enterClientWorkspaceAction(
   locationId: string,
 ): Promise<{ ok: false; error: string }> {
-  const { provider, session } = await scoped("agency_admin", "owner");
-  const home = session.agencyWorkspaceId ?? session.workspaceId;
+  const { provider, session, ws: home } = await agencyScoped("agency_admin", "owner");
   const data = await provider.getData(home);
   if (!data || (session.role !== "agency_admin" && data.subscription.tier !== "agency")) {
     return { ok: false, error: "Client workspaces require the Agency plan." };
@@ -2680,7 +2686,7 @@ export async function createAgencyClientAction(input: {
   city?: string;
   address?: string;
 }): Promise<CreateAgencyClientResult | { ok: false; error: string }> {
-  const { provider, ws, session } = await scoped("owner", "agency_admin");
+  const { provider, ws, session } = await agencyScoped("owner", "agency_admin");
   const data = await provider.getData(ws);
   if (!data || (session.role !== "agency_admin" && data.subscription.tier !== "agency")) {
     return { ok: false, error: "Client management requires the Agency plan." };

@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getAgencyClients, getData } from "@/lib/data";
+import { getAgencyClients, getAgencyData } from "@/lib/data";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { LinkButton } from "@/components/ds/Button";
 import { Badge } from "@/components/ds/misc";
@@ -13,7 +13,7 @@ import { ClientActions } from "./ClientActions";
 
 export default async function AgencyClientPage({ params }: { params: Promise<{ clientId: string }> }) {
   const { clientId } = await params;
-  const [data, clients] = await Promise.all([getData(), getAgencyClients()]);
+  const [data, clients] = await Promise.all([getAgencyData(), getAgencyClients()]);
   const wl = data.agency.whiteLabel;
   const client = clients.find((c) => c.locationId === clientId);
   if (!client) notFound();

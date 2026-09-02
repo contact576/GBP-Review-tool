@@ -17,11 +17,6 @@ import type { SessionRole } from "@/lib/auth/session";
 function consoleFor(role: SessionRole, pathname: string, actingInClient = false): string | null {
   if (pathname.startsWith("/admin") && role !== "platform_admin") return "/app";
   if (pathname.startsWith("/agency") && role !== "agency_admin" && role !== "owner") return "/app";
-  // An agency admin whose session is pointed at a client workspace is bounced
-  // through /agency/return, which restores their own workspace first.
-  if (pathname.startsWith("/agency") && pathname !== "/agency/return" && role === "agency_admin" && actingInClient) {
-    return "/agency/return";
-  }
   if (pathname.startsWith("/app")) {
     if (role === "agency_admin" && !actingInClient) return "/agency";
     if (role === "platform_admin") return "/admin";
@@ -84,10 +79,11 @@ describe("console role routing", () => {
     expect(consoleFor("platform_admin", "/app", true)).toBe("/admin");
   });
 
-  it("returns an acting agency admin to their own workspace before showing the agency console", () => {
-    expect(consoleFor("agency_admin", "/agency", true)).toBe("/agency/return");
-    expect(consoleFor("agency_admin", "/agency/clients", true)).toBe("/agency/return");
-    expect(consoleFor("agency_admin", "/agency/return", true)).toBeNull();
+  it("keeps the agency console reachable while acting — it reads the agency's own workspace", () => {
+    // No redirect and, crucially, no session rewrite on a GET: a prefetched
+    // link to /agency must never end the acting session behind the user's back.
+    expect(consoleFor("agency_admin", "/agency", true)).toBeNull();
+    expect(consoleFor("agency_admin", "/agency/clients", true)).toBeNull();
     expect(consoleFor("agency_admin", "/agency", false)).toBeNull();
   });
 });
