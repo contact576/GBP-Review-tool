@@ -155,8 +155,14 @@ const loadPlatformSnapshot = cache(async (provider: DataProvider, homeWorkspaceI
 });
 
 export async function getPlatformSnapshot(): Promise<FoundlyData["platform"]> {
-  const session = await getSession();
-  if (!session) redirect("/sign-in");
+  // Wait for the workspace load FIRST. Every admin page runs this alongside
+  // getSessionAndData(); when the 21-query workspace fan-out and the
+  // snapshot's own queries hit the eight-connection pool at the same time on
+  // Vercel, the request stalled for minutes with the database idle — while
+  // either one alone finished in well under a second (2026-09-04, measured
+  // with /api/admin/snapshot-diag). The workspace load is request-cached, so
+  // awaiting it here costs nothing on the pages that already need it.
+  const { session } = await getSessionAndData();
   const provider = await getProviderFor(session);
   // Request-cached: the overview page reads it to render AND to decide whether
   // today's history record still needs writing — one aggregate, not two.

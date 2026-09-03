@@ -80,6 +80,16 @@ export async function GET() {
     const { drizzleProvider } = await import("@/lib/data/drizzle-provider");
     return drizzleProvider.getPlatformSnapshot("diag");
   }, 20_000);
+  // The shape every admin page used to run: the 21-query workspace load and
+  // the snapshot at the same time, on the same pool.
+  await stage("workspaceLoadAlone", async () => {
+    const { drizzleProvider } = await import("@/lib/data/drizzle-provider");
+    return drizzleProvider.getData(session.workspaceId);
+  }, 20_000);
+  await stage("workspaceLoadAndSnapshotConcurrently", async () => {
+    const { drizzleProvider } = await import("@/lib/data/drizzle-provider");
+    return Promise.all([drizzleProvider.getData(session.workspaceId), drizzleProvider.getPlatformSnapshot("diag")]);
+  }, 20_000);
 
   return NextResponse.json({ ok: true, instance: process.env.VERCEL_REGION ?? null, results });
 }
