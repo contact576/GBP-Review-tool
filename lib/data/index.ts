@@ -171,8 +171,9 @@ export async function getPlatformSnapshot(): Promise<FoundlyData["platform"]> {
 
 /** One tenant in full for the ops console. Null when the organization is unknown. */
 export async function getTenantDetail(organizationId: string): Promise<import("./types").PlatformTenantDetail | null> {
-  const session = await getSession();
-  if (!session) redirect("/sign-in");
+  // Same serialisation as getPlatformSnapshot: never overlap the workspace
+  // fan-out with these cross-tenant reads on the pool.
+  const { session } = await getSessionAndData();
   if (session.role !== "platform_admin") return null;
   const provider = await getProviderFor(session);
   return provider.getTenantDetail(organizationId);
@@ -183,8 +184,7 @@ export async function getTenantDetail(organizationId: string): Promise<import(".
  * demo session sees its own seeded ledger, labelled as such by the page.
  */
 export async function getPlatformAuditLog(limit: number): Promise<import("./types").PlatformAuditEntry[]> {
-  const session = await getSession();
-  if (!session) redirect("/sign-in");
+  const { session } = await getSessionAndData();
   if (session.role !== "platform_admin") return [];
   const provider = await getProviderFor(session);
   if (session.isDemo) {
