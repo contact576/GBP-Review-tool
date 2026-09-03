@@ -2,6 +2,7 @@ import { cache } from "react";
 import { redirect } from "next/navigation";
 import type { DataProvider } from "./provider";
 import { memoryProvider, DEMO_WORKSPACE_ID } from "./memory-provider";
+import { emptyPlatform } from "./empty";
 import { reconcileIntegrations } from "./integration-status";
 import { describeEmailSender, resolveEmailSender } from "@/lib/email/config";
 import { getSession, type Session } from "@/lib/auth/session";
@@ -130,9 +131,28 @@ export function homeWorkspaceIdFor(session: Session): string {
  * Independent of which workspace the session points at, so it keeps working
  * while a platform admin is inside a tenant.
  */
-const loadPlatformSnapshot = cache(
-  async (provider: DataProvider, homeWorkspaceId: string) => provider.getPlatformSnapshot(homeWorkspaceId),
-);
+/**
+ * Hard cap on the platform aggregate. A hung database socket (see
+ * lib/db/client.ts) must never hang the whole ops console: past the cap the
+ * page renders the never-measured blob, which every admin panel already
+ * knows how to show as "Not measured", and the operator can reload.
+ */
+const PLATFORM_SNAPSHOT_TIMEOUT_MS = 20_000;
+
+const loadPlatformSnapshot = cache(async (provider: DataProvider, homeWorkspaceId: string) => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<FoundlyData["platform"]>((resolve) => {
+    timer = setTimeout(() => {
+      console.error(`[platform] snapshot exceeded ${PLATFORM_SNAPSHOT_TIMEOUT_MS}ms; rendering as not measured`);
+      resolve(emptyPlatform());
+    }, PLATFORM_SNAPSHOT_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([provider.getPlatformSnapshot(homeWorkspaceId), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+});
 
 export async function getPlatformSnapshot(): Promise<FoundlyData["platform"]> {
   const session = await getSession();

@@ -66,8 +66,17 @@ export function getSql(): FoundlySql {
       // Kept modest because Supavisor/PgBouncer multiplexes on its side: this is
       // per warm instance, not per request, and idle sockets are reaped below.
       max: 8,
-      idle_timeout: 20,
-      connect_timeout: 15,
+      // Serverless instances freeze between requests. A socket the pooler
+      // closed while the instance was frozen looks alive on thaw, and the
+      // first query written to it waits on a reply that never comes — there
+      // is no query timeout, so the request hangs (2026-09-04, /admin pages
+      // hanging while pg_stat_activity showed everything idle). Keepalives
+      // surface a dead peer, and short idle/lifetime windows mean a thawed
+      // instance reconnects instead of reusing a stale socket.
+      idle_timeout: 10,
+      max_lifetime: 60 * 5,
+      keep_alive: 20,
+      connect_timeout: 10,
       prepare: !usesTransactionPooler(url),
       // Managed Postgres requires TLS. `sslmode` in the URL takes precedence
       // when present; this is the fallback for bare connection strings.
