@@ -290,6 +290,19 @@ async function guardPublicAction(
 export interface AuthFormResult {
   ok: boolean;
   error?: string;
+  /**
+   * Where this account's console lives (/app, /agency or /admin). The form
+   * navigates straight there: pushing "/app" and letting the middleware bounce
+   * an admin to their console left the client router with a redirect it never
+   * committed, so admins stayed on the sign-in page with a valid session.
+   */
+  home?: string;
+}
+
+function consoleHomeFor(role: SessionRole): string {
+  if (role === "platform_admin") return "/admin";
+  if (role === "agency_admin") return "/agency";
+  return "/app";
 }
 
 export async function registerAction(input: {
@@ -430,7 +443,7 @@ export async function loginAction(input: {
     email: user.email,
     sessionVersion: user.sessionVersion ?? 0,
   });
-  return { ok: true };
+  return { ok: true, home: consoleHomeFor(user.role) };
 }
 
 const RESET_TOKEN_RE = /^[A-Za-z0-9_-]{43,128}$/;

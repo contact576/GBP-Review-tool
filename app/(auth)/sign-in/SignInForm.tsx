@@ -63,7 +63,14 @@ export function SignInForm({
         setError(result.error ?? "Something went wrong. Please try again.");
         return;
       }
-      router.push(next && next.startsWith("/") ? next : "/app");
+      // Go straight to this account's console. An admin pushed to "/app" is
+      // redirected by the middleware, and the client router never committed
+      // that redirect — the session was set but the page stayed here.
+      const home = result.home ?? "/app";
+      const wanted = next && next.startsWith("/") ? next : home;
+      const allowed =
+        home === "/app" ? !wanted.startsWith("/admin") && !wanted.startsWith("/agency") : wanted.startsWith(home);
+      router.push(allowed ? wanted : home);
       router.refresh();
     });
   }
