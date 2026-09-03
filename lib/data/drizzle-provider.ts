@@ -3667,6 +3667,7 @@ export const drizzleProvider: DataProvider = {
     // Set when the owned sync could not serve and public data stood in for it.
     let fromPublicData = false;
     let publicDataReason: "approval_pending" | "not_connected" | undefined;
+    let publicDataDetail: string | undefined;
     let outcome = await fetchGoogleProfile(
       credential,
       location,
@@ -3682,11 +3683,13 @@ export const drizzleProvider: DataProvider = {
     if (!outcome.ok || outcome.pendingApproval) {
       const reason = outcome.ok ? "approval_pending" : "not_connected";
       const googleError = outcome.ok ? undefined : outcome.error;
+      const pendingDetail = outcome.ok ? outcome.pendingDetail : undefined;
       const publicOutcome = await fetchApifyProfile(location, nowIso());
       if (publicOutcome.ok) {
         outcome = publicOutcome;
         fromPublicData = true;
         publicDataReason = reason;
+        publicDataDetail = pendingDetail;
       } else if (googleError) {
         // Public data could not stand in either. Report Google's own problem
         // rather than the scraper's, which is the one the owner can act on.
@@ -3696,7 +3699,9 @@ export const drizzleProvider: DataProvider = {
           db,
           workspaceId,
           "needs_attention",
-          "Connected — Google Business Profile API approval pending (Google approves per-project; typically 1–2 weeks)",
+          pendingDetail
+            ? `Connected — ${pendingDetail}`
+            : "Connected — Google Business Profile API approval pending (Google approves per-project; typically 1–2 weeks)",
         );
         return { ok: true, pendingApproval: true };
       }
@@ -3794,6 +3799,7 @@ export const drizzleProvider: DataProvider = {
     const googleStatusInput = {
       source: fromPublicData ? "google_public_scrape" : outcome.profileSnapshot?.source,
       publicDataReason,
+      publicDataDetail,
       reviewCount: outcome.reviewCount,
       performanceError: outcome.performanceError,
     };

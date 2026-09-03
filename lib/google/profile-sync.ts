@@ -69,6 +69,12 @@ export { GBP_REVIEW_ID_PREFIX };
 export interface ProfileSyncOutcome {
   ok: boolean;
   pendingApproval?: boolean;
+  /**
+   * Google's own explanation when approval is pending — carried so the owner
+   * can see whether the APIs are merely not enabled (a two-minute console fix)
+   * or access is genuinely still awaiting approval.
+   */
+  pendingDetail?: string;
   error?: string;
   rating?: number;
   reviewCount?: number;
@@ -121,13 +127,13 @@ export async function fetchGoogleProfile(
 
   const located = await resolveLocationResource(accessToken, credential, location);
   if (!located.ok) {
-    if (located.pendingApproval) return { ok: true, pendingApproval: true };
+    if (located.pendingApproval) return { ok: true, pendingApproval: true, pendingDetail: located.detail };
     return { ok: false, error: located.error };
   }
 
   const locationRes = await getLocation(accessToken, located.locationResource);
   if (!locationRes.ok) {
-    if (locationRes.reason === "not_approved") return { ok: true, pendingApproval: true };
+    if (locationRes.reason === "not_approved") return { ok: true, pendingApproval: true, pendingDetail: locationRes.detail };
     return { ok: false, error: locationRes.detail };
   }
 
@@ -177,7 +183,7 @@ export async function fetchGoogleProfile(
     collectInstagramEvidence(instagramToken, nowIso),
   ]);
   if (!reviewsRes.ok) {
-    if (reviewsRes.reason === "not_approved") return { ok: true, pendingApproval: true };
+    if (reviewsRes.reason === "not_approved") return { ok: true, pendingApproval: true, pendingDetail: reviewsRes.detail };
     return { ok: false, error: reviewsRes.detail };
   }
 
@@ -290,7 +296,7 @@ type ResolveResult =
       locationResource: string;
       accountLocationResource: string;
     }
-  | { ok: false; pendingApproval?: boolean; error?: string };
+  | { ok: false; pendingApproval?: boolean; error?: string; detail?: string };
 
 /** Find "accounts/{a}/locations/{l}" for this workspace's Place ID. */
 async function resolveLocationResource(
@@ -300,7 +306,7 @@ async function resolveLocationResource(
 ): Promise<ResolveResult> {
   const accounts = await listAccounts(accessToken);
   if (!accounts.ok) {
-    if (accounts.reason === "not_approved") return { ok: false, pendingApproval: true };
+    if (accounts.reason === "not_approved") return { ok: false, pendingApproval: true, detail: accounts.detail };
     return { ok: false, error: accounts.detail };
   }
   // Prefer the stored account when present, else scan all manageable accounts.
@@ -314,7 +320,7 @@ async function resolveLocationResource(
     seen.add(account);
     const locs = await listLocations(accessToken, account);
     if (!locs.ok) {
-      if (locs.reason === "not_approved") return { ok: false, pendingApproval: true };
+      if (locs.reason === "not_approved") return { ok: false, pendingApproval: true, detail: locs.detail };
       continue;
     }
     const match = location.googlePlaceId

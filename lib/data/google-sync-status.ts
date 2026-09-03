@@ -26,6 +26,12 @@ export interface GoogleSyncStatusInput {
    * off to wait for something that was never going to arrive.
    */
   publicDataReason?: "approval_pending" | "not_connected";
+  /**
+   * Google's own words for why the owned read was refused, when approval is
+   * the blocker. Without it the tile said "needs approval" even after Google
+   * had approved the project and the only remaining step was enabling the APIs.
+   */
+  publicDataDetail?: string;
 }
 
 function isPublicScrape(input: GoogleSyncStatusInput): boolean {
@@ -52,7 +58,8 @@ export function googleIntegrationDetail(
       input.publicDataReason === "not_connected"
         ? "connect Google Business Profile to measure views, calls and direction requests"
         : "views, calls and direction requests need Business Profile approval and are not measured";
-    return `${reviews} reviews imported from public Google data — ${blocker}`;
+    const said = input.publicDataDetail?.trim();
+    return `${reviews} reviews imported from public Google data — ${blocker}${said ? `. ${said}` : ""}`;
   }
   if (input.performanceError) {
     return `Reviews synced; Business Profile performance unavailable — ${input.performanceError}`;
