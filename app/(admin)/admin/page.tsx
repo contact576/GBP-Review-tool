@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { after } from "next/server";
 import { getPlatformSnapshot, getProviderFor, getSessionAndData, homeWorkspaceIdFor } from "@/lib/data";
 import { recordPlatformHistory } from "@/lib/platform/history-runner";
 import { utcDay } from "@/lib/platform/retention";
@@ -132,12 +131,19 @@ export default async function AdminOverviewPage() {
   const pastDue = tenants.filter((t) => t.status === "past_due");
 
   // History starts the first time an operator looks, not a day later: if
-  // today's snapshot is not stored yet, store it after the response goes out.
-  // Idempotent per day, so racing the cron is harmless.
+  // today's snapshot is not stored yet, store it now. Idempotent per day, so
+  // racing the cron is harmless. Deliberately awaited INLINE rather than in
+  // `after()`: post-response database work on Vercel left a connection open
+  // while the lambda froze, and every later request on that instance hung on
+  // the poisoned pool (2026-09-04). One small upsert is cheaper than that.
   if (telemetry.source === "live_aggregate" && platform.history?.latestAt !== utcDay(new Date())) {
-    const provider = await getProviderFor(session);
-    const home = homeWorkspaceIdFor(session);
-    after(() => recordPlatformHistory({ provider, snapshot: platform, homeWorkspaceId: home, onlyIfMissing: true }).catch(() => undefined));
+    try {
+      const provider = await getProviderFor(session);
+      const home = homeWorkspaceIdFor(session);
+      await recordPlatformHistory({ provider, snapshot: platform, homeWorkspaceId: home, onlyIfMissing: true });
+    } catch (error) {
+      console.error("[admin] history write failed:", error instanceof Error ? error.message : error);
+    }
   }
   const history = platform.history;
   const historyDaysLeft = history ? Math.max(0, history.requiredDays - history.days) : null;
