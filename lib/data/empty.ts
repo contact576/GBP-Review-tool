@@ -155,7 +155,7 @@ export function emptyFoundlyData(input: NewWorkspaceInput): FoundlyData {
       { id: `int_search_console_${locationId}`, locationId, provider: "search_console", label: "Google Search Console", status: "disconnected", detail: "Reconnect Google with read-only Search Console access" },
       { id: `int_instagram_${locationId}`, locationId, provider: "instagram", label: "Instagram professional account", status: "disconnected", detail: "Connect an authorized Business or Creator account" },
       { id: `int_resend_${locationId}`, locationId, provider: "resend", label: "Email delivery", status: "pending", detail: "Email sending activates once the platform email service is configured" },
-      { id: `int_twilio_${locationId}`, locationId, provider: "twilio", label: "SMS (A2P 10DLC)", status: "disconnected", detail: "SMS requires carrier registration (1–5 days)" },
+      { id: `int_twilio_${locationId}`, locationId, provider: "twilio", label: "SMS (Twilio)", status: "disconnected", detail: "SMS not configured — review requests fall back to email" },
       { id: `int_stripe_${locationId}`, locationId, provider: "stripe", label: "Billing", status: "pending", detail: "Trial active — payment method not required yet" },
     ],
     auditLog: [],

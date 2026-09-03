@@ -18,7 +18,9 @@
     "db:seed": "tsx lib/db/seed-runner.ts",
     "db:verify": "tsx lib/db/verify-runner.ts",
     "verify:live": "node live-check.mjs",
-    "db:provision": "tsx --conditions=react-server lib/db/provision-runner.ts"
+    "db:provision": "tsx --conditions=react-server lib/db/provision-runner.ts",
+    "stripe:bootstrap": "node scripts/stripe-bootstrap.mjs",
+    "stripe:verify": "node scripts/stripe-verify.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",

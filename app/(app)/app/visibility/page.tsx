@@ -7,7 +7,8 @@ import { Paywall } from "@/components/app/Paywall";
 import { Icon, type IconName } from "@/components/icons";
 import { StatTile } from "@/components/charts/StatTile";
 import { ProgressMeter } from "@/components/charts/ProgressMeter";
-import { hasFeature, upgradeFor } from "@/lib/billing/plans";
+import { upgradeFor } from "@/lib/billing/plans";
+import { subscriptionHasFeature } from "@/lib/billing/trial";
 import { formatDate } from "@/lib/utils/format";
 import { buildAeoContext, SERVICES_SOURCE_COPY } from "@/lib/aeo/context";
 import { engineAvailability } from "@/lib/aeo/engines";
@@ -41,11 +42,9 @@ export default async function VisibilityPage() {
   // advertising the retired name; `upgradeFor` reads the lowest plan that
   // actually carries `ai_visibility`, so the badge cannot drift again.
   const visibilityPlan = upgradeFor("ai_visibility");
-  const entitled = hasFeature(
-    data.subscription.tier,
-    "ai_visibility",
-    data.subscription.status === "trialing",
-  );
+  // Trial-aware: an expired trial is locked here even though the row still
+  // says `trialing` / `growth` (lib/billing/trial.ts).
+  const entitled = subscriptionHasFeature(data.subscription, "ai_visibility");
 
   const context = buildAeoContext(data);
   const businessName = context.businessName || data.location.name;

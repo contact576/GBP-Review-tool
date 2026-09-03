@@ -67,7 +67,13 @@ export async function middleware(req: NextRequest) {
   }
 
   // ── 2. Security headers (all matched routes) ──────────────
-  return applySecurityHeaders(NextResponse.next(), pathname);
+  // The app layout enforces the expired-trial lock server-side and needs the
+  // path to know which routes stay open (billing, settings, customers).
+  // Layouts can't read the URL, so it is forwarded here — set, never trusted
+  // from the client, which is why it is overwritten rather than passed through.
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set("x-pathname", pathname);
+  return applySecurityHeaders(NextResponse.next({ request: { headers: requestHeaders } }), pathname);
 }
 
 function applySecurityHeaders(response: NextResponse, pathname: string): NextResponse {

@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
+import { trialLockAllowsPath } from "@/lib/billing/trial";
 import { Icon } from "@/components/icons";
 import { Badge } from "@/components/ds/misc";
 import { ToastProvider } from "@/components/ds/Toast";
@@ -33,6 +34,8 @@ export function AppShell({
   ownerName,
   ownerEmail,
   trialDaysLeft,
+  trialEnded,
+  trialLocked,
   unread,
   locations,
   currentWorkspaceId,
@@ -44,7 +47,16 @@ export function AppShell({
   business: string;
   ownerName: string;
   ownerEmail?: string;
+  /** Whole days left on a live trial; undefined when not trialing. */
   trialDaysLeft?: number;
+  /** The trial's end date has passed and nothing paid replaced it. */
+  trialEnded?: boolean;
+  /**
+   * This session is locked out of the app until it pays or continues on Free
+   * (decided server-side in app/(app)/layout.tsx). The shell re-applies the
+   * redirect on client-side navigation, which a shared layout never sees.
+   */
+  trialLocked?: boolean;
   unread?: number;
   locations: OrganizationWorkspaceSummary[];
   currentWorkspaceId: string;
@@ -54,8 +66,13 @@ export function AppShell({
   hasBanner?: boolean;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [moreOpen, setMoreOpen] = useState(false);
   const dashboardHome = pathname === "/app";
+
+  useEffect(() => {
+    if (trialLocked && !trialLockAllowsPath(pathname)) router.replace("/app/trial-ending");
+  }, [trialLocked, pathname, router]);
 
   return (
     <ToastProvider>
@@ -177,9 +194,15 @@ export function AppShell({
                   <Badge tone="primary" icon="grid">Agency</Badge>
                 </Link>
               ) : null}
-              {!dashboardHome && typeof trialDaysLeft === "number" && trialDaysLeft > 0 ? (
+              {trialEnded ? (
                 <Link href="/app/settings/billing" className="hidden sm:inline-flex">
-                  <Badge tone="gold" icon="clock">Trial · {trialDaysLeft}d left</Badge>
+                  <Badge tone="danger" icon="clock">Trial ended</Badge>
+                </Link>
+              ) : typeof trialDaysLeft === "number" ? (
+                <Link href="/app/settings/billing" className="hidden sm:inline-flex">
+                  <Badge tone="gold" icon="clock">
+                    Trial · {trialDaysLeft} {trialDaysLeft === 1 ? "day" : "days"} left
+                  </Badge>
                 </Link>
               ) : null}
               <Link

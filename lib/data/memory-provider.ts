@@ -1151,6 +1151,17 @@ export const memoryProvider: DataProvider = {
     }
   },
 
+  async listTrialingSubscriptions() {
+    return allWorkspaces()
+      .filter((data) => !data.workspace.isDemo && data.subscription.status === "trialing")
+      .map((data) => data.subscription);
+  },
+
+  async markTrialNoticeSent(workspaceId, kind, sentAt) {
+    const data = mustDb(workspaceId);
+    data.subscription.trialNotices = { ...data.subscription.trialNotices, [kind]: sentAt };
+  },
+
   async setIntegrationStatus(workspaceId, provider, status, detail) {
     const data = mustDb(workspaceId);
     const integration = data.integrations.find((i) => i.provider === provider);

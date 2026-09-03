@@ -8,8 +8,12 @@ import { encryptSecret, decryptSecret } from "@/lib/google/crypto";
 /**
  * Per-workspace outbound email sender configuration.
  *
- * Two ways to switch email on, both self-serve from Settings → Channels:
+ * Three ways to switch email on, all self-serve from Settings → Channels:
  *
+ *   • "gmail"  — "Connect Gmail": an OAuth grant for gmail.send, so Foundly
+ *     sends through the Gmail API from the owner's own address. No app
+ *     password, no SMTP details, revocable from their Google account. The
+ *     stored secret is the Google refresh token.
  *   • "resend" — paste a Resend API key. Hosted, best deliverability, but the
  *     sending domain has to be verified inside Resend first.
  *   • "smtp"   — point at any mailbox the business already owns (Gmail with an
@@ -22,11 +26,20 @@ import { encryptSecret, decryptSecret } from "@/lib/google/crypto";
  * is the UI-facing shape and deliberately omits it.
  */
 
-export type EmailProvider = "resend" | "smtp";
+export type EmailProvider = "resend" | "smtp" | "gmail";
+
+/**
+ * Health of a stored credential. `null` is healthy; "needs_reconnect" is set
+ * by the Gmail backend when Google answers a refresh with invalid_grant (the
+ * owner revoked access, changed their password, or the grant expired) — the
+ * only fix is a fresh consent, so the UI must say so rather than retry.
+ */
+export type EmailCredentialStatus = "needs_reconnect" | null;
 
 /** Full config including the decrypted secret. Server-side delivery only. */
 export interface EmailSenderConfig {
   provider: EmailProvider;
+  /** Resend API key, SMTP password, or (gmail) the Google refresh token. */
   secret: string;
   fromEmail: string;
   fromName?: string;
@@ -35,6 +48,9 @@ export interface EmailSenderConfig {
   smtpPort?: number;
   smtpUser?: string;
   smtpSecure?: boolean;
+  /** gmail: the mailbox the OAuth grant belongs to. */
+  googleAccount?: string;
+  status?: EmailCredentialStatus;
   /** "workspace" when configured in-app, "env" when inherited from env vars. */
   source: "workspace" | "env";
 }
@@ -50,6 +66,12 @@ export interface EmailSettingsView {
   smtpPort: number | null;
   smtpUser: string;
   smtpSecure: boolean;
+  /** gmail: the connected mailbox (empty for other providers). */
+  googleAccount: string;
+  /** gmail: when consent was granted. */
+  connectedAt: string | null;
+  /** gmail: Google rejected the refresh token — only a fresh consent fixes it. */
+  needsReconnect: boolean;
   /** True once a real test send has succeeded on the current credentials. */
   verified: boolean;
   verifiedAt: string | null;
@@ -62,6 +84,7 @@ export interface EmailSettingsView {
 }
 
 export interface SaveEmailSettingsInput {
+  /** Resend or SMTP — the Gmail sender is written only by `saveGmailSender`. */
   provider: EmailProvider;
   /** Omit to keep the currently stored secret (so the UI never round-trips it). */
   secret?: string;
@@ -129,9 +152,21 @@ const readRow = cache(async function readRow(workspaceId: string) {
   }
 });
 
+function providerOf(value: string): EmailProvider {
+  return value === "smtp" ? "smtp" : value === "gmail" ? "gmail" : "resend";
+}
+
+function statusOf(value: string | null | undefined): EmailCredentialStatus {
+  return value === "needs_reconnect" ? "needs_reconnect" : null;
+}
+
 /**
  * Resolve the sender to use for a workspace: its own config first, env second.
  * Returns null when neither exists, so callers can degrade honestly.
+ *
+ * A Gmail row flagged needs_reconnect still resolves (it beats env): the owner
+ * chose that mailbox, and silently sending from a different address would be
+ * worse than an honest failure that the Channels page explains.
  */
 export async function resolveEmailSender(
   workspaceId?: string,
@@ -144,7 +179,7 @@ export async function resolveEmailSender(
       // through to env is better than throwing mid-send.
       if (secret) {
         return {
-          provider: row.provider === "smtp" ? "smtp" : "resend",
+          provider: providerOf(row.provider),
           secret,
           fromEmail: row.fromEmail,
           fromName: row.fromName ?? undefined,
@@ -153,6 +188,8 @@ export async function resolveEmailSender(
           smtpPort: row.smtpPort ?? undefined,
           smtpUser: row.smtpUser ?? undefined,
           smtpSecure: row.smtpSecure ?? undefined,
+          googleAccount: row.googleAccount ?? undefined,
+          status: statusOf(row.status),
           source: "workspace",
         };
       }
@@ -176,6 +213,9 @@ export async function readEmailSettings(workspaceId: string): Promise<EmailSetti
       smtpPort: env?.smtpPort ?? null,
       smtpUser: env?.smtpUser ?? "",
       smtpSecure: env?.smtpSecure ?? false,
+      googleAccount: "",
+      connectedAt: null,
+      needsReconnect: false,
       verified: false,
       verifiedAt: null,
       lastError: null,
@@ -184,7 +224,7 @@ export async function readEmailSettings(workspaceId: string): Promise<EmailSetti
   }
   return {
     configured: true,
-    provider: row.provider === "smtp" ? "smtp" : "resend",
+    provider: providerOf(row.provider),
     fromEmail: row.fromEmail,
     fromName: row.fromName ?? "",
     replyTo: row.replyTo ?? "",
@@ -192,6 +232,9 @@ export async function readEmailSettings(workspaceId: string): Promise<EmailSetti
     smtpPort: row.smtpPort ?? null,
     smtpUser: row.smtpUser ?? "",
     smtpSecure: row.smtpSecure ?? false,
+    googleAccount: row.googleAccount ?? "",
+    connectedAt: row.connectedAt ?? null,
+    needsReconnect: statusOf(row.status) === "needs_reconnect",
     verified: Boolean(row.verifiedAt),
     verifiedAt: row.verifiedAt,
     lastError: row.lastError,
@@ -207,8 +250,15 @@ export async function saveEmailSettings(
   workspaceId: string,
   input: SaveEmailSettingsInput,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (input.provider === "gmail") {
+    // Gmail is an OAuth grant, not a pasted secret — it has its own writer.
+    return { ok: false, reason: "Use Connect Gmail to set up Gmail sending." };
+  }
   const existing = await readRow(workspaceId);
-  const secret = input.secret?.trim() || (existing ? decryptSecret(existing.encryptedSecret) : null);
+  // Only reuse the stored secret when the provider is unchanged — a Gmail
+  // refresh token must never be replayed as an SMTP password, and vice versa.
+  const reusable = existing && existing.provider === input.provider ? existing : null;
+  const secret = input.secret?.trim() || (reusable ? decryptSecret(reusable.encryptedSecret) : null);
   if (!secret) {
     return {
       ok: false,
@@ -231,6 +281,10 @@ export async function saveEmailSettings(
     smtpPort: input.provider === "smtp" ? input.smtpPort ?? null : null,
     smtpUser: input.provider === "smtp" ? input.smtpUser ?? null : null,
     smtpSecure: input.provider === "smtp" ? input.smtpSecure ?? false : null,
+    googleAccount: null,
+    scopes: null,
+    connectedAt: null,
+    status: null,
     verifiedAt: null,
     lastError: null,
     createdAt: existing?.createdAt ?? now,
@@ -250,6 +304,100 @@ export async function saveEmailSettings(
       reason: err instanceof Error ? err.message : "Could not save email settings.",
     };
   }
+}
+
+export interface SaveGmailSenderInput {
+  /** Google refresh token from the gmail.send consent — encrypted before write. */
+  refreshToken: string;
+  /** The mailbox the grant belongs to; becomes the From address. */
+  googleAccount: string;
+  /** What Google actually granted (space-separated). */
+  scopes: string;
+  /** Display name for the From header, usually the business name. */
+  fromName?: string;
+}
+
+/**
+ * Upsert the Gmail OAuth sender for a workspace. Replaces whatever sender was
+ * there before (Resend key / SMTP mailbox) — one row per workspace — and
+ * clears `verifiedAt` so only the callback's real test send can mark it good.
+ */
+export async function saveGmailSender(
+  workspaceId: string,
+  input: SaveGmailSenderInput,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const account = input.googleAccount.trim().toLowerCase();
+  if (!input.refreshToken || !account) {
+    return { ok: false, reason: "Google did not return a usable grant." };
+  }
+  const existing = await readRow(workspaceId);
+  const now = nowIso();
+  const values = {
+    workspaceId,
+    provider: "gmail" as const,
+    encryptedSecret: encryptSecret(input.refreshToken),
+    fromEmail: account,
+    fromName: input.fromName?.trim().slice(0, 120) || null,
+    replyTo: null,
+    smtpHost: null,
+    smtpPort: null,
+    smtpUser: null,
+    smtpSecure: null,
+    googleAccount: account,
+    scopes: input.scopes,
+    connectedAt: now,
+    status: null,
+    verifiedAt: null,
+    lastError: null,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+  try {
+    const db = getDb();
+    await db
+      .insert(t.emailCredential)
+      .values(values)
+      .onConflictDoUpdate({ target: t.emailCredential.workspaceId, set: values });
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: err instanceof Error ? err.message : "Could not save the Gmail sender.",
+    };
+  }
+}
+
+/**
+ * Flag (or clear) a credential's health. The Gmail backend sets
+ * "needs_reconnect" on invalid_grant and clears it on the next successful
+ * send, so a transient flag heals itself without a manual step.
+ */
+export async function setEmailCredentialStatus(
+  workspaceId: string,
+  status: EmailCredentialStatus,
+  detail?: string,
+): Promise<void> {
+  try {
+    const db = getDb();
+    await db
+      .update(t.emailCredential)
+      .set({
+        status,
+        ...(status ? { verifiedAt: null, lastError: (detail ?? "Reconnect required").slice(0, 400) } : {}),
+        updatedAt: nowIso(),
+      })
+      .where(eq(t.emailCredential.workspaceId, workspaceId));
+  } catch {
+    // Best-effort bookkeeping — never let it mask the send result.
+  }
+}
+
+/** Human label for the Integrations tile, e.g. "Gmail · you@domain.com". */
+export function describeEmailSender(config: EmailSenderConfig): string {
+  const address = config.fromEmail.replace(/^.*<([^>]+)>.*$/, "$1").trim();
+  if (config.provider === "gmail") return `Gmail · ${config.googleAccount ?? address}`;
+  if (config.provider === "smtp") return `SMTP · ${address}`;
+  return `Resend · ${address}`;
 }
 
 /** Record the outcome of a test send so the UI reflects reality, not intent. */

@@ -9,7 +9,8 @@ import { Funnel } from "@/components/charts";
 import { formatNumber, formatDate } from "@/lib/utils/format";
 import { emailEnabled } from "@/lib/email";
 import { smsEnabled } from "@/lib/sms/twilio";
-import { hasFeature, upgradeFor } from "@/lib/billing/plans";
+import { upgradeFor } from "@/lib/billing/plans";
+import { subscriptionHasFeature } from "@/lib/billing/trial";
 import type { Campaign, CampaignDeliveryState, Channel } from "@/lib/data/types";
 
 const CHANNEL_ICON: Record<Channel, IconName> = {
@@ -42,11 +43,9 @@ export default async function CampaignsPage() {
   // pays for campaigns_pro must never be told it is locked. Named from the plan
   // catalog for the same reason the badge is — there is no "Pro" plan to sell.
   const proPlan = upgradeFor("campaigns_pro");
-  const hasCampaignsPro = hasFeature(
-    data.subscription.tier,
-    "campaigns_pro",
-    data.subscription.status === "trialing",
-  );
+  // Read through the trial-aware gate: an expired trial no longer counts as
+  // trialing, and its stored Growth tier no longer counts as paid.
+  const hasCampaignsPro = subscriptionHasFeature(data.subscription, "campaigns_pro");
   const automations = data.campaigns.filter((c) => c.isAutomation);
   const oneOff = data.campaigns.filter((c) => !c.isAutomation);
   const hasCampaigns = data.campaigns.length > 0;

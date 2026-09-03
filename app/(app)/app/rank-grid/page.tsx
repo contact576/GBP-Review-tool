@@ -6,18 +6,17 @@ import { PageHeader } from "@/components/app/PageHeader";
 import { Paywall } from "@/components/app/Paywall";
 import { Icon } from "@/components/icons";
 import { StatTile } from "@/components/charts/StatTile";
-import { hasFeature, upgradeFor } from "@/lib/billing/plans";
+import { upgradeFor } from "@/lib/billing/plans";
+import { subscriptionHasFeature } from "@/lib/billing/trial";
 import { formatDate } from "@/lib/utils/format";
 import { RankGridView } from "./RankGridView";
 import { RankGridRunner } from "./RankGridRunner";
 
 export default async function RankGridPage() {
   const data = await getData();
-  const entitled = hasFeature(
-    data.subscription.tier,
-    "rank_grid",
-    data.subscription.status === "trialing",
-  );
+  // Trial-aware: an expired trial is locked here even though the row still
+  // says `trialing` / `growth` (lib/billing/trial.ts).
+  const entitled = subscriptionHasFeature(data.subscription, "rank_grid");
   // Named from the entitlement rather than written by hand: the badge used to
   // say "Pro", a tier folded into Growth and now only a legacy alias, while the
   // Paywall directly below it already read "Growth" off this same helper.

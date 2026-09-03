@@ -4,6 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import {
   getSession,
   createSession,
@@ -37,6 +38,7 @@ import {
   reviewRequestEmail,
   staffInviteEmail,
   verificationEmail,
+  welcomeEmail,
 } from "@/lib/email/templates";
 import { reviewRequestSms } from "@/lib/sms/templates";
 import { sendSms, smsEnabled } from "@/lib/sms/twilio";
@@ -46,7 +48,8 @@ import { appUrl } from "@/lib/utils/app-url";
 import { consumeRateLimit } from "@/lib/security/api";
 import { trustedClientIp } from "@/lib/security/client-ip";
 import { parseReferralCode } from "@/lib/referrals/code";
-import { hasFeature } from "@/lib/billing/plans";
+import { TRIAL_DAYS } from "@/lib/billing/plans";
+import { isTrialExpired, subscriptionHasFeature } from "@/lib/billing/trial";
 import type {
   CaptureCustomerInput,
   SendRequestInput,
@@ -333,6 +336,35 @@ export async function registerAction(input: {
     name: result.user.name,
     email: result.user.email,
     sessionVersion: result.user.sessionVersion ?? 0,
+  });
+
+  // Welcome email: the trial length and the three steps that make it pay off.
+  // Fire-and-forget — `after` runs once the response is sent, so sign-up never
+  // waits on a mail API, and `sendEmail` returns a result rather than
+  // throwing, so it can never fail the registration either way.
+  after(async () => {
+    try {
+      const base = await appUrl();
+      const template = welcomeEmail({
+        firstName: name.split(" ")[0] || undefined,
+        business: businessName,
+        trialDays: TRIAL_DAYS,
+        links: {
+          linkBusiness: `${base}/app/settings/business`,
+          connectGoogle: `${base}/app/settings/integrations`,
+          sendRequest: `${base}/app/requests`,
+        },
+      });
+      await sendEmail({
+        to: email,
+        subject: template.subject,
+        html: template.html,
+        text: template.text,
+        workspaceId: result.user.workspaceId,
+      });
+    } catch {
+      // a welcome note is a courtesy, never part of the registration contract
+    }
   });
 
   // V17: when email delivery is configured, require the registrant to confirm
@@ -2279,7 +2311,7 @@ export async function runRankGridAction(input: {
   }
   const data = await provider.getData(ws);
   if (!data) return { ok: false, message: "The workspace could not be loaded." };
-  if (!hasFeature(data.subscription.tier, "rank_grid", data.subscription.status === "trialing")) {
+  if (!subscriptionHasFeature(data.subscription, "rank_grid")) {
     return { ok: false, message: "Rank Grid is available on Pro, Multi-location, and Agency plans." };
   }
   if (!data.location.googlePlaceId) {
@@ -2811,6 +2843,39 @@ export async function downgradeToFreeAction() {
     return { ok: true as const };
   }
   return billingPortal(provider, ws);
+}
+
+/**
+ * "Continue on Free" from the trial-ending page.
+ *
+ * Unlike `downgradeToFreeAction`, this never goes near Stripe: a no-card trial
+ * has no Stripe subscription to cancel, so the portal would only answer
+ * `not_configured` and leave the owner stuck behind the lock. It is limited to
+ * exactly that case — an expired trial with no Stripe subscription — and
+ * simply records the Free plan the workspace is already entitled to.
+ */
+export async function continueOnFreeAction(): Promise<void> {
+  const { provider, ws } = await scoped("owner");
+  const data = await provider.getData(ws);
+  if (!data) throw new Error("The workspace could not be loaded.");
+  const sub = data.subscription;
+  if (!isTrialExpired(sub) || sub.stripeSubscriptionId) {
+    // Not the no-card expired trial this action is for — billing handles it.
+    redirect("/app/settings/billing");
+  }
+  await provider.setSubscription(ws, { tier: "free", status: "free" });
+  await provider.appendAuditLog(ws, {
+    id: `audit_${randomBytes(12).toString("hex")}`,
+    workspaceId: ws,
+    actor: data.owner.name,
+    action: "billing.trial_continued_on_free",
+    targetType: "subscription",
+    targetId: sub.id,
+    at: new Date().toISOString(),
+    meta: sub.trialEndsAt ? { trialEndsAt: sub.trialEndsAt } : undefined,
+  });
+  revalidatePath("/app", "layout");
+  redirect("/app");
 }
 
 /**

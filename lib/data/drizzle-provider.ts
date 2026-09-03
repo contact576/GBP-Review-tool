@@ -505,6 +505,7 @@ function mapSubscription(row: SubscriptionRow): Subscription {
     interval: row.interval as Subscription["interval"],
     status: row.status as Subscription["status"],
     trialEndsAt: row.trialEndsAt ?? undefined,
+    trialNotices: row.trialNotices ?? undefined,
     currency: row.currency as Subscription["currency"],
     stripeCustomerId: row.stripeCustomerId ?? undefined,
     stripeSubscriptionId: row.stripeSubscriptionId ?? undefined,
@@ -3355,6 +3356,27 @@ export const drizzleProvider: DataProvider = {
     await db
       .update(t.subscription)
       .set(set)
+      .where(eq(t.subscription.workspaceId, workspaceId));
+  },
+
+  async listTrialingSubscriptions() {
+    const rows = await getDb()
+      .select({ sub: t.subscription })
+      .from(t.subscription)
+      .innerJoin(t.workspace, eq(t.workspace.id, t.subscription.workspaceId))
+      .where(and(eq(t.subscription.status, "trialing"), eq(t.workspace.isDemo, false)));
+    return rows.map((row) => mapSubscription(row.sub));
+  },
+
+  async markTrialNoticeSent(workspaceId, kind, sentAt) {
+    // A single jsonb merge, so two overlapping cron runs can't clobber each
+    // other's marker (each only adds its own key).
+    const patch = JSON.stringify({ [kind]: sentAt });
+    await getDb()
+      .update(t.subscription)
+      .set({
+        trialNotices: sql`coalesce(${t.subscription.trialNotices}, '{}'::jsonb) || ${patch}::jsonb`,
+      })
       .where(eq(t.subscription.workspaceId, workspaceId));
   },
 

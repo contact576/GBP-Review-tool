@@ -326,6 +326,8 @@ export const subscription = pgTable("subscription", {
   interval: text("interval").notNull(),
   status: text("status").notNull(),
   trialEndsAt: text("trial_ends_at"),
+  /** Trial notice send markers — additive column, see ADDITIVE_STATEMENTS. */
+  trialNotices: jsonb("trial_notices").$type<Subscription["trialNotices"]>(),
   currency: text("currency").notNull(),
   stripeCustomerId: text("stripe_customer_id"),
   stripeSubscriptionId: text("stripe_subscription_id"),
@@ -436,11 +438,19 @@ export const googleCredential = pgTable("google_credential", {
  * Per-workspace outbound email sender. One row per workspace, written from
  * Settings → Channels so an owner can switch email on without a redeploy.
  *
- * `provider` is "resend" (hosted API) or "smtp" (their own mailbox). The single
- * `encryptedSecret` column holds whichever secret that provider needs — the
- * Resend API key or the SMTP password — as an AES-256-GCM envelope, never
- * plaintext. `verifiedAt` is stamped only by a real test send that succeeded,
- * so the UI can never claim "verified" on an untested config.
+ * `provider` is "resend" (hosted API), "smtp" (their own mailbox) or "gmail"
+ * (OAuth — sends through the Gmail API from the owner's own address). The
+ * single `encryptedSecret` column holds whichever secret that provider needs —
+ * the Resend API key, the SMTP password, or the Google refresh token — as an
+ * AES-256-GCM envelope, never plaintext. `verifiedAt` is stamped only by a
+ * real test send that succeeded, so the UI can never claim "verified" on an
+ * untested config.
+ *
+ * Gmail-only columns (all nullable, added additively): `googleAccount` is the
+ * mailbox the grant belongs to, `scopes` what Google actually granted,
+ * `connectedAt` when consent happened, and `status` is null while healthy or
+ * "needs_reconnect" once a refresh comes back invalid_grant — so the Channels
+ * page can say "Reconnect Gmail" instead of failing silently on every send.
  */
 export const emailCredential = pgTable("email_credential", {
   workspaceId: text("workspace_id").primaryKey(),
@@ -453,6 +463,10 @@ export const emailCredential = pgTable("email_credential", {
   smtpPort: integer("smtp_port"),
   smtpUser: text("smtp_user"),
   smtpSecure: boolean("smtp_secure"),
+  googleAccount: text("google_account"),
+  scopes: text("scopes"),
+  connectedAt: text("connected_at"),
+  status: text("status"),
   verifiedAt: text("verified_at"),
   lastError: text("last_error"),
   createdAt: text("created_at").notNull(),

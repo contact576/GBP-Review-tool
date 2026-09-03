@@ -908,6 +908,15 @@ export interface Campaign {
 }
 
 // ── Billing ─────────────────────────────────────────────────
+/**
+ * When each trial notice email went out (ISO timestamps). The daily cron uses
+ * these as its idempotency marker — a notice is sent once per workspace.
+ */
+export interface TrialNotices {
+  ending?: string;
+  ended?: string;
+}
+
 export interface Subscription {
   id: Id;
   workspaceId: WorkspaceId;
@@ -915,6 +924,7 @@ export interface Subscription {
   interval: "monthly" | "annual";
   status: "trialing" | "active" | "past_due" | "free" | "canceled" | "paused";
   trialEndsAt?: string;
+  trialNotices?: TrialNotices;
   currency: "USD" | "CAD";
   stripeCustomerId?: string;
   stripeSubscriptionId?: string;

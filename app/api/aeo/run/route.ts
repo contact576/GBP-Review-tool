@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getProviderFor } from "@/lib/data";
-import { hasFeature } from "@/lib/billing/plans";
+import { subscriptionHasFeature } from "@/lib/billing/trial";
 import { guardAuthenticatedApi } from "@/lib/security/api";
 import { buildAeoContext } from "@/lib/aeo/context";
 import { connectedEngineIds, engineAvailability } from "@/lib/aeo/engines";
@@ -43,7 +43,7 @@ export async function GET(req: Request) {
   const data = await provider.getData(session.workspaceId);
   if (!data) return NextResponse.json({ error: "workspace_not_found" }, { status: 404 });
 
-  if (!hasFeature(data.subscription.tier, "ai_visibility", data.subscription.status === "trialing")) {
+  if (!subscriptionHasFeature(data.subscription, "ai_visibility")) {
     return NextResponse.json({ error: "upgrade_required" }, { status: 403 });
   }
 
@@ -89,7 +89,7 @@ export async function POST(req: Request) {
   const data = await provider.getData(session.workspaceId);
   if (!data) return NextResponse.json({ error: "workspace_not_found" }, { status: 404 });
 
-  if (!hasFeature(data.subscription.tier, "ai_visibility", data.subscription.status === "trialing")) {
+  if (!subscriptionHasFeature(data.subscription, "ai_visibility")) {
     return NextResponse.json({ error: "upgrade_required" }, { status: 403 });
   }
 

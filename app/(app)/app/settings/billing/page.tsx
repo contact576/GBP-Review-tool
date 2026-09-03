@@ -4,8 +4,9 @@ import { Badge, EmptyState } from "@/components/ds/misc";
 import { ProgressMeter } from "@/components/charts";
 import { PageHeader } from "@/components/app/PageHeader";
 import { type IconName } from "@/components/icons";
-import { formatMoney, formatNumber, formatDate, daysUntil } from "@/lib/utils/format";
-import { PLANS, effectivePlan, TRIAL_DAYS } from "@/lib/billing/plans";
+import { formatMoney, formatNumber, formatDate } from "@/lib/utils/format";
+import { PLANS, TRIAL_DAYS } from "@/lib/billing/plans";
+import { entitledPlan, trialState, trialUnlocks } from "@/lib/billing/trial";
 import type { Subscription } from "@/lib/data/types";
 import { SettingsNav } from "../SettingsNav";
 import { BillingActions } from "./BillingActions";
@@ -31,18 +32,25 @@ export default async function BillingSettingsPage() {
   const currency = sub.currency;
   const invoices = data.invoices ?? [];
 
-  const trialing = sub.status === "trialing";
-  const effectiveTier = effectivePlan(sub.tier, trialing);
+  // Trial-aware (lib/billing/trial.ts): `trialing` is true only while the
+  // trial is live, and an expired one is entitled to Free — not to the Growth
+  // tier the row still records from sign-up.
+  const trial = trialState(sub);
+  const trialing = trialUnlocks(sub);
+  const trialEnded = trial.phase === "expired";
+  const effectiveTier = entitledPlan(sub);
   const plan = PLANS[effectiveTier];
 
-  const trialLeft = trialing && sub.trialEndsAt ? daysUntil(sub.trialEndsAt) : 0;
+  const trialLeft = trialing ? trial.daysLeft : 0;
   const trialDay = Math.max(1, Math.min(TRIAL_LENGTH, TRIAL_LENGTH - trialLeft + 1));
-  const trialEndDate = sub.trialEndsAt ? formatDate(sub.trialEndsAt) : "";
+  const trialEndDate = trial.endsAt ? formatDate(trial.endsAt) : "";
 
   // Displayed headline price follows the subscription's own interval.
   const headlinePrice = sub.interval === "annual" ? plan.priceAnnualMonthly : plan.priceMonthly;
 
-  const badge = STATUS_BADGE[sub.status] ?? STATUS_BADGE.active;
+  const badge: (typeof STATUS_BADGE)[keyof typeof STATUS_BADGE] = trialEnded
+    ? { tone: "danger", icon: "clock", label: "Trial ended" }
+    : (STATUS_BADGE[sub.status] ?? STATUS_BADGE.active);
 
   const u = sub.usage;
   const aiUnlimited = u.aiDraftsLimit === -1;
@@ -77,6 +85,12 @@ export default async function BillingSettingsPage() {
                     drafts/mo).
                   </>
                 ) : null}
+              </p>
+            ) : trialEnded ? (
+              <p className="max-w-[68ch] text-[14px] text-sub">
+                Your {TRIAL_LENGTH}-day trial ended{trialEndDate ? ` on ${trialEndDate}` : ""}. Nothing
+                was charged and nothing was deleted — pick a plan below to switch every tool back on,
+                or keep going on Free.
               </p>
             ) : effectiveTier === "free" ? (
               <p className="max-w-[68ch] text-[14px] text-sub">

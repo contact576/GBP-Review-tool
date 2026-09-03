@@ -4,16 +4,19 @@ import { Icon } from "@/components/icons";
 import { Card } from "@/components/ds/Card";
 import { LinkButton } from "@/components/ds/Button";
 import { Kicker } from "@/components/ds/misc";
+import { TRIAL_DAYS } from "@/lib/billing/plans";
 
 export const metadata: Metadata = {
   title: "Start your free trial",
-  description: "How the Foundly reverse trial works: 30 days of every tool free, no credit card, then keep a free plan forever.",
+  description: `How the Foundly reverse trial works: ${TRIAL_DAYS} days of every tool free, no credit card, then keep a free plan forever.`,
 };
 
+// Day numbers come from TRIAL_DAYS so this page can't drift from the trial the
+// billing code actually grants (it once said 14 while the trial ran 30).
 const STEPS: { icon: "gift" | "sparkles" | "shield"; title: string; body: string }[] = [
   { icon: "gift", title: "Day 0 — full Growth, free", body: "You start on the complete Growth plan with everything unlocked. No credit card, nothing to configure first." },
-  { icon: "sparkles", title: "Days 1–14 — see it work", body: "Send requests, watch reviews land, and get your first Growth Report — with real numbers from your own business." },
-  { icon: "shield", title: "Day 14 — you decide", body: "Nothing auto-charges. Stay on a paid plan, or drop to the free plan and keep your reviews, score, and QR kit." },
+  { icon: "sparkles", title: `Days 1–${TRIAL_DAYS - 1} — see it work`, body: "Send requests, watch reviews land, and get your first Growth Report — with real numbers from your own business." },
+  { icon: "shield", title: `Day ${TRIAL_DAYS} — you decide`, body: "Nothing auto-charges. Stay on a paid plan, or drop to the free plan and keep your reviews, score, and QR kit." },
 ];
 
 export default function TrialStartPage() {
@@ -45,7 +48,7 @@ export default function TrialStartPage() {
 
       <div className="mt-6">
         <LinkButton href="/sign-up" size="lg" fullWidth icon="sparkles">Start free</LinkButton>
-        <p className="mt-3 text-center text-[12px] text-faint">30 days of every tool · no credit card · cancel anytime</p>
+        <p className="mt-3 text-center text-[12px] text-faint">{TRIAL_DAYS} days of every tool · no credit card · cancel anytime</p>
       </div>
 
       <p className="mt-5 text-center text-[13px] text-sub">

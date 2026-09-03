@@ -89,6 +89,36 @@ describe("reconcileIntegrations", () => {
     expect(find(reconcileIntegrations(makeData({})), "twilio").status).toBe("connected");
   });
 
+  it("names the exact missing Twilio vars instead of claiming a carrier registration is pending", () => {
+    delete process.env.TWILIO_ACCOUNT_SID;
+    delete process.env.TWILIO_AUTH_TOKEN;
+    delete process.env.TWILIO_FROM_NUMBER;
+    delete process.env.TWILIO_MESSAGING_SERVICE_SID;
+    const tile = find(reconcileIntegrations(makeData({})), "twilio");
+    expect(tile.status).toBe("disconnected");
+    expect(tile.detail).toContain("TWILIO_ACCOUNT_SID");
+    expect(tile.detail).toContain("TWILIO_AUTH_TOKEN");
+    expect(tile.detail).toContain("TWILIO_MESSAGING_SERVICE_SID or TWILIO_FROM_NUMBER");
+    expect(tile.detail).not.toMatch(/pending|carrier registration/i);
+  });
+
+  it("keeps a real 'Send test SMS' outcome on the tile while SMS is enabled, with an honest status", () => {
+    process.env.TWILIO_ACCOUNT_SID = "AC_test";
+    process.env.TWILIO_AUTH_TOKEN = "token";
+    process.env.TWILIO_FROM_NUMBER = "+15550000000";
+    const accepted = { ...integration("twilio", "connected"), detail: "Test SMS accepted by Twilio for ••••0123 (SM1) — check the handset" };
+    expect(find(reconcileIntegrations(makeData({ integrations: [accepted] })), "twilio")).toBe(accepted);
+
+    const failed = { ...integration("twilio", "connected"), detail: "Test SMS failed for ••••0123: unreachable carrier" };
+    const tile = find(reconcileIntegrations(makeData({ integrations: [failed] })), "twilio");
+    expect(tile.status).toBe("needs_attention");
+    expect(tile.detail).toBe(failed.detail);
+
+    // Once the env goes away the stale test result must not keep claiming "connected".
+    delete process.env.TWILIO_FROM_NUMBER;
+    expect(find(reconcileIntegrations(makeData({ integrations: [accepted] })), "twilio").status).toBe("disconnected");
+  });
+
   it("never touches providers that own a real connect flow", () => {
     const result = reconcileIntegrations(makeData({}));
     expect(find(result, "google")).toEqual(find(makeData({}), "google"));

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import type { DataProvider } from "./provider";
 import { memoryProvider, DEMO_WORKSPACE_ID } from "./memory-provider";
 import { reconcileIntegrations } from "./integration-status";
-import { emailEnabledFor } from "@/lib/email";
+import { describeEmailSender, resolveEmailSender } from "@/lib/email/config";
 import { getSession, type Session } from "@/lib/auth/session";
 import type { FoundlyData } from "./types";
 
@@ -73,8 +73,17 @@ const loadWorkspaceData = cache(
   async (provider: DataProvider, workspaceId: string): Promise<FoundlyData | null> => {
     const data = await provider.getData(workspaceId);
     if (!data) return data;
+    // Request-cached single-row lookup (lib/email/config) — the same one the
+    // send path reads, so the tile and delivery can never disagree.
+    const sender = await resolveEmailSender(workspaceId);
     return reconcileIntegrations(data, {
-      emailOn: await emailEnabledFor(workspaceId),
+      emailOn: sender !== null,
+      emailSender: sender
+        ? {
+            label: describeEmailSender(sender),
+            needsReconnect: sender.status === "needs_reconnect",
+          }
+        : null,
     });
   },
 );

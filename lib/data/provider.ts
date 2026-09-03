@@ -27,6 +27,7 @@ import type {
   Region,
   Integration,
   Subscription,
+  TrialNotices,
   RankGridScan,
   AeoSnapshot,
   AgencyClient,
@@ -493,6 +494,17 @@ export interface DataProvider {
         | "cancelAtPeriodEnd"
       >
     >,
+  ): Promise<void>;
+  /**
+   * Every non-demo subscription whose status is `trialing`, for the daily trial
+   * notice cron. Cheap on purpose: subscription rows only, no tenant fan-out.
+   */
+  listTrialingSubscriptions(): Promise<Subscription[]>;
+  /** Record that a trial notice went out — the cron's once-per-workspace marker. */
+  markTrialNoticeSent(
+    workspaceId: string,
+    kind: keyof TrialNotices,
+    sentAt: string,
   ): Promise<void>;
 
   // Google data sync

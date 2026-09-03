@@ -71,6 +71,9 @@ export const ADDITIVE_STATEMENTS: string[] = [
   "ALTER TABLE \"subscription\" ADD COLUMN IF NOT EXISTS \"stripe_price_id\" text;",
   "ALTER TABLE \"subscription\" ADD COLUMN IF NOT EXISTS \"current_period_end\" text;",
   "ALTER TABLE \"subscription\" ADD COLUMN IF NOT EXISTS \"cancel_at_period_end\" boolean;",
+  // Trial notice idempotency (lib/billing/trial-emails.ts): {ending?, ended?}
+  // ISO timestamps. Nullable and additive — existing rows read as "never sent".
+  "ALTER TABLE \"subscription\" ADD COLUMN IF NOT EXISTS \"trial_notices\" jsonb;",
   "ALTER TABLE \"workspace\" ADD COLUMN IF NOT EXISTS \"referred_by_workspace_id\" text;",
   "ALTER TABLE \"workspace\" ADD COLUMN IF NOT EXISTS \"referral_reward_status\" text;",
   "ALTER TABLE \"workspace\" ADD COLUMN IF NOT EXISTS \"referral_reward_applied_at\" text;",
@@ -79,6 +82,13 @@ export const ADDITIVE_STATEMENTS: string[] = [
   "ALTER TABLE \"location\" ADD COLUMN IF NOT EXISTS \"suggestion_inbox\" jsonb;",
   "ALTER TABLE \"location\" ADD COLUMN IF NOT EXISTS \"website\" text;",
   "ALTER TABLE \"location\" ADD COLUMN IF NOT EXISTS \"owner_description\" text;",
+  // Gmail OAuth sender (Settings → Channels → Connect Gmail). The refresh token
+  // reuses encrypted_secret; these carry the mailbox, granted scopes, consent
+  // time, and a "needs_reconnect" flag set when a refresh returns invalid_grant.
+  "ALTER TABLE \"email_credential\" ADD COLUMN IF NOT EXISTS \"google_account\" text;",
+  "ALTER TABLE \"email_credential\" ADD COLUMN IF NOT EXISTS \"scopes\" text;",
+  "ALTER TABLE \"email_credential\" ADD COLUMN IF NOT EXISTS \"connected_at\" text;",
+  "ALTER TABLE \"email_credential\" ADD COLUMN IF NOT EXISTS \"status\" text;",
   "CREATE TABLE IF NOT EXISTS \"profile_mutation_job\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"workspace_id\" text NOT NULL,\n\t\"location_id\" text NOT NULL,\n\t\"suggestion_id\" text NOT NULL,\n\t\"idempotency_key\" text NOT NULL,\n\t\"target\" text NOT NULL,\n\t\"status\" text NOT NULL,\n\t\"update_mask\" jsonb NOT NULL,\n\t\"before_value\" jsonb,\n\t\"proposed_value\" jsonb NOT NULL,\n\t\"provider_response\" jsonb,\n\t\"verified_value\" jsonb,\n\t\"rollback_value\" jsonb,\n\t\"attempts\" integer DEFAULT 0 NOT NULL,\n\t\"approved_at\" text NOT NULL,\n\t\"approved_by\" text NOT NULL,\n\t\"created_at\" text NOT NULL,\n\t\"updated_at\" text NOT NULL,\n\t\"started_at\" text,\n\t\"applied_at\" text,\n\t\"failed_at\" text,\n\t\"last_error\" text\n);",
   "CREATE UNIQUE INDEX IF NOT EXISTS \"profile_mutation_job_idempotency_uq\" ON \"profile_mutation_job\" USING btree (\"idempotency_key\");",
 
