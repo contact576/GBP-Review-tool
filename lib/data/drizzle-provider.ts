@@ -1790,33 +1790,56 @@ export const drizzleProvider: DataProvider = {
     // days of requests; self-review needs every customer who was ever sent a
     // real request, which is a join rather than a full customer scan.
     const tenantIds = workspaces.map((row) => row.workspaceId);
-    const [fraudRequests, fraudReviews, fraudCustomers, fraudStaff, fraudUsers, triage, history] =
-      tenantIds.length
-        ? await Promise.all([
-            pg<FraudRequestRow[]>`
-              select workspace_id as "workspaceId", id, customer_id as "customerId", staff_id as "staffId",
-                     status, created_at as "createdAt", is_test as "isTest"
-              from review_request
-              where workspace_id in ${pg(tenantIds)} and is_test = false
-                and (created_at >= ${iso(BURST_LOOKBACK_DAYS)} or status in ('posted_google','opened','clicked','sent','delivered'))`,
-            pg<FraudReviewRow[]>`
-              select workspace_id as "workspaceId", published_at as "publishedAt", matched_request_id as "matchedRequestId"
-              from review
-              where workspace_id in ${pg(tenantIds)} and matched_request_id is not null and published_at >= ${iso(31)}`,
-            pg<FraudCustomerRow[]>`
-              select distinct c.workspace_id as "workspaceId", c.id, c.name, c.email
-              from customer c
-              where c.workspace_id in ${pg(tenantIds)}
-                and exists (select 1 from review_request r where r.customer_id = c.id and r.workspace_id = c.workspace_id and r.is_test = false)`,
-            pg<FraudStaffRow[]>`
-              select workspace_id as "workspaceId", id, display_name as "displayName"
-              from staff_member where workspace_id in ${pg(tenantIds)}`,
-            pg<FraudUserRow[]>`
-              select workspace_id as "workspaceId", email from app_user where workspace_id in ${pg(tenantIds)}`,
-            getDb().select().from(t.fraudTriage),
-            drizzleProvider.listPlatformHistory(),
-          ])
-        : [[], [], [], [], [], [], await drizzleProvider.listPlatformHistory()];
+    // Sequential on purpose, and never fatal: the roster, billing and delivery
+    // figures above are already earned, so a failure in the detector inputs
+    // or the history read must degrade that section to "Not measured" — not
+    // take the whole console down with a 500.
+    let fraud: Parameters<typeof aggregatePlatform>[0]["fraud"];
+    let history: PlatformHistoryRecord[] | undefined;
+    try {
+      history = await drizzleProvider.listPlatformHistory();
+    } catch (error) {
+      console.error("[platform] history read failed:", error instanceof Error ? error.message : error);
+    }
+    if (tenantIds.length) {
+      try {
+        const fraudRequests = await pg<FraudRequestRow[]>`
+          select workspace_id as "workspaceId", id, customer_id as "customerId", staff_id as "staffId",
+                 status, created_at as "createdAt", is_test as "isTest"
+          from review_request
+          where workspace_id in ${pg(tenantIds)} and is_test = false
+            and (created_at >= ${iso(BURST_LOOKBACK_DAYS)} or status in ('posted_google','opened','clicked','sent','delivered'))`;
+        const fraudReviews = await pg<FraudReviewRow[]>`
+          select workspace_id as "workspaceId", published_at as "publishedAt", matched_request_id as "matchedRequestId"
+          from review
+          where workspace_id in ${pg(tenantIds)} and matched_request_id is not null and published_at >= ${iso(31)}`;
+        const fraudCustomers = await pg<FraudCustomerRow[]>`
+          select distinct c.workspace_id as "workspaceId", c.id, c.name, c.email
+          from customer c
+          where c.workspace_id in ${pg(tenantIds)}
+            and exists (select 1 from review_request r where r.customer_id = c.id and r.workspace_id = c.workspace_id and r.is_test = false)`;
+        const fraudStaff = await pg<FraudStaffRow[]>`
+          select workspace_id as "workspaceId", id, display_name as "displayName"
+          from staff_member where workspace_id in ${pg(tenantIds)}`;
+        const fraudUsers = await pg<FraudUserRow[]>`
+          select workspace_id as "workspaceId", email from app_user where workspace_id in ${pg(tenantIds)}`;
+        const triage = await pg<(typeof t.fraudTriage.$inferSelect)[]>`
+          select flag_id as "flagId", workspace_id as "workspaceId", decision, operator, note, at from fraud_triage`;
+        fraud = {
+          requests: fraudRequests,
+          reviews: fraudReviews,
+          customers: fraudCustomers,
+          staff: fraudStaff,
+          users: fraudUsers,
+          triage: triage.map(mapFraudTriage),
+        };
+      } catch (error) {
+        console.error("[platform] fraud inputs failed:", error instanceof Error ? error.message : error);
+        fraud = undefined;
+      }
+    } else {
+      fraud = { requests: [], reviews: [], customers: [], staff: [], users: [], triage: [] };
+    }
 
     return aggregatePlatform({
       workspaces,
@@ -1824,14 +1847,7 @@ export const drizzleProvider: DataProvider = {
       durability,
       reviewsLast7d: weekly[0]?.count ?? 0,
       now,
-      fraud: {
-        requests: fraudRequests,
-        reviews: fraudReviews,
-        customers: fraudCustomers,
-        staff: fraudStaff,
-        users: fraudUsers,
-        triage: triage.map(mapFraudTriage),
-      },
+      fraud,
       history,
     });
   },
