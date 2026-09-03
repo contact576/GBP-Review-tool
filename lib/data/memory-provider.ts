@@ -1,10 +1,11 @@
 import { buildSeed } from "./seed";
 import { nanoid } from "nanoid";
-import { emptyFoundlyData, makeSlug } from "./empty";
+import { emptyFoundlyData, emptyPlatform, makeSlug } from "./empty";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { canonicalPhone } from "@/lib/sms/phone";
 import { PLANS } from "@/lib/billing/plans";
 import { mergeSuggestionInbox } from "@/lib/suggestions/inbox";
+import { googleIntegrationDetail, googleIntegrationStatus } from "./google-sync-status";
 import { buildAudienceSnapshot } from "@/lib/campaigns/audience";
 import { isAssetEffectivelyDegraded } from "@/lib/qr/degrade";
 import type { QrScanContext } from "@/lib/qr/types";
@@ -64,7 +65,13 @@ import type {
   ContentPublishingJob,
   MonitoringRun,
   Notification,
+  AgencyClientLive,
+  FraudTriage,
+  PlatformHistoryRecord,
+  PlatformTenantUser,
 } from "./types";
+import { rollupAgencyBook } from "@/lib/agency/rollup";
+import { aggregatePlatform, type PlatformWorkspaceRow } from "@/lib/platform/aggregate";
 
 /**
  * In-memory provider — multi-tenant Map keyed by workspaceId.
@@ -85,6 +92,7 @@ interface StoredUser {
   passwordHash?: string;
   googleSub?: string;
   emailVerified: boolean;
+  sessionVersion?: number;
 }
 
 interface MemoryStore {
@@ -99,6 +107,8 @@ interface MemoryStore {
     string,
     { userId: string; expiresAt: string; createdAt: string; usedAt?: string }
   >; // key: SHA-256 token hash
+  platformHistory: Map<string, PlatformHistoryRecord>; // key: UTC day
+  fraudTriage: Map<string, FraudTriage>; // key: flag id
 }
 
 const globalRef = globalThis as unknown as { __foundlyStore?: MemoryStore };
@@ -114,7 +124,15 @@ function store(): MemoryStore {
       contentPublishingJobs: new Map(),
       monitoringRuns: new Map(),
       passwordResets: new Map(),
+      platformHistory: new Map(),
+      fraudTriage: new Map(),
     };
+  }
+  if (!globalRef.__foundlyStore.platformHistory) {
+    globalRef.__foundlyStore.platformHistory = new Map();
+  }
+  if (!globalRef.__foundlyStore.fraudTriage) {
+    globalRef.__foundlyStore.fraudTriage = new Map();
   }
   // Back-compat for stores created before credentials existed.
   if (!globalRef.__foundlyStore.credentials) {
@@ -218,7 +236,61 @@ function toAuthUser(u: StoredUser, isDemo = false): AuthUser {
     role: u.role,
     workspaceId: u.workspaceId,
     isDemo,
+    sessionVersion: u.sessionVersion ?? 0,
   };
+}
+
+/**
+ * The accounts on a workspace as the ops console lists them. Registered
+ * logins come from the users map; a workspace created by an agency (no login
+ * yet) still has its owner record, so that is listed too.
+ */
+function memoryUsersFor(data: FoundlyData): PlatformTenantUser[] {
+  const registered = [...store().users.values()].filter(
+    (user) => user.workspaceId === data.workspace.id,
+  );
+  const users: PlatformTenantUser[] = registered.map((user) => ({
+    id: user.id,
+    workspaceId: user.workspaceId,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    emailVerified: user.emailVerified,
+    hasLogin: Boolean(user.passwordHash || user.googleSub),
+  }));
+  if (!users.some((user) => user.id === data.owner.id)) {
+    users.unshift({
+      id: data.owner.id,
+      workspaceId: data.workspace.id,
+      email: data.owner.email,
+      name: data.owner.name,
+      role: data.owner.role,
+      emailVerified: data.owner.emailVerified ?? false,
+      hasLogin: false,
+    });
+  }
+  return users;
+}
+
+/** The roster maths over a set of workspaces, so the tenant page agrees with the roster. */
+function aggregatePlatformFor(members: FoundlyData[]) {
+  const rows: PlatformWorkspaceRow[] = members.map((data) => ({
+    workspaceId: data.workspace.id,
+    organizationId: data.organization.id,
+    organizationName: data.organization.name,
+    locationName: data.location.name,
+    vertical: data.workspace.vertical,
+    region: data.workspace.region,
+    tier: data.subscription.tier,
+    interval: data.subscription.interval,
+    status: data.subscription.status,
+    ownerEmail: null,
+    createdAt: data.workspace.createdAt,
+  }));
+  const snapshot = aggregatePlatform({ workspaces: rows, deliveryFailures: [], durability: [], reviewsLast7d: 0, now: new Date() });
+  const first = members[0];
+  if (snapshot.tenants[0] && first) snapshot.tenants[0].ownerEmail = first.owner.email;
+  return snapshot;
 }
 
 export const memoryProvider: DataProvider = {
@@ -248,42 +320,202 @@ export const memoryProvider: DataProvider = {
       });
   },
 
+  async getPlatformSnapshot(workspaceId) {
+    // The demo fixture, exactly as seeded — labelled as such by the console.
+    return db(workspaceId)?.platform ?? emptyPlatform();
+  },
+
   async listAgencyClients(workspaceId) {
     const current = db(workspaceId);
     if (!current) return [];
     if (current.workspace.isDemo) return current.agency.clients;
-    const cutoff = Date.now() - 30 * 86_400_000;
-    return current.agency.clients.map((stored) => {
-      const child = allWorkspaces().find(
-        (candidate) =>
-          candidate.organization.id === current.organization.id &&
-          candidate.location.id === stored.locationId,
+    const s = store();
+    const live = new Map<string, AgencyClientLive>();
+    for (const child of allWorkspaces()) {
+      if (child.organization.id !== current.organization.id || child.workspace.id === current.workspace.id) continue;
+      const owner = [...s.users.values()].find(
+        (user) => user.workspaceId === child.workspace.id && user.role === "owner",
       );
-      if (!child) return stored;
-      const latest = [...child.metrics].sort((a, b) => a.date.localeCompare(b.date)).pop();
-      const growthScore = latest?.sources?.scores ? latest.growthScore : 0;
-      const needsReply = child.reviews.filter((review) => review.needsReply).length;
-      const newReviews30d = child.reviews.filter(
-        (review) => new Date(review.publishedAt).getTime() >= cutoff,
-      ).length;
-      const status =
-        growthScore < 50 || needsReply > 7
-          ? "at_risk" as const
-          : growthScore < 70 || needsReply > 3
-            ? "attention" as const
-            : "healthy" as const;
-      return {
-        ...stored,
+      live.set(child.location.id, {
+        workspaceId: child.workspace.id,
+        locationId: child.location.id,
         name: child.location.name,
         city: child.location.city,
-        growthScore,
         rating: child.location.rating,
-        newReviews30d,
-        needsReply,
-        plan: child.subscription.tier,
-        status,
-      };
+        reviewCount: child.location.reviewCount,
+        tier: child.subscription.tier,
+        googleLinked: Boolean(child.location.googlePlaceId),
+        gbpConnected: s.credentials.has(child.workspace.id),
+        ownerEmail: owner?.email ?? child.owner.email,
+        ownerHasLogin: Boolean(owner?.passwordHash || owner?.googleSub),
+        metrics: child.metrics,
+        reviews: child.reviews,
+      });
+    }
+    return rollupAgencyBook(current.agency.clients, live);
+  },
+
+  // ── Platform ops (internal console) ───────────────────────
+  async getTenantDetail(organizationId) {
+    const s = store();
+    const members = allWorkspaces().filter(
+      (data) => data.organization.id === organizationId && !data.workspace.isDemo,
+    );
+    const first = members[0];
+    if (!first) return null;
+    const since30 = Date.now() - 30 * 86_400_000;
+    const workspaces = members.map((data) => ({
+      workspaceId: data.workspace.id,
+      locationId: data.location.id,
+      name: data.location.name,
+      city: data.location.city,
+      vertical: data.workspace.vertical,
+      region: data.workspace.region,
+      createdAt: data.workspace.createdAt,
+      rating: data.location.rating,
+      reviewCount: data.location.reviewCount,
+      googleLinked: Boolean(data.location.googlePlaceId),
+      gbpConnected: s.credentials.has(data.workspace.id),
+      emailSenderConnected: false,
+      subscription: data.subscription,
+      counts: {
+        customers: data.customers.length,
+        requests: data.requests.filter((request) => !request.isTest).length,
+        requestsFailed30d: data.requests.filter(
+          (request) =>
+            !request.isTest &&
+            (request.status === "failed" || request.status === "suppressed") &&
+            new Date(request.createdAt).getTime() >= since30,
+        ).length,
+        reviews: data.reviews.length,
+        needsReply: data.reviews.filter((review) => review.needsReply).length,
+        staff: data.staff.filter((member) => member.active).length,
+      },
+      lastActivityAt: data.auditLog[0]?.at ?? data.requests[0]?.createdAt,
+    }));
+    const users = members.flatMap((data) => memoryUsersFor(data));
+    const audit = members
+      .flatMap((data) =>
+        data.auditLog.map((entry) => ({ ...entry, tenant: data.location.name, organizationId })),
+      )
+      .sort((a, b) => b.at.localeCompare(a.at))
+      .slice(0, 25);
+    const tenant = aggregatePlatformFor(members).tenants[0];
+    if (!tenant) return null;
+    return { organization: first.organization, tenant, workspaces, users, audit };
+  },
+
+  async listPlatformAuditLog(limit) {
+    return allWorkspaces()
+      .filter((data) => !data.workspace.isDemo)
+      .flatMap((data) =>
+        data.auditLog.map((entry) => ({
+          ...entry,
+          tenant: data.organization.name || data.location.name,
+          organizationId: data.organization.id,
+        })),
+      )
+      .sort((a, b) => b.at.localeCompare(a.at))
+      .slice(0, Math.max(1, Math.min(limit, 500)));
+  },
+
+  async listWorkspaceUsers(workspaceId) {
+    const data = db(workspaceId);
+    return data ? memoryUsersFor(data) : [];
+  },
+
+  async savePlatformHistory(record) {
+    store().platformHistory.set(record.day, record);
+  },
+
+  async listPlatformHistory(limit = 400) {
+    return [...store().platformHistory.values()]
+      .sort((a, b) => a.day.localeCompare(b.day))
+      .slice(-limit);
+  },
+
+  async saveFraudTriage(entry) {
+    store().fraudTriage.set(entry.flagId, entry);
+  },
+
+  async deleteWorkspace(workspaceId) {
+    const s = store();
+    const data = db(workspaceId);
+    if (!data) return { ok: false, error: "That workspace no longer exists." };
+    if (data.workspace.isDemo) return { ok: false, error: "The demo workspace cannot be deleted." };
+    const users = [...s.users.entries()].filter(([, user]) => user.workspaceId === workspaceId);
+    if (users.some(([, user]) => user.role === "platform_admin")) {
+      return { ok: false, error: "A workspace holding a platform admin cannot be deleted from here." };
+    }
+    for (const [email] of users) s.users.delete(email);
+    s.workspaces.delete(workspaceId);
+    s.credentials.delete(workspaceId);
+    s.instagramCredentials.delete(workspaceId);
+    return { ok: true, userIds: users.map(([, user]) => user.id) };
+  },
+
+  async deleteOrganization(organizationId) {
+    const ids = allWorkspaces()
+      .filter((data) => data.organization.id === organizationId)
+      .map((data) => data.workspace.id);
+    for (const id of ids) {
+      const result = await memoryProvider.deleteWorkspace(id);
+      if (!result.ok) return result;
+    }
+    return { ok: true, workspaceIds: ids };
+  },
+
+  // ── Agency (client book) ──────────────────────────────────
+  async setAgencyRates(workspaceId, rates) {
+    const data = mustDb(workspaceId);
+    data.agency.wholesaleRate = rates.wholesaleRate;
+    data.agency.retailAverage = rates.retailAverage;
+  },
+
+  async updateAgencyClient(workspaceId, locationId, patch) {
+    const data = mustDb(workspaceId);
+    const client = data.agency.clients.find((entry) => entry.locationId === locationId);
+    if (!client) return null;
+    Object.assign(client, patch);
+    return client;
+  },
+
+  async removeAgencyClient(workspaceId, locationId) {
+    const data = mustDb(workspaceId);
+    data.agency.clients = data.agency.clients.filter((entry) => entry.locationId !== locationId);
+  },
+
+  async setWorkspaceOwnerIdentity(workspaceId, identity) {
+    const s = store();
+    const data = db(workspaceId);
+    if (!data) return { ok: false, error: "This workspace has no owner account to invite." };
+    const email = identity.email.trim().toLowerCase();
+    const existing = s.users.get(email);
+    if (existing && existing.workspaceId !== workspaceId) {
+      return { ok: false, error: "That email already has a Foundly login on another workspace." };
+    }
+    const ownerEntry = [...s.users.entries()].find(
+      ([, user]) => user.workspaceId === workspaceId && user.role === "owner",
+    );
+    if (ownerEntry && (ownerEntry[1].passwordHash || ownerEntry[1].googleSub)) {
+      return { ok: false, error: "This workspace's owner already has a login; they can sign in or reset their password." };
+    }
+    if (ownerEntry) s.users.delete(ownerEntry[0]);
+    const name = identity.name.trim() || data.owner.name;
+    data.owner.email = email;
+    data.owner.name = name;
+    data.owner.emailVerified = true;
+    // Register the (still credential-less) login so a password-setup token can
+    // be consumed against it, exactly as the Postgres path allows.
+    s.users.set(email, {
+      id: data.owner.id,
+      name,
+      email,
+      role: "owner",
+      workspaceId,
+      emailVerified: true,
     });
+    return { ok: true, userId: data.owner.id };
   },
 
   async createOrganizationWorkspace(workspaceId, input) {
@@ -476,10 +708,34 @@ export const memoryProvider: DataProvider = {
     if (!user) return false;
     record.usedAt = consumedAt;
     user.passwordHash = passwordHash;
+    // Revoke every outstanding session on reset (V8).
+    user.sessionVersion = (user.sessionVersion ?? 0) + 1;
     for (const [hash, candidate] of s.passwordResets) {
       if (candidate.userId === user.id && hash !== tokenHash) s.passwordResets.delete(hash);
     }
     return true;
+  },
+
+  async getUserSessionVersion(userId) {
+    const user = [...store().users.values()].find((candidate) => candidate.id === userId);
+    return user ? user.sessionVersion ?? 0 : null;
+  },
+
+  async bumpUserSessionVersion(userId) {
+    const user = [...store().users.values()].find((candidate) => candidate.id === userId);
+    if (user) user.sessionVersion = (user.sessionVersion ?? 0) + 1;
+  },
+
+  async setEmailVerified(userId, verified) {
+    const user = [...store().users.values()].find((candidate) => candidate.id === userId);
+    if (user) user.emailVerified = verified;
+  },
+
+  async isWorkspaceEmailVerified(workspaceId) {
+    const owner = [...store().users.values()].find(
+      (candidate) => candidate.workspaceId === workspaceId && candidate.role === "owner",
+    );
+    return owner ? owner.emailVerified : true; // fail open
   },
 
   async upsertGoogleUser({ googleSub, email, name, referredByWorkspaceId }) {
@@ -1103,6 +1359,7 @@ export const memoryProvider: DataProvider = {
     if (patch.status !== undefined) data.subscription.status = patch.status;
     if (patch.tier !== undefined) data.subscription.tier = patch.tier;
     if (patch.interval !== undefined) data.subscription.interval = patch.interval;
+    if (patch.trialEndsAt !== undefined) data.subscription.trialEndsAt = patch.trialEndsAt;
     if (patch.stripeCustomerId !== undefined) data.subscription.stripeCustomerId = patch.stripeCustomerId;
     if (patch.stripeSubscriptionId !== undefined) data.subscription.stripeSubscriptionId = patch.stripeSubscriptionId;
     if (patch.stripePriceId !== undefined) data.subscription.stripePriceId = patch.stripePriceId;
@@ -1117,6 +1374,17 @@ export const memoryProvider: DataProvider = {
       data.subscription.usage.aiDraftsLimit = limits.aiDraftsPerMonth;
       data.subscription.usage.smsCreditsTotal = limits.smsCredits;
     }
+  },
+
+  async listTrialingSubscriptions() {
+    return allWorkspaces()
+      .filter((data) => !data.workspace.isDemo && data.subscription.status === "trialing")
+      .map((data) => data.subscription);
+  },
+
+  async markTrialNoticeSent(workspaceId, kind, sentAt) {
+    const data = mustDb(workspaceId);
+    data.subscription.trialNotices = { ...data.subscription.trialNotices, [kind]: sentAt };
   },
 
   async setIntegrationStatus(workspaceId, provider, status, detail) {
@@ -1176,6 +1444,16 @@ export const memoryProvider: DataProvider = {
     ];
     reconcileReviewAttribution(data);
     data.metrics = upsertSnapshot(data.metrics, update.snapshot);
+    // The public audit is the fallback, never an overwrite: a Business Profile
+    // snapshot sees posts, Q&A, replies and services that Places cannot, so its
+    // audit and inbox always win.
+    if (!data.location.gbpSnapshot) {
+      data.location.gbpAudit = update.audit;
+      data.location.suggestionInbox = mergeSuggestionInbox(
+        data.location.suggestionInbox ?? [],
+        update.suggestions,
+      );
+    }
     const places = data.integrations.find((i) => i.provider === "google_places");
     if (places) {
       places.status = "connected";
@@ -1187,6 +1465,13 @@ export const memoryProvider: DataProvider = {
       rating: update.rating,
       reviewCount: update.reviewCount,
       reviewsImported: update.reviews.length,
+      ...(data.location.gbpSnapshot
+        ? {}
+        : {
+            capabilityScore: update.audit.applicableProfileScore,
+            auditFindings: update.audit.findings.length,
+            suggestionsCreated: update.suggestions.length,
+          }),
     };
   },
 
@@ -1196,23 +1481,47 @@ export const memoryProvider: DataProvider = {
       return { ok: false, error: "The demo uses sample data." };
     }
     const credential = store().credentials.get(workspaceId) ?? null;
-    const { fetchGoogleProfile, locationFromProfileSnapshot } = await import("@/lib/google/profile-sync");
-    const outcome = await fetchGoogleProfile(
+    const { fetchGoogleProfile, fetchApifyProfile, locationFromProfileSnapshot } = await import(
+      "@/lib/google/profile-sync"
+    );
+    // Set when the owned sync could not serve and public data stood in for it.
+    let fromPublicData = false;
+    let publicDataReason: "approval_pending" | "not_connected" | undefined;
+    let publicDataDetail: string | undefined;
+    let outcome = await fetchGoogleProfile(
       credential,
       data.location,
       nowIso(),
       store().instagramCredentials.get(workspaceId) ?? null,
     );
-    if (!outcome.ok) return { ok: false, error: outcome.error };
 
-    if (outcome.pendingApproval) {
+    // Whenever Google itself cannot supply the profile — no connection, an
+    // expired token, or approval still pending — try public data before giving
+    // up. Waiting on Google is the thing this is meant to remove.
+    if (!outcome.ok || outcome.pendingApproval) {
+      const reason = outcome.ok ? "approval_pending" : "not_connected";
+      const googleError = outcome.ok ? undefined : outcome.error;
+      const pendingDetail = outcome.ok ? outcome.pendingDetail : undefined;
+      const publicOutcome = await fetchApifyProfile(data.location, nowIso());
       const g = data.integrations.find((i) => i.provider === "google");
-      if (g) {
-        g.status = "needs_attention";
-        g.detail =
-          "Connected — Google Business Profile API approval pending (Google approves per-project; typically 1–2 weeks)";
+      if (publicOutcome.ok) {
+        outcome = publicOutcome;
+        fromPublicData = true;
+        publicDataReason = reason;
+        publicDataDetail = pendingDetail;
+      } else if (googleError) {
+        // Public data could not stand in either. Report Google's own problem
+        // rather than the scraper's, which is the one the owner can act on.
+        return { ok: false, error: googleError };
+      } else {
+        if (g) {
+          g.status = "needs_attention";
+          g.detail = pendingDetail
+            ? `Connected — ${pendingDetail}`
+            : "Connected — Google Business Profile API approval pending (Google approves per-project; typically 1–2 weeks)";
+        }
+        return { ok: true, pendingApproval: true };
       }
-      return { ok: true, pendingApproval: true };
     }
 
     if (outcome.profileSnapshot) {
@@ -1255,13 +1564,15 @@ export const memoryProvider: DataProvider = {
     data.location.gbpConnected = true;
     const g = data.integrations.find((i) => i.provider === "google");
     if (g) {
-      g.status = outcome.performanceError ? "needs_attention" : "connected";
-      g.detail = `Google Business Profile synced — ${outcome.reviewCount ?? imported.length} reviews`;
-      if (outcome.performanceError) {
-        g.detail = `Reviews synced; GBP performance unavailable - ${outcome.performanceError}`;
-      } else {
-        g.detail = `Google Business Profile synced - ${outcome.reviewCount ?? imported.length} reviews and performance`;
-      }
+      const status = {
+        source: fromPublicData ? "google_public_scrape" : outcome.profileSnapshot?.source,
+        publicDataReason,
+        publicDataDetail,
+        reviewCount: outcome.reviewCount,
+        performanceError: outcome.performanceError,
+      };
+      g.status = googleIntegrationStatus(status);
+      g.detail = googleIntegrationDetail(status, imported.length);
       g.lastSyncAt = nowIso();
     }
     const external = outcome.profileSnapshot?.externalEvidence;
@@ -1324,6 +1635,21 @@ export const memoryProvider: DataProvider = {
     const suggestion = (data.location.suggestionInbox ?? []).find((item) => item.id === suggestionId);
     if (!suggestion) return null;
     Object.assign(suggestion, patch);
+    return suggestion;
+  },
+
+  async updateBusinessDetails(workspaceId, patch) {
+    const data = mustDb(workspaceId);
+    if (patch.website !== undefined) data.location.website = patch.website || undefined;
+    if (patch.ownerDescription !== undefined) data.location.ownerDescription = patch.ownerDescription || undefined;
+  },
+
+  async appendProfileSuggestion(workspaceId, suggestion) {
+    if (suggestion.workspaceId !== workspaceId) throw new Error("Suggestion workspace mismatch.");
+    const data = mustDb(workspaceId);
+    data.location.suggestionInbox ??= [];
+    if (data.location.suggestionInbox.some((item) => item.id === suggestion.id)) return suggestion;
+    data.location.suggestionInbox.unshift(suggestion);
     return suggestion;
   },
 
@@ -1493,10 +1819,26 @@ export const memoryProvider: DataProvider = {
     return member;
   },
 
+  // ── Milestones ────────────────────────────────────────────
+  async appendMilestone(workspaceId, milestone) {
+    const data = mustDb(workspaceId);
+    if (milestone.locationId !== data.location.id) throw new Error("Milestone location mismatch.");
+    // Idempotent on id: the award pass re-offers earned milestones every sync.
+    if (data.milestones.some((m) => m.id === milestone.id || m.kind === milestone.kind)) return;
+    data.milestones.unshift(milestone);
+  },
+
   // ── Notifications ─────────────────────────────────────────
   async markNotificationsRead(workspaceId) {
     const data = mustDb(workspaceId);
     for (const n of data.notifications) n.read = true;
+  },
+
+  async markNotificationRead(workspaceId, notificationId) {
+    const data = mustDb(workspaceId);
+    const found = data.notifications.find((n) => n.id === notificationId);
+    // An unknown id is a no-op: the row may have been read on another device.
+    if (found) found.read = true;
   },
 
   // ── Demo ──────────────────────────────────────────────────

@@ -9,6 +9,8 @@ import { Funnel } from "@/components/charts";
 import { formatNumber, formatDate } from "@/lib/utils/format";
 import { emailEnabled } from "@/lib/email";
 import { smsEnabled } from "@/lib/sms/twilio";
+import { upgradeFor } from "@/lib/billing/plans";
+import { subscriptionHasFeature } from "@/lib/billing/trial";
 import type { Campaign, CampaignDeliveryState, Channel } from "@/lib/data/types";
 
 const CHANNEL_ICON: Record<Channel, IconName> = {
@@ -37,6 +39,13 @@ const STATE_TONE: Record<CampaignDeliveryState, "primary" | "danger" | "gold" | 
 
 export default async function CampaignsPage() {
   const data = await getData();
+  // The upsell below is an upsell, not a page header: a workspace that already
+  // pays for campaigns_pro must never be told it is locked. Named from the plan
+  // catalog for the same reason the badge is — there is no "Pro" plan to sell.
+  const proPlan = upgradeFor("campaigns_pro");
+  // Read through the trial-aware gate: an expired trial no longer counts as
+  // trialing, and its stored Growth tier no longer counts as paid.
+  const hasCampaignsPro = subscriptionHasFeature(data.subscription, "campaigns_pro");
   const automations = data.campaigns.filter((c) => c.isAutomation);
   const oneOff = data.campaigns.filter((c) => !c.isAutomation);
   const hasCampaigns = data.campaigns.length > 0;
@@ -118,23 +127,26 @@ export default async function CampaignsPage() {
         </Card>
       ) : null}
 
-      {/* Campaigns Pro upsell (locked) — restrained, no gold-as-celebration. */}
-      <div className="flex flex-col gap-3 rounded-card border border-hairline bg-card p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-primary-wash text-primary">
-            <Icon name="lock" size={18} />
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5 text-[15px] font-bold text-ink">
-              Campaigns Pro <Badge tone="neutral">Pro plan</Badge>
+      {/* Campaigns Pro upsell (locked) — restrained, no gold-as-celebration.
+          Hidden once the workspace owns the feature. */}
+      {hasCampaignsPro ? null : (
+        <div className="flex flex-col gap-3 rounded-card border border-hairline bg-card p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-primary-wash text-primary">
+              <Icon name="lock" size={18} />
             </div>
-            <p className="text-[14px] text-sub">Multi-step journeys, segments, and A/B testing.</p>
+            <div>
+              <div className="flex items-center gap-1.5 text-[15px] font-bold text-ink">
+                Campaigns Pro <Badge tone="neutral">{proPlan.name} and up</Badge>
+              </div>
+              <p className="text-[14px] text-sub">Multi-step journeys, segments, and A/B testing.</p>
+            </div>
           </div>
+          <LinkButton href="/app/settings/billing" variant="secondary" size="sm" iconRight="chevron-right">
+            See plans
+          </LinkButton>
         </div>
-        <LinkButton href="/app/settings/billing" variant="secondary" size="sm" iconRight="chevron-right">
-          See plans
-        </LinkButton>
-      </div>
+      )}
     </div>
   );
 }

@@ -42,23 +42,34 @@ export function ResetPasswordForm({ token }: { token: string }) {
         <h1 className="text-[24px] font-extrabold tracking-tight text-ink">Choose a new password</h1>
         <p className="mt-1 text-[14px] text-sub">Use at least eight characters with a letter and a number.</p>
       </div>
+      {/* method="post" so a pre-hydration submit cannot fall back to a GET that
+          places the new password — and the reset token — in the URL. */}
       <form
         className="mt-6 space-y-4"
+        method="post"
         onSubmit={(event) => {
           event.preventDefault();
-          if (password !== confirm) {
+          // Read the DOM, not state — see the note in SignInForm. Submitting
+          // before hydration otherwise compared two empty strings, passed the
+          // match check, and sent a blank password to the action.
+          const data = new FormData(event.currentTarget);
+          const typedPassword = String(data.get("password") ?? "") || password;
+          const typedConfirm = String(data.get("confirm") ?? "") || confirm;
+          if (typedPassword !== typedConfirm) {
             setResult({ ok: false, message: "Passwords do not match." });
             return;
           }
           setResult(null);
-          startTransition(async () => setResult(await resetPasswordAction({ token, password })));
+          startTransition(async () =>
+            setResult(await resetPasswordAction({ token, password: typedPassword })),
+          );
         }}
       >
         <Field label="New password">
-          <Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" iconLeft="lock" minLength={8} maxLength={128} required />
+          <Input type="password" name="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" iconLeft="lock" minLength={8} maxLength={128} required />
         </Field>
         <Field label="Confirm new password">
-          <Input type="password" value={confirm} onChange={(event) => setConfirm(event.target.value)} autoComplete="new-password" iconLeft="lock" minLength={8} maxLength={128} required />
+          <Input type="password" name="confirm" value={confirm} onChange={(event) => setConfirm(event.target.value)} autoComplete="new-password" iconLeft="lock" minLength={8} maxLength={128} required />
         </Field>
         {result && !result.ok ? <div role="alert" className="rounded-btn border border-danger/20 bg-danger-tint px-3 py-2 text-[13px] text-danger">{result.message}</div> : null}
         <Button type="submit" size="lg" fullWidth loading={pending}>Reset password</Button>

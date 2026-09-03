@@ -2,6 +2,7 @@ import "server-only";
 import { randomBytes } from "node:crypto";
 import type { DataProvider } from "@/lib/data/provider";
 import type { MonitoringRun, Review } from "@/lib/data/types";
+import { awardMilestones } from "@/lib/milestones/runner";
 
 interface DurabilityDelta {
   vanished: Review[];
@@ -34,6 +35,50 @@ export function durabilityDelta(before: Review[], after: Review[]): DurabilityDe
     }
   }
   return delta;
+}
+
+export interface ReviewArrivals {
+  /** Reviews present after the sync that were not in the prior import. */
+  arrived: Review[];
+  /**
+   * True when there was no prior history at all. The whole review set is then a
+   * first import, not a burst of new arrivals — announcing 60 "new" reviews the
+   * day someone connects Google would be false.
+   */
+  firstImport: boolean;
+}
+
+/**
+ * Reviews that genuinely appeared since the last sync.
+ *
+ * Identity is the stored review id, so a re-import of the same review is not an
+ * arrival. A first import reports `arrived: []` rather than the entire history.
+ */
+export function newReviewArrivals(before: Review[], after: Review[]): ReviewArrivals {
+  if (!before.length) return { arrived: [], firstImport: true };
+  const known = new Set(before.map((review) => review.id));
+  return { arrived: after.filter((review) => !known.has(review.id)), firstImport: false };
+}
+
+/** "3× 5★, 1× 4★" — measured counts, highest rating first. */
+export function describeArrivalRatings(reviews: Review[]): string {
+  const counts = new Map<number, number>();
+  for (const review of reviews) counts.set(review.rating, (counts.get(review.rating) ?? 0) + 1);
+  return [...counts.entries()]
+    .sort((a, b) => b[0] - a[0])
+    .map(([rating, count]) => `${count}× ${rating}★`)
+    .join(", ");
+}
+
+/**
+ * The reply-backlog half of the arrival notification. Empty when every arrival
+ * already carries a reply, so the sentence is never padded with a zero.
+ */
+export function replyBacklogSentence(arrived: number, unanswered: number): string {
+  if (unanswered <= 0) return "";
+  if (arrived === 1) return " No reply yet.";
+  if (unanswered >= arrived) return " None have a reply yet.";
+  return ` ${unanswered} of them ${unanswered === 1 ? "has" : "have"} no reply yet.`;
 }
 
 export interface MonitoringWorkspaceResult {
@@ -194,6 +239,27 @@ export async function runWorkspaceMonitoring(input: {
         createdAt: completedAt,
         read: false,
       });
+    }
+    // New reviews are the thing an owner most wants to hear about, and until
+    // now the only review notification was for reviews disappearing.
+    const arrivals = newReviewArrivals(beforeReviews, after?.reviews ?? beforeReviews);
+    if (after && arrivals.arrived.length) {
+      const count = arrivals.arrived.length;
+      const unanswered = arrivals.arrived.filter((review) => review.needsReply).length;
+      await provider.appendNotification(workspaceId, {
+        id: `ntf_${randomBytes(12).toString("hex")}`,
+        locationId: after.location.id,
+        kind: "review",
+        title: `${count} new Google review${count === 1 ? "" : "s"}`,
+        body: `${describeArrivalRatings(arrivals.arrived)}.${replyBacklogSentence(count, unanswered)}`,
+        createdAt: completedAt,
+        read: false,
+      });
+    }
+
+    // Milestones are evaluated against the numbers this sync just measured.
+    if (after) {
+      await awardMilestones({ provider, workspaceId, data: after, now: new Date(completedAt) });
     }
     return { workspaceId, status, newSuggestions: newSuggestionIds.length };
   } catch (error) {

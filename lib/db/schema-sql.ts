@@ -33,6 +33,7 @@ export const SCHEMA_STATEMENTS: string[] = [
   "CREATE TABLE IF NOT EXISTS \"workspace\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"organization_id\" text NOT NULL,\n\t\"name\" text NOT NULL,\n\t\"vertical\" text NOT NULL,\n\t\"region\" text NOT NULL,\n\t\"timezone\" text NOT NULL,\n\t\"plan\" text NOT NULL,\n\t\"created_at\" text NOT NULL,\n\t\"white_label\" jsonb,\n\t\"industry_config\" jsonb,\n\t\"settings\" jsonb,\n\t\"is_demo\" boolean DEFAULT false NOT NULL,\n\t\"referred_by_workspace_id\" text,\n\t\"referral_reward_status\" text,\n\t\"referral_reward_applied_at\" text\n);",
   "CREATE UNIQUE INDEX IF NOT EXISTS \"qr_asset_slug_uq\" ON \"qr_asset\" USING btree (\"slug\");",
   "CREATE TABLE IF NOT EXISTS \"google_credential\" (\n\t\"workspace_id\" text PRIMARY KEY NOT NULL,\n\t\"encrypted_refresh_token\" text NOT NULL,\n\t\"google_account\" text,\n\t\"scopes\" text NOT NULL,\n\t\"connected_at\" text NOT NULL,\n\t\"updated_at\" text NOT NULL\n);",
+  "CREATE TABLE IF NOT EXISTS \"email_credential\" (\n\t\"workspace_id\" text PRIMARY KEY NOT NULL,\n\t\"provider\" text NOT NULL,\n\t\"encrypted_secret\" text NOT NULL,\n\t\"from_email\" text NOT NULL,\n\t\"from_name\" text,\n\t\"reply_to\" text,\n\t\"smtp_host\" text,\n\t\"smtp_port\" integer,\n\t\"smtp_user\" text,\n\t\"smtp_secure\" boolean,\n\t\"verified_at\" text,\n\t\"last_error\" text,\n\t\"created_at\" text NOT NULL,\n\t\"updated_at\" text NOT NULL\n);",
   "CREATE TABLE IF NOT EXISTS \"instagram_credential\" (\n\t\"workspace_id\" text PRIMARY KEY NOT NULL,\n\t\"encrypted_access_token\" text NOT NULL,\n\t\"account_id\" text NOT NULL,\n\t\"username\" text,\n\t\"scopes\" text NOT NULL,\n\t\"expires_at\" text,\n\t\"connected_at\" text NOT NULL,\n\t\"updated_at\" text NOT NULL\n);",
   "CREATE TABLE IF NOT EXISTS \"profile_mutation_job\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"workspace_id\" text NOT NULL,\n\t\"location_id\" text NOT NULL,\n\t\"suggestion_id\" text NOT NULL,\n\t\"idempotency_key\" text NOT NULL,\n\t\"target\" text NOT NULL,\n\t\"status\" text NOT NULL,\n\t\"update_mask\" jsonb NOT NULL,\n\t\"before_value\" jsonb,\n\t\"proposed_value\" jsonb NOT NULL,\n\t\"provider_response\" jsonb,\n\t\"verified_value\" jsonb,\n\t\"rollback_value\" jsonb,\n\t\"attempts\" integer DEFAULT 0 NOT NULL,\n\t\"approved_at\" text NOT NULL,\n\t\"approved_by\" text NOT NULL,\n\t\"created_at\" text NOT NULL,\n\t\"updated_at\" text NOT NULL,\n\t\"started_at\" text,\n\t\"applied_at\" text,\n\t\"failed_at\" text,\n\t\"last_error\" text\n);",
   "CREATE UNIQUE INDEX IF NOT EXISTS \"profile_mutation_job_idempotency_uq\" ON \"profile_mutation_job\" USING btree (\"idempotency_key\");"
@@ -52,21 +53,87 @@ export const ADDITIVE_STATEMENTS: string[] = [
   "CREATE TABLE IF NOT EXISTS \"ai_content_asset\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"workspace_id\" text NOT NULL,\n\t\"location_id\" text NOT NULL,\n\t\"suggestion_id\" text NOT NULL,\n\t\"kind\" text NOT NULL,\n\t\"mime_type\" text NOT NULL,\n\t\"base64_data\" text NOT NULL,\n\t\"prompt\" text NOT NULL,\n\t\"alt_text\" text NOT NULL,\n\t\"model\" text NOT NULL,\n\t\"created_at\" text NOT NULL,\n\t\"updated_at\" text NOT NULL\n);",
   "CREATE UNIQUE INDEX IF NOT EXISTS \"ai_content_asset_suggestion_uq\" ON \"ai_content_asset\" USING btree (\"workspace_id\",\"suggestion_id\");",
   "CREATE TABLE IF NOT EXISTS \"google_credential\" (\n\t\"workspace_id\" text PRIMARY KEY NOT NULL,\n\t\"encrypted_refresh_token\" text NOT NULL,\n\t\"google_account\" text,\n\t\"scopes\" text NOT NULL,\n\t\"connected_at\" text NOT NULL,\n\t\"updated_at\" text NOT NULL\n);",
+  "CREATE TABLE IF NOT EXISTS \"email_credential\" (\n\t\"workspace_id\" text PRIMARY KEY NOT NULL,\n\t\"provider\" text NOT NULL,\n\t\"encrypted_secret\" text NOT NULL,\n\t\"from_email\" text NOT NULL,\n\t\"from_name\" text,\n\t\"reply_to\" text,\n\t\"smtp_host\" text,\n\t\"smtp_port\" integer,\n\t\"smtp_user\" text,\n\t\"smtp_secure\" boolean,\n\t\"verified_at\" text,\n\t\"last_error\" text,\n\t\"created_at\" text NOT NULL,\n\t\"updated_at\" text NOT NULL\n);",
   "CREATE TABLE IF NOT EXISTS \"instagram_credential\" (\n\t\"workspace_id\" text PRIMARY KEY NOT NULL,\n\t\"encrypted_access_token\" text NOT NULL,\n\t\"account_id\" text NOT NULL,\n\t\"username\" text,\n\t\"scopes\" text NOT NULL,\n\t\"expires_at\" text,\n\t\"connected_at\" text NOT NULL,\n\t\"updated_at\" text NOT NULL\n);",
   "CREATE TABLE IF NOT EXISTS \"password_reset_token\" (\n\t\"token_hash\" text PRIMARY KEY NOT NULL,\n\t\"user_id\" text NOT NULL,\n\t\"expires_at\" text NOT NULL,\n\t\"used_at\" text,\n\t\"created_at\" text NOT NULL\n);",
+  "ALTER TABLE \"app_user\" ADD COLUMN IF NOT EXISTS \"session_version\" integer DEFAULT 0 NOT NULL;",
+  // Duplicate-account prevention was application-only, so two concurrent
+  // registrations for the same address could both pass the pre-insert check and
+  // create two authenticatable accounts. This enforces it in the database.
+  //
+  // PARTIAL and on lower(email), to match findUserRowByEmail exactly: adding a
+  // second location under one organization legitimately inserts another app_user
+  // row with the owner's email and NULL credentials, and those rows are excluded
+  // from every auth lookup — so they must stay excluded here too.
+  "CREATE UNIQUE INDEX IF NOT EXISTS \"app_user_credentialed_email_uq\" ON \"app_user\" (lower(\"email\")) WHERE \"password_hash\" IS NOT NULL OR \"google_sub\" IS NOT NULL;",
   "ALTER TABLE \"subscription\" ADD COLUMN IF NOT EXISTS \"stripe_customer_id\" text;",
   "ALTER TABLE \"subscription\" ADD COLUMN IF NOT EXISTS \"stripe_subscription_id\" text;",
   "ALTER TABLE \"subscription\" ADD COLUMN IF NOT EXISTS \"stripe_price_id\" text;",
   "ALTER TABLE \"subscription\" ADD COLUMN IF NOT EXISTS \"current_period_end\" text;",
   "ALTER TABLE \"subscription\" ADD COLUMN IF NOT EXISTS \"cancel_at_period_end\" boolean;",
+  // Trial notice idempotency (lib/billing/trial-emails.ts): {ending?, ended?}
+  // ISO timestamps. Nullable and additive — existing rows read as "never sent".
+  "ALTER TABLE \"subscription\" ADD COLUMN IF NOT EXISTS \"trial_notices\" jsonb;",
   "ALTER TABLE \"workspace\" ADD COLUMN IF NOT EXISTS \"referred_by_workspace_id\" text;",
   "ALTER TABLE \"workspace\" ADD COLUMN IF NOT EXISTS \"referral_reward_status\" text;",
   "ALTER TABLE \"workspace\" ADD COLUMN IF NOT EXISTS \"referral_reward_applied_at\" text;",
   "ALTER TABLE \"location\" ADD COLUMN IF NOT EXISTS \"gbp_snapshot\" jsonb;",
   "ALTER TABLE \"location\" ADD COLUMN IF NOT EXISTS \"gbp_audit\" jsonb;",
   "ALTER TABLE \"location\" ADD COLUMN IF NOT EXISTS \"suggestion_inbox\" jsonb;",
+  "ALTER TABLE \"location\" ADD COLUMN IF NOT EXISTS \"website\" text;",
+  "ALTER TABLE \"location\" ADD COLUMN IF NOT EXISTS \"owner_description\" text;",
+  // Gmail OAuth sender (Settings → Channels → Connect Gmail). The refresh token
+  // reuses encrypted_secret; these carry the mailbox, granted scopes, consent
+  // time, and a "needs_reconnect" flag set when a refresh returns invalid_grant.
+  "ALTER TABLE \"email_credential\" ADD COLUMN IF NOT EXISTS \"google_account\" text;",
+  "ALTER TABLE \"email_credential\" ADD COLUMN IF NOT EXISTS \"scopes\" text;",
+  "ALTER TABLE \"email_credential\" ADD COLUMN IF NOT EXISTS \"connected_at\" text;",
+  "ALTER TABLE \"email_credential\" ADD COLUMN IF NOT EXISTS \"status\" text;",
   "CREATE TABLE IF NOT EXISTS \"profile_mutation_job\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"workspace_id\" text NOT NULL,\n\t\"location_id\" text NOT NULL,\n\t\"suggestion_id\" text NOT NULL,\n\t\"idempotency_key\" text NOT NULL,\n\t\"target\" text NOT NULL,\n\t\"status\" text NOT NULL,\n\t\"update_mask\" jsonb NOT NULL,\n\t\"before_value\" jsonb,\n\t\"proposed_value\" jsonb NOT NULL,\n\t\"provider_response\" jsonb,\n\t\"verified_value\" jsonb,\n\t\"rollback_value\" jsonb,\n\t\"attempts\" integer DEFAULT 0 NOT NULL,\n\t\"approved_at\" text NOT NULL,\n\t\"approved_by\" text NOT NULL,\n\t\"created_at\" text NOT NULL,\n\t\"updated_at\" text NOT NULL,\n\t\"started_at\" text,\n\t\"applied_at\" text,\n\t\"failed_at\" text,\n\t\"last_error\" text\n);",
   "CREATE UNIQUE INDEX IF NOT EXISTS \"profile_mutation_job_idempotency_uq\" ON \"profile_mutation_job\" USING btree (\"idempotency_key\");",
+
+  // Tenant-scoping indexes. Every one of the ~21 queries getData() fans out
+  // filters on workspace_id and most then sort by seq — with no index that is a
+  // sequential scan plus a sort, per table, per page load. Harmless today at low
+  // row counts, but it degrades linearly with total customers and review/
+  // audit_log are the first to hurt. Composite (workspace_id, seq) so the sort
+  // is satisfied by the index too.
+  //
+  // Deliberately NOT `CONCURRENTLY`: these run inside ensureSchema's batched
+  // transaction, and CREATE INDEX CONCURRENTLY cannot run in a transaction
+  // block. On a fresh/small table the exclusive lock is momentary; on a large
+  // existing table, create them by hand with CONCURRENTLY first — the
+  // IF NOT EXISTS here then becomes a no-op.
+  "CREATE INDEX IF NOT EXISTS \"review_ws_seq_idx\" ON \"review\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"review_request_ws_seq_idx\" ON \"review_request\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"customer_ws_seq_idx\" ON \"customer\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"audit_log_ws_seq_idx\" ON \"audit_log\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"notification_ws_seq_idx\" ON \"notification\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"staff_member_ws_seq_idx\" ON \"staff_member\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"review_draft_ws_seq_idx\" ON \"review_draft\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"gbp_task_ws_seq_idx\" ON \"gbp_task\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"campaign_ws_seq_idx\" ON \"campaign\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"private_feedback_ws_seq_idx\" ON \"private_feedback\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"qr_asset_ws_seq_idx\" ON \"qr_asset\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"staff_invite_ws_seq_idx\" ON \"staff_invite\" (\"workspace_id\",\"seq\");",
+  "CREATE INDEX IF NOT EXISTS \"location_ws_idx\" ON \"location\" (\"workspace_id\");",
+  "CREATE INDEX IF NOT EXISTS \"subscription_ws_idx\" ON \"subscription\" (\"workspace_id\");",
+  "CREATE INDEX IF NOT EXISTS \"dataset_meta_ws_idx\" ON \"dataset_meta\" (\"workspace_id\");",
+  "CREATE INDEX IF NOT EXISTS \"customer_consent_ws_idx\" ON \"customer_consent\" (\"workspace_id\");",
+  "CREATE INDEX IF NOT EXISTS \"review_reply_ws_idx\" ON \"review_reply\" (\"workspace_id\");",
+  "CREATE INDEX IF NOT EXISTS \"app_user_ws_role_idx\" ON \"app_user\" (\"workspace_id\",\"role\");",
+  "CREATE INDEX IF NOT EXISTS \"workspace_org_idx\" ON \"workspace\" (\"organization_id\");",
+
+  // Internal ops console (2026-09). Daily platform history, so churn and NRR
+  // have a "then" to compare against; and the operator's fraud-triage ledger.
+  "CREATE TABLE IF NOT EXISTS \"platform_snapshot\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"day\" text NOT NULL,\n\t\"captured_at\" text NOT NULL,\n\t\"tenants\" jsonb NOT NULL,\n\t\"kpis\" jsonb NOT NULL\n);",
+  "CREATE UNIQUE INDEX IF NOT EXISTS \"platform_snapshot_day_uq\" ON \"platform_snapshot\" USING btree (\"day\");",
+  "CREATE TABLE IF NOT EXISTS \"fraud_triage\" (\n\t\"flag_id\" text PRIMARY KEY NOT NULL,\n\t\"workspace_id\" text NOT NULL,\n\t\"decision\" text NOT NULL,\n\t\"operator\" text NOT NULL,\n\t\"note\" text,\n\t\"at\" text NOT NULL\n);",
+  "CREATE INDEX IF NOT EXISTS \"fraud_triage_ws_idx\" ON \"fraud_triage\" (\"workspace_id\");",
+  // Platform-wide reads the ops console runs on every page: the audit ledger
+  // ordered by time across tenants, and the fraud detector's request window.
+  "CREATE INDEX IF NOT EXISTS \"audit_log_at_idx\" ON \"audit_log\" (\"at\");",
+  "CREATE INDEX IF NOT EXISTS \"review_request_created_idx\" ON \"review_request\" (\"created_at\");",
 ];
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -187,6 +254,13 @@ export const TENANT_SCOPED_TABLES: readonly TenantScopedTable[] = [
   { table: "customer", tenantColumn: "workspace_id" },
   { table: "customer_consent", tenantColumn: "workspace_id" },
   { table: "dataset_meta", tenantColumn: "workspace_id" },
+  // Holds each workspace's encrypted Resend key / SMTP password. Cross-tenant
+  // reads here would expose sending credentials, so it is scoped like any
+  // other credential table.
+  { table: "email_credential", tenantColumn: "workspace_id" },
+  // An operator's decision about one tenant's capture signal — it is a record
+  // about that tenant, so it is isolated with the tenant's rows.
+  { table: "fraud_triage", tenantColumn: "workspace_id" },
   { table: "gbp_task", tenantColumn: "workspace_id" },
   { table: "google_credential", tenantColumn: "workspace_id" },
   { table: "instagram_credential", tenantColumn: "workspace_id" },
@@ -226,6 +300,13 @@ export const UNSCOPED_TABLES: readonly { table: string; reason: string }[] = [
       "No workspace_id column; looked up by token_hash before the tenant is " +
       "known. Needs an additive workspace_id + backfill before it can be " +
       "covered. Currently protected only by token unguessability.",
+  },
+  {
+    table: "platform_snapshot",
+    reason:
+      "Platform-wide daily aggregate written by the ops cron; it is a roll-up " +
+      "over every tenant and carries no tenant key by design. Read and " +
+      "written only by platform_admin code paths (lib/actions.ts guards).",
   },
 ];
 

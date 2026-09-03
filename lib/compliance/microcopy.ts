@@ -17,6 +17,12 @@ export const MICROCOPY = Object.freeze({
   // Review page / customer flow
   aiDraftDisclaimer: "AI-drafted starting point — edit it so it's your own words.",
   customerWordsOnly: "Write about your genuine experience in your own words.",
+  draftFromYourAnswers: "Built only from what you just told us — the service, your rating and what you picked out. Edit anything that isn't right.",
+  draftTemplateDisclaimer: "Assembled from your answers using a fixed template — no AI wrote this. Edit it so it's your own words.",
+  draftEditBeforePosting: "Please read it through and make it sound like you before you post.",
+  draftWriteMyOwn: "Rather start from a blank page?",
+  serviceStepHelp: "This only shapes the wording we suggest. Skip it if none of these fit.",
+  attributeStepHelp: "Pick anything that was actually true of your visit. Nothing is added for you.",
   aiReviewEditDisclaimer: "Optional clarity edit only - Foundly never adds services, names, keywords, or claims.",
   samePathEveryRating: "The public Google review option is available for every rating.",
   publicLinkAlways: "Prefer to post publicly? Leave a Google review:",

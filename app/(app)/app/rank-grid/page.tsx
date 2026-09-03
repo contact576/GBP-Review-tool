@@ -6,18 +6,21 @@ import { PageHeader } from "@/components/app/PageHeader";
 import { Paywall } from "@/components/app/Paywall";
 import { Icon } from "@/components/icons";
 import { StatTile } from "@/components/charts/StatTile";
-import { hasFeature } from "@/lib/billing/plans";
+import { upgradeFor } from "@/lib/billing/plans";
+import { subscriptionHasFeature } from "@/lib/billing/trial";
 import { formatDate } from "@/lib/utils/format";
 import { RankGridView } from "./RankGridView";
 import { RankGridRunner } from "./RankGridRunner";
 
 export default async function RankGridPage() {
   const data = await getData();
-  const entitled = hasFeature(
-    data.subscription.tier,
-    "rank_grid",
-    data.subscription.status === "trialing",
-  );
+  // Trial-aware: an expired trial is locked here even though the row still
+  // says `trialing` / `growth` (lib/billing/trial.ts).
+  const entitled = subscriptionHasFeature(data.subscription, "rank_grid");
+  // Named from the entitlement rather than written by hand: the badge used to
+  // say "Pro", a tier folded into Growth and now only a legacy alias, while the
+  // Paywall directly below it already read "Growth" off this same helper.
+  const rankGridPlan = upgradeFor("rank_grid");
   const scan = (data.rankScans ?? [])[0];
   const month = new Date().toISOString().slice(0, 7);
   const scansUsed = data.rankScans.filter((item) => item.ranAt.startsWith(month)).length;
@@ -36,7 +39,7 @@ export default async function RankGridPage() {
         <PageHeader
           title={
             <span className="inline-flex items-center gap-2">
-              Rank Grid <Badge tone="gold" icon="sparkles">Pro</Badge>
+              Rank Grid <Badge tone="gold" icon="sparkles">{rankGridPlan.name} and up</Badge>
             </span>
           }
           sub="Measure relevance-ranked Google Places visibility across nearby coordinates."
@@ -49,7 +52,7 @@ export default async function RankGridPage() {
               <EmptyState
                 icon="grid"
                 title="Google Places visibility scanning"
-                description="Scan 9 or 25 nearby coordinates for one search keyword on Pro."
+                description={`Scan 9 or 25 nearby coordinates for one search keyword on ${rankGridPlan.name}.`}
               />
             </Card>
           </Paywall>
@@ -66,17 +69,25 @@ export default async function RankGridPage() {
   }
 
   const points = scan.points ?? [];
-  const green = points.filter((point) => point.rank !== null && point.rank <= 3).length;
-  const amber = points.filter(
+  // A point Google never answered for is not a ranking result. Every figure here
+  // is measured-only, for the same reason the scan itself averages that way
+  // (lib/actions.ts) — otherwise a Google outage reads as a ranking collapse.
+  const measured = points.filter((point) => !point.unavailable);
+  const green = measured.filter((point) => point.rank !== null && point.rank <= 3).length;
+  const amber = measured.filter(
     (point) => point.rank !== null && point.rank > 3 && point.rank <= 10,
   ).length;
-  const red = points.filter((point) => point.rank === null || point.rank > 10).length;
-  const total = points.length;
+  // Ranking #14 is not "not found" — it is found, and beaten. The two are split
+  // so neither is reported as the other.
+  const absent = measured.filter((point) => point.rank === null).length;
+  const belowTen = measured.filter((point) => point.rank !== null && point.rank > 10).length;
+  const red = absent + belowTen;
+  const total = measured.length;
   const kpis = [
     { label: "Average rank", value: scan.avgRank.toFixed(1) },
     { label: "Top-3 coverage", value: `${Math.round(scan.shareOfLocalPack * 100)}%` },
     { label: "Top-3 points", value: `${green}/${total}` },
-    { label: "Not found", value: red },
+    { label: "Not in top 10", value: red },
   ];
 
   const overview = (
@@ -111,7 +122,11 @@ export default async function RankGridPage() {
     <div className="space-y-5">
       <Card>
         <CardHeader kicker="Coverage" title="Local visibility grid" />
-        <RankGridView scan={scan} />
+        <RankGridView
+          scan={scan}
+          businessName={data.location.name}
+          {...(data.location.googlePlaceId ? { businessPlaceId: data.location.googlePlaceId } : {})}
+        />
       </Card>
       <Card className="border-primary/30 bg-primary-wash/50">
         <div className="flex items-start gap-3">
@@ -144,7 +159,7 @@ export default async function RankGridPage() {
       <PageHeader
         title={
           <span className="inline-flex items-center gap-2">
-            Rank Grid <Badge tone="gold" icon="sparkles">Pro</Badge>
+            Rank Grid <Badge tone="gold" icon="sparkles">{rankGridPlan.name} and up</Badge>
           </span>
         }
         sub="Measure relevance-ranked Google Places visibility across nearby coordinates."

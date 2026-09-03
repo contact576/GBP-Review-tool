@@ -53,12 +53,21 @@ export function ReconnectButton({
   connected: boolean;
 }) {
   const t = connected ? TARGET[provider].connected : TARGET[provider].disconnected;
+  // These /api/* targets are not pages — each one mints a fresh OAuth state and
+  // sets the CSRF state cookie before redirecting to the provider. Next.js
+  // prefetches links by default, which fired the flow unattended: the prefetch
+  // fetch followed the cross-origin redirect (a CORS error in the console), and
+  // because this page renders two links to the same connect route, a prefetch
+  // landing after a real click overwrites the in-flight state cookie and the
+  // callback then fails state validation. Never prefetch a side-effecting route.
+  const sideEffecting = t.href.startsWith("/api/");
   return (
     <LinkButton
       href={t.href}
       variant={connected ? "ghost" : "secondary"}
       size="sm"
       icon={t.icon}
+      prefetch={sideEffecting ? false : undefined}
     >
       {t.label}
     </LinkButton>

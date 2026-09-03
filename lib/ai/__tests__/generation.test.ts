@@ -10,7 +10,12 @@ import {
   type ScoreStanding,
 } from "@/lib/ai/fallbacks";
 import { lintSentimentConsistency, runLints } from "@/lib/compliance/lints";
-import { getIndustry, INDUSTRIES } from "@/lib/industries";
+import {
+  getIndustry,
+  humanizeServiceName,
+  INDUSTRIES,
+  resolveServiceOptions,
+} from "@/lib/industries";
 
 /** Superlatives that must never appear in a 4-star register. */
 const BANNED_AT_4 = /exceeded expectations|flawless|perfect|\bbest\b.*\bever\b|incredible|10\s*\/\s*10/i;
@@ -154,11 +159,151 @@ describe("template engine — fallbackReviewDrafts", () => {
     }
   });
 
+  /**
+   * The regression that matters most: before the per-request nonce, two
+   * customers who tapped the same chips at the same business on the same day
+   * received byte-identical review text — which reads as fake to the next
+   * person and to Google.
+   */
+  it("two customers with identical picks at the same business get different text", () => {
+    const base = inputFor("restaurant", "Cedar Grove Bistro", 5);
+    const first = fallbackReviewDrafts({ ...base, nonce: "tok_alice.m1a2.9f3b" });
+    const second = fallbackReviewDrafts({ ...base, nonce: "tok_brenda.m1a2.71cd" });
+
+    // Every one of the three variants must differ between the two customers.
+    for (let i = 0; i < 3; i++) {
+      expect(second[i]!.text, `variant ${i} repeated verbatim`).not.toBe(first[i]!.text);
+    }
+
+    // And each customer's own drafts stay lint-clean and grounded.
+    for (const variants of [first, second]) {
+      for (const v of variants) {
+        const res = runLints(v.text, {
+          kind: "review",
+          businessName: base.business,
+          rating: 5,
+          allowedFacts: [...base.attributes, base.service ?? "", base.staffName ?? ""],
+        });
+        expect(res.flags, v.text).toEqual([]);
+        expect(countOccurrences(v.text, base.business)).toBe(1);
+      }
+    }
+  });
+
+  it("a run of customers keeps producing fresh wording, not two alternating drafts", () => {
+    const base = inputFor("salon", "Velvet Room Salon", 5);
+    const seen = new Set(
+      Array.from({ length: 12 }, (_, n) =>
+        fallbackReviewDrafts({ ...base, nonce: `tok_${n}.abc.${n * 7}` })
+          .map((v) => v.text)
+          .join("\n"),
+      ),
+    );
+    expect(seen.size).toBeGreaterThanOrEqual(6);
+  });
+
+  it("the same nonce reproduces the same drafts (a retry is not a rewrite)", () => {
+    const base = inputFor("physiotherapy", "Harbourview Physio", 4);
+    const once = fallbackReviewDrafts({ ...base, nonce: "tok_same.111.222" });
+    const twice = fallbackReviewDrafts({ ...base, nonce: "tok_same.111.222" });
+    expect(twice.map((v) => v.text)).toEqual(once.map((v) => v.text));
+  });
+
+  it("every industry stays lint-clean across many nonces", () => {
+    for (const industry of INDUSTRIES) {
+      for (const rating of [4, 5]) {
+        for (let n = 0; n < 4; n++) {
+          const input: ReviewDraftInput = {
+            business: "Juniper & Co",
+            category: industry.label,
+            industryKey: industry.key,
+            rating,
+            attributes: industry.attributes.slice(0, 2),
+            service: industry.services[0],
+            staffName: "Alex",
+            nonce: `nonce_${industry.key}_${rating}_${n}`,
+          };
+          for (const v of fallbackReviewDrafts(input)) {
+            const res = runLints(v.text, {
+              kind: "review",
+              businessName: input.business,
+              rating,
+              allowedFacts: [...input.attributes, input.service ?? "", "Alex"],
+            });
+            expect(res.flags, `${industry.key} ${rating}★ n${n} [${v.tone}]: ${v.text}`).toEqual([]);
+          }
+        }
+      }
+    }
+  });
+
   it("resolves industry from legacy category text when no key is given", () => {
     expect(resolveReviewIndustry(undefined, "restaurant").key).toBe("restaurant");
     expect(resolveReviewIndustry(undefined, "Physiotherapy clinic").key).toBe("physiotherapy");
     expect(resolveReviewIndustry(undefined, "totally unknown thing").key).toBe("professional_services");
     expect(resolveReviewIndustry("salon", "whatever").key).toBe("salon");
+  });
+});
+
+describe("service options — real GBP services first", () => {
+  const CATALOG = ["Haircut", "Colour", "Blow dry"];
+
+  it("falls back to owner services then catalog when no profile is synced", () => {
+    const resolved = resolveServiceOptions({
+      gbpServiceItems: undefined,
+      ownerServices: ["Bridal styling"],
+      catalogServices: ["Bridal styling", ...CATALOG],
+    });
+    expect(resolved.services).toEqual(["Bridal styling", ...CATALOG]);
+    expect(resolved.source).toBe("owner");
+    expect(resolved.fromGoogleProfile).toBe(false);
+  });
+
+  it("is safe when everything is null (today's pre-approval state)", () => {
+    const resolved = resolveServiceOptions({ gbpServiceItems: null, ownerServices: null });
+    expect(resolved.services).toEqual([]);
+    expect(resolved.source).toBe("catalog");
+    expect(resolved.fromGoogleProfile).toBe(false);
+  });
+
+  it("prefers real profile services and humanizes raw structured ids", () => {
+    const resolved = resolveServiceOptions({
+      gbpServiceItems: [
+        { name: "Balayage", source: "free_form" },
+        { name: "job_type_id:deep_cleaning", serviceTypeId: "job_type_id:deep_cleaning", source: "structured" },
+        { name: "   ", source: "unknown" },
+      ],
+      ownerServices: ["Bridal styling"],
+      catalogServices: ["Bridal styling", ...CATALOG],
+    });
+    expect(resolved.services).toEqual([
+      "Balayage",
+      "Deep cleaning",
+      "Bridal styling",
+      ...CATALOG,
+    ]);
+    expect(resolved.source).toBe("google_profile");
+    expect(resolved.sources).toEqual(["google_profile", "owner", "catalog"]);
+    expect(resolved.fromGoogleProfile).toBe(true);
+  });
+
+  it("dedupes case-insensitively without losing the higher-priority spelling", () => {
+    const resolved = resolveServiceOptions({
+      gbpServiceItems: [{ name: "HAIRCUT", source: "free_form" }],
+      ownerServices: ["haircut"],
+      catalogServices: CATALOG,
+    });
+    expect(resolved.services).toEqual(["HAIRCUT", "Colour", "Blow dry"]);
+    expect(resolved.sources).toEqual(["google_profile", "catalog"]);
+  });
+
+  it("humanizes gcids but leaves real display labels alone", () => {
+    expect(humanizeServiceName("job_type_id:deep_cleaning")).toBe("Deep cleaning");
+    expect(humanizeServiceName("categories/gcid:plumber/jobTypes/drain_repair")).toBe("Drain repair");
+    expect(humanizeServiceName("wine_tasting")).toBe("Wine tasting");
+    expect(humanizeServiceName("Deep Tissue Massage")).toBe("Deep Tissue Massage");
+    expect(humanizeServiceName("Men's cut & style")).toBe("Men's cut & style");
+    expect(humanizeServiceName("   ")).toBe("");
   });
 });
 

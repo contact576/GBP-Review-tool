@@ -69,17 +69,19 @@ export function ChannelsPanel({ email, sms }: { email: ChannelState; sms: Channe
         </div>
       </Card>
 
-      {/* WhatsApp — later phase */}
-      <Card className="flex items-center gap-3 opacity-80">
-        <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-primary-wash text-faint">
+      {/* WhatsApp — manual click-to-chat, so it needs no approval to be "on" */}
+      <Card className="flex items-center gap-3">
+        <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-primary-wash text-primary">
           <Icon name="chat" size={20} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-[14px] font-bold text-ink">WhatsApp</span>
-            <Badge tone="sub">Phase 3</Badge>
+            <Badge tone="primary" icon="check-circle">On — you press send</Badge>
           </div>
-          <div className="text-[13px] text-sub">Available later in Settings → Channels.</div>
+          <div className="text-[13px] text-sub">
+            Opens each chat in your own WhatsApp with the message ready — no Business API needed.
+          </div>
         </div>
       </Card>
 

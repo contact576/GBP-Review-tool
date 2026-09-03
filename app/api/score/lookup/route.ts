@@ -5,6 +5,7 @@ import {
   MIN_BENCHMARK_SAMPLE,
   getPlaceDetails,
   getPlaceLocation,
+  isPlausibleNameMatch,
   publicProfileCompleteness,
   searchBusinesses,
   searchNearbyCompetitors,
@@ -74,7 +75,16 @@ async function matchLookup(body: Record<string, unknown>) {
     category && category !== "Other local business" ? `${business} ${category}` : business,
   );
   if (!match.ok) return unavailable(match.reason === "no_key" ? "no_key" : "error");
-  const top = match.places[0];
+
+  // Text Search ranks against the whole query, category included, and always
+  // returns its best effort — so a name it never really matched still comes
+  // back looking authoritative. Searching "Priority Plumbing & Drains Toronto"
+  // with the category select untouched returned "Tru Physiotherapy" (5.0, 87
+  // reviews), which the tool then showed as the caller's own listing. Match the
+  // hit against the name the user actually typed, never the augmented query,
+  // and report not_found when it does not hold up. Showing nothing beats
+  // stating someone else's numbers as fact.
+  const top = match.places.find((place) => isPlausibleNameMatch(business, place.name));
   if (!top) return unavailable("not_found");
 
   return NextResponse.json({

@@ -86,16 +86,16 @@ export default function ScorePage() {
       <CtaBand
         eyebrow="Start free"
         title="Get reviews like this every week"
-        lede="Start free and Foundly runs the whole loop — asks at the right moment, drafts the first version, and keeps your profile climbing. No card for 14 days."
+        lede="Start free and Foundly runs the whole loop — asks at the right moment, drafts the first version, and keeps your profile climbing. No card for 30 days."
         actions={
           <>
-            <LinkButton href="/sign-up" size="lg" icon="sparkles">Start 14-day trial</LinkButton>
+            <LinkButton href="/sign-up" size="lg" icon="sparkles">Start 30-day trial</LinkButton>
             <LinkButton href="/pricing" size="lg" variant="secondary" className={heroSecondaryBtn}>
               See pricing
             </LinkButton>
           </>
         }
-        footnote="14 days of Growth · no credit card · keep a free plan forever."
+        footnote="30 days of every tool · no credit card · keep a free plan forever."
       />
     </div>
   );

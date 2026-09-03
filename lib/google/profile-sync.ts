@@ -42,6 +42,16 @@ import {
 } from "./gbp";
 import { daysSince, GBP_REVIEW_ID_PREFIX } from "./public-sync";
 import { isPlausibleFullImport, PRE_RECONCILE_DURABILITY } from "@/lib/reviews/durability";
+import { fetchApifyPlace, fetchApifyReviews, isApifyConfigured } from "./apify";
+import {
+  apifyLocationResource,
+  mapApifyReviews,
+  mapAttributes,
+  mapLocalPosts,
+  mapLocationRecord,
+  mapQuestions,
+  responseRate,
+} from "./apify-map";
 
 /**
  * Google Business Profile (owned-profile) sync — the deeper integration that
@@ -59,6 +69,12 @@ export { GBP_REVIEW_ID_PREFIX };
 export interface ProfileSyncOutcome {
   ok: boolean;
   pendingApproval?: boolean;
+  /**
+   * Google's own explanation when approval is pending — carried so the owner
+   * can see whether the APIs are merely not enabled (a two-minute console fix)
+   * or access is genuinely still awaiting approval.
+   */
+  pendingDetail?: string;
   error?: string;
   rating?: number;
   reviewCount?: number;
@@ -111,13 +127,13 @@ export async function fetchGoogleProfile(
 
   const located = await resolveLocationResource(accessToken, credential, location);
   if (!located.ok) {
-    if (located.pendingApproval) return { ok: true, pendingApproval: true };
+    if (located.pendingApproval) return { ok: true, pendingApproval: true, pendingDetail: located.detail };
     return { ok: false, error: located.error };
   }
 
   const locationRes = await getLocation(accessToken, located.locationResource);
   if (!locationRes.ok) {
-    if (locationRes.reason === "not_approved") return { ok: true, pendingApproval: true };
+    if (locationRes.reason === "not_approved") return { ok: true, pendingApproval: true, pendingDetail: locationRes.detail };
     return { ok: false, error: locationRes.detail };
   }
 
@@ -167,7 +183,7 @@ export async function fetchGoogleProfile(
     collectInstagramEvidence(instagramToken, nowIso),
   ]);
   if (!reviewsRes.ok) {
-    if (reviewsRes.reason === "not_approved") return { ok: true, pendingApproval: true };
+    if (reviewsRes.reason === "not_approved") return { ok: true, pendingApproval: true, pendingDetail: reviewsRes.detail };
     return { ok: false, error: reviewsRes.detail };
   }
 
@@ -280,7 +296,7 @@ type ResolveResult =
       locationResource: string;
       accountLocationResource: string;
     }
-  | { ok: false; pendingApproval?: boolean; error?: string };
+  | { ok: false; pendingApproval?: boolean; error?: string; detail?: string };
 
 /** Find "accounts/{a}/locations/{l}" for this workspace's Place ID. */
 async function resolveLocationResource(
@@ -290,7 +306,7 @@ async function resolveLocationResource(
 ): Promise<ResolveResult> {
   const accounts = await listAccounts(accessToken);
   if (!accounts.ok) {
-    if (accounts.reason === "not_approved") return { ok: false, pendingApproval: true };
+    if (accounts.reason === "not_approved") return { ok: false, pendingApproval: true, detail: accounts.detail };
     return { ok: false, error: accounts.detail };
   }
   // Prefer the stored account when present, else scan all manageable accounts.
@@ -304,7 +320,7 @@ async function resolveLocationResource(
     seen.add(account);
     const locs = await listLocations(accessToken, account);
     if (!locs.ok) {
-      if (locs.reason === "not_approved") return { ok: false, pendingApproval: true };
+      if (locs.reason === "not_approved") return { ok: false, pendingApproval: true, detail: locs.detail };
       continue;
     }
     const match = location.googlePlaceId
@@ -461,7 +477,13 @@ export function deriveGbpCapabilities(input: {
       4,
       location.metadata?.canModifyServiceList === false
         ? "Google marks service-list editing as unavailable for this location."
-        : `${services.length} services; ${describedServices} include descriptions.`,
+        : location.metadata?.canModifyServiceList === undefined
+          // Exactly when serviceStatus() reports "unknown". Google does not
+          // publish the service list on a public listing, so a public-data sync
+          // never sees one. Stating "0 services" here would be a count from a
+          // source we never read.
+          ? "Google does not publish a service list publicly, so this sync could not read one. That is not the same as your profile having none."
+          : `${services.length} services; ${describedServices} include descriptions.`,
     ),
     capability(
       "attributes",
@@ -494,28 +516,40 @@ export function deriveGbpCapabilities(input: {
       "Cover photo",
       mediaStatus(sourceStatus.media, input.media.some((media) => media.category === "COVER")),
       3,
-      input.media.some((media) => media.category === "COVER") ? "Google cover photo found." : "No Google cover photo was returned.",
+      sourceStatus.media !== "synced"
+        ? "Your Google photos were not read in this sync, so the cover photo could not be checked."
+        : input.media.some((media) => media.category === "COVER")
+          ? "Google cover photo found."
+          : "No Google cover photo was returned.",
     ),
     capability(
       "profile_media",
       "Profile photo or logo",
       mediaStatus(sourceStatus.media, input.media.some((media) => media.category === "PROFILE" || media.category === "LOGO")),
       2,
-      input.media.some((media) => media.category === "PROFILE" || media.category === "LOGO") ? "Profile or logo media found." : "No profile or logo media was returned.",
+      sourceStatus.media !== "synced"
+        ? "Your Google photos were not read in this sync, so the profile photo could not be checked."
+        : input.media.some((media) => media.category === "PROFILE" || media.category === "LOGO")
+          ? "Profile or logo media found."
+          : "No profile or logo media was returned.",
     ),
     capability(
       "media_library",
       "Photo library",
       sourceStatus.media !== "synced" ? "unknown" : input.media.length >= 10 ? "complete" : input.media.length > 0 ? "partial" : "missing",
       3,
-      `${input.media.length} original Google media items synced.`,
+      sourceStatus.media !== "synced"
+        ? "Your Google photo library was not read in this sync, so its size is unknown."
+        : `${input.media.length} original Google media items synced.`,
     ),
     capability(
       "local_posts",
       "Local posts",
       sourceStatus.posts === "unavailable" ? "not_applicable" : sourceStatus.posts !== "synced" ? "unknown" : recentPostCount > 0 ? "complete" : input.posts.length > 0 ? "partial" : "missing",
       2,
-      `${input.posts.length} posts synced; ${recentPostCount} published in the last 30 days.`,
+      sourceStatus.posts !== "synced"
+        ? "Your Google posts were not read in this sync."
+        : `${input.posts.length} posts synced; ${recentPostCount} published in the last 30 days.`,
     ),
     capability(
       "questions",
@@ -798,5 +832,150 @@ function buildSnapshot(
     growthScore: scores.growth,
     reviewsScore: scores.reviews,
     profileScore: scores.profile,
+  };
+}
+
+/**
+ * Public-data profile sync (Apify) — the substitute used while Business
+ * Profile API approval is pending.
+ *
+ * This produces the SAME `GbpProfileSnapshot` shape as the owned sync, so the
+ * audit engine, suggestion inbox and dashboard need no special case. What
+ * differs is recorded in the data rather than hidden:
+ *
+ *  - `source` is `google_public_scrape`, never `google_business_profile`.
+ *  - `performance`, `searchKeywords` and `googleUpdates` are `not_authorized`.
+ *    They are owner-only surfaces; no scraper reaches them, so they read as
+ *    not-measured rather than as a healthy zero.
+ *  - `availableAttributes` is empty, so completeness scores what IS set rather
+ *    than what could be.
+ *  - `reviewsImportOk` is true only when the imported count is consistent with
+ *    the total Google itself reports, which is what stops a capped import from
+ *    being mistaken for reviews disappearing.
+ *
+ * It grants no write access whatsoever. `locationResource` is an unusable
+ * sentinel so a mutation attempt fails loudly instead of finding a real target.
+ */
+export async function fetchApifyProfile(
+  location: Location,
+  nowIso: string,
+  maxReviews = 500,
+): Promise<ProfileSyncOutcome> {
+  if (!isApifyConfigured()) {
+    return {
+      ok: false,
+      error:
+        "Apify isn't configured — set APIFY_TOKEN to import Google reviews while Business Profile approval is pending.",
+    };
+  }
+  const placeId = location.googlePlaceId?.trim();
+  if (!placeId) {
+    return {
+      ok: false,
+      error: "This location has no Google Place ID yet — find the business in Settings first.",
+    };
+  }
+
+  const [placeRes, reviewsRes] = await Promise.all([
+    fetchApifyPlace(placeId),
+    fetchApifyReviews(placeId, maxReviews),
+  ]);
+  if (!placeRes.ok) return { ok: false, error: placeRes.detail };
+
+  const place = placeRes.data;
+  const [websiteEvidence, instagramEvidence] = await Promise.all([
+    collectWebsiteEvidence(place.website, nowIso),
+    collectInstagramEvidence(null, nowIso),
+  ]);
+
+  const reviews = reviewsRes.ok ? mapApifyReviews(reviewsRes.data, location.id) : [];
+  const locationRecord = mapLocationRecord(place);
+  const attributes = mapAttributes(place.additionalInfo);
+  const questions = mapQuestions(place.questionsAndAnswers);
+  const localPosts = mapLocalPosts(place.ownerUpdates);
+
+  // Google's own aggregate, never the sample length.
+  const reviewCount = place.reviewsCount ?? reviews.length;
+  const rating = place.totalScore ?? aggregateRating(reviews);
+
+  const sourceStatus: GbpProfileSnapshot["sourceStatus"] = {
+    location: "synced",
+    attributes: attributes.length > 0 ? "synced" : "unavailable",
+    // The attribute CATALOGUE is owner-only — not merely absent, unauthorised.
+    attributeMetadata: "not_authorized",
+    // Photo counts Google publishes include customer uploads, which is a
+    // different metric from the owner's media library. Left unmeasured.
+    media: "unavailable",
+    posts: localPosts.length > 0 ? "synced" : "unavailable",
+    questions: questions.length > 0 ? "synced" : "unavailable",
+    reviews: reviewsRes.ok ? "synced" : "error",
+    performance: "not_authorized",
+    searchKeywords: "not_authorized",
+    googleUpdates: "not_authorized",
+  };
+
+  const warnings = [
+    "Imported from public Google data. Views, calls and direction requests need Business Profile approval and are not measured.",
+    reviewsRes.ok ? undefined : `Reviews: ${reviewsRes.detail}`,
+    websiteEvidence.error ? `Website: ${websiteEvidence.error}` : undefined,
+  ].filter((warning): warning is string => Boolean(warning));
+
+  const capabilities = deriveGbpCapabilities({
+    location: locationRecord,
+    attributes,
+    availableAttributes: [],
+    media: [],
+    posts: localPosts,
+    questions,
+    reviews,
+    sourceStatus,
+    nowIso,
+  });
+  const profileSnapshot: GbpProfileSnapshot = {
+    schemaVersion: 1,
+    source: "google_public_scrape",
+    accountResource: "",
+    locationResource: apifyLocationResource(placeId),
+    syncedAt: nowIso,
+    location: locationRecord,
+    attributes,
+    availableAttributes: [],
+    media: [],
+    localPosts,
+    questions,
+    searchKeywords: [],
+    externalEvidence: {
+      website: websiteEvidence,
+      instagram: instagramEvidence,
+      // This path has no Google OAuth at all, so Search Console was never
+      // reachable. Not connected — not "zero clicks".
+      searchConsole: { status: "not_connected", observedAt: nowIso, rows: [] },
+    },
+    capabilities,
+    capabilityScore: scoreApplicableCapabilities(capabilities),
+    reviewResponseRate: responseRate(reviews),
+    sourceStatus,
+    warnings,
+  };
+
+  const syncedLocation = locationFromProfileSnapshot(location, profileSnapshot);
+  const profileAudit = buildLocalGrowthAudit({
+    location: syncedLocation,
+    snapshot: profileSnapshot,
+    reviews,
+    nowIso,
+  });
+
+  return {
+    ok: true,
+    rating,
+    reviewCount,
+    reviews,
+    // A capped import must never license vanish detection.
+    reviewsImportOk: reviewsRes.ok && isPlausibleFullImport(reviews.length, reviewCount),
+    snapshot: buildSnapshot(syncedLocation, rating, reviewCount, reviews, nowIso),
+    profileSnapshot,
+    profileAudit,
+    suggestionInbox: buildSuggestionInbox(profileAudit),
   };
 }

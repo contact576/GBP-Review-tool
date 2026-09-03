@@ -12,7 +12,7 @@ import { registerAction } from "@/lib/actions";
 import type { Region } from "@/lib/data/types";
 
 const TRIAL_POINTS = [
-  "Full Growth plan, free for 14 days",
+  "Every tool unlocked, free for 30 days",
   "No credit card required to start",
   "Keep a free plan forever when it ends",
 ];
@@ -80,12 +80,19 @@ export function SignUpForm({
       return;
     }
     setError(null);
+    // Read the DOM, not state — see the note in SignInForm. A pre-hydration
+    // submit here would have created an account with a blank name and business,
+    // or failed validation on credentials the visitor had plainly typed. The
+    // selects carry their own defaults, so state stays authoritative for those.
+    const data = new FormData(e.currentTarget);
+    const typed = (field: string, fallback: string) =>
+      String(data.get(field) ?? "").trim() || fallback;
     startTransition(async () => {
       const result = await registerAction({
-        name,
-        email,
-        password,
-        businessName,
+        name: typed("name", name),
+        email: typed("email", email),
+        password: String(data.get("password") ?? "") || password,
+        businessName: typed("businessName", businessName),
         industryKey,
         region,
         referralCode,
@@ -103,7 +110,7 @@ export function SignUpForm({
     <Card raised className="p-6 sm:p-8">
       <div className="text-center">
         <h1 className="text-[24px] font-extrabold leading-tight tracking-tight text-ink">
-          Start your 14-day Growth trial
+          Start your 30-day full-access trial
         </h1>
         <p className="mt-1 text-[14px] text-sub">No card. No catch. Cancel anytime.</p>
       </div>
@@ -170,7 +177,11 @@ export function SignUpForm({
         </div>
       ) : null}
 
-      <form className="space-y-3.5" onSubmit={submit}>
+      {/* method="post" is deliberate even though submission is handled in JS:
+          before hydration completes, a submit falls back to the browser's native
+          behaviour, and the default (GET) would put the password in the URL —
+          and therefore in history, logs, and Referer headers. */}
+      <form className="space-y-3.5" method="post" onSubmit={submit}>
         <Field label="Your name">
           <Input
             name="name"

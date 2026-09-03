@@ -6,6 +6,8 @@ import type {
   ReviewRequest,
   MetricSnapshot,
   StaffMember,
+  RankGridPoint,
+  RankGridScan,
 } from "./types";
 
 /**
@@ -93,6 +95,91 @@ function makeConsent(r: () => number, region: "US" | "CA"): CustomerConsent {
       "Customer agreed to receive messages about their visit" +
       (marketing ? " and occasional offers." : "."),
     caslCaptured: region === "CA",
+  };
+}
+
+/** The demo clinic's real-world coordinates (218 Queen St E, Toronto). */
+const DEMO_CENTER = { latitude: 43.6558, longitude: -79.366 };
+const DEMO_SCAN_RADIUS_KM = 2;
+
+/**
+ * The demo rank scan, in the shape a live scan actually writes.
+ *
+ * The original seed stored bare row/col/rank — no centre, no per-point
+ * coordinates, no results — which predates the v2 scan shape. On the map that
+ * renders as "no coordinates on this scan", so the demo workspace showed a
+ * degraded version of the very feature it exists to demonstrate. These are the
+ * same three competitors the seeded competitor table already names, with the
+ * same ratings and review counts, so the two surfaces agree.
+ */
+function buildDemoRankScan(
+  r: () => number,
+  locationId: string,
+  ranAt: string,
+): RankGridScan {
+  const rivals = [
+    { placeId: "ChIJriversidephysio", name: "Riverside Physio & Rehab", address: "44 Riverside Dr, Toronto", rating: 4.5, reviewCount: 61, latitude: 43.6602, longitude: -79.352 },
+    { placeId: "ChIJeastsidesports", name: "Eastside Sports Clinic", address: "910 Eastern Ave, Toronto", rating: 4.6, reviewCount: 44, latitude: 43.6491, longitude: -79.3583 },
+    { placeId: "ChIJlakeshorewellness", name: "Lakeshore Wellness", address: "77 Lake Shore Blvd E, Toronto", rating: 4.3, reviewCount: 33, latitude: 43.653, longitude: -79.382 },
+  ];
+  const own = {
+    placeId: "ChIJharbourviewphysio",
+    name: "Harbourview Physiotherapy",
+    address: "218 Queen St E, Toronto",
+    rating: 4.7,
+    reviewCount: 28,
+    latitude: DEMO_CENTER.latitude,
+    longitude: DEMO_CENTER.longitude,
+  };
+  const lonKm = 111.32 * Math.cos((DEMO_CENTER.latitude * Math.PI) / 180);
+
+  const points: RankGridPoint[] = Array.from({ length: 25 }, (_, k) => {
+    const row = Math.floor(k / 5);
+    const col = k % 5;
+    const ring = Math.abs(row - 2) + Math.abs(col - 2);
+    const raw = ring <= 1 ? 1 + Math.floor(r() * 2) : ring <= 2 ? 3 + Math.floor(r() * 4) : 8 + Math.floor(r() * 8);
+    const rank = raw > 20 ? null : raw;
+
+    // Everyone above us, in order, then us — so `position` and `rank` agree.
+    const ordered = [...rivals].sort(() => r() - 0.5);
+    const results = ordered.map((rival, index) => ({ ...rival, position: index + 1 }));
+    if (rank !== null) {
+      const at = Math.min(rank, results.length + 1);
+      results.splice(at - 1, 0, { ...own, position: at });
+      results.forEach((entry, index) => {
+        entry.position = index + 1;
+      });
+    }
+
+    return {
+      row,
+      col,
+      rank,
+      latitude: DEMO_CENTER.latitude + ((2 - row) / 2) * (DEMO_SCAN_RADIUS_KM / 110.574),
+      longitude: DEMO_CENTER.longitude + ((col - 2) / 2) * (DEMO_SCAN_RADIUS_KM / lonKm),
+      results,
+    };
+  });
+
+  // Derived from the points just generated, exactly as `runRankGridScan` derives
+  // them for a real scan. Hardcoding them made the demo contradict itself on
+  // screen — "Top-3 coverage 44%" sat beside a computed "Top-3 points 8/25".
+  const measured = points.filter((point) => !point.unavailable);
+  const measuredCount = Math.max(1, measured.length);
+
+  return {
+    id: "rank_1",
+    locationId,
+    keyword: "physiotherapy near me",
+    gridSize: 5,
+    avgRank: measured.reduce((sum, point) => sum + (point.rank ?? 21), 0) / measuredCount,
+    shareOfLocalPack:
+      measured.filter((point) => point.rank !== null && point.rank <= 3).length / measuredCount,
+    ranAt,
+    source: "google_places",
+    radiusKm: DEMO_SCAN_RADIUS_KM,
+    center: DEMO_CENTER,
+    points,
   };
 }
 
@@ -215,6 +302,9 @@ export function buildSeed(): FoundlyData {
     { status: "posted_google", n: 5 },
     { status: "private_feedback", n: 2 },
     { status: "suppressed", n: 1 },
+    // One delivery that failed after being accepted for sending — the demo
+    // should show what that looks like, and that it can be re-sent.
+    { status: "failed", n: 1 },
   ];
   let rIdx = 0;
   for (const { status, n } of statuses) {
@@ -522,19 +612,55 @@ export function buildSeed(): FoundlyData {
         { query: "dry needling near me Toronto", named: true, position: 2, competitorsNamed: ["Eastside Sports Clinic"], answerExcerpt: "Harbourview Physiotherapy and Eastside Sports Clinic both offer dry needling…" },
         { query: "physio open Saturday Toronto east", named: false, position: null, competitorsNamed: ["Riverside Physio & Rehab"], answerExcerpt: "Riverside Physio & Rehab lists Saturday hours…" },
       ],
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      // The same six questions put to every engine, so the demo shows the
+      // real product: agreement and disagreement between engines, and one
+      // engine honestly reported as not connected rather than as silent zeros.
+      engines: [
+        {
+          engineId: "openai", productName: "ChatGPT", vendor: "OpenAI", grounding: "model_knowledge",
+          model: "gpt-5.4-mini", state: "answered", missing: null,
+          queries: [
+            { status: "checked", query: "best physio for sports injury in Toronto east end", named: true, position: 2, competitorsNamed: ["Riverside Physio & Rehab"], answerExcerpt: "For sports injury rehab in Toronto's east end, well-reviewed options include Harbourview Physiotherapy and Riverside Physio & Rehab…" },
+            { status: "checked", query: "physiotherapy clinic with direct billing near me", named: true, position: 1, competitorsNamed: [], answerExcerpt: "Harbourview Physiotherapy offers direct billing and consistently strong reviews…" },
+            { status: "checked", query: "concussion rehab specialist Toronto", named: false, position: null, competitorsNamed: ["Eastside Sports Clinic", "Lakeshore Wellness"], answerExcerpt: "For concussion and vestibular rehab, consider Eastside Sports Clinic or Lakeshore Wellness…" },
+            { status: "checked", query: "pediatric physiotherapy Toronto", named: true, position: 3, competitorsNamed: ["Lakeshore Wellness", "Riverside Physio & Rehab"], answerExcerpt: "Clinics offering pediatric physiotherapy include Lakeshore Wellness, Riverside Physio & Rehab, and Harbourview Physiotherapy…" },
+            { status: "checked", query: "dry needling near me Toronto", named: true, position: 2, competitorsNamed: ["Eastside Sports Clinic"], answerExcerpt: "Harbourview Physiotherapy and Eastside Sports Clinic both offer dry needling…" },
+            { status: "checked", query: "physio open Saturday Toronto east", named: false, position: null, competitorsNamed: ["Riverside Physio & Rehab"], answerExcerpt: "Riverside Physio & Rehab lists Saturday hours…" },
+          ],
+        },
+        {
+          engineId: "anthropic", productName: "Claude", vendor: "Anthropic", grounding: "model_knowledge",
+          model: "claude-haiku-4-5-20251001", state: "answered", missing: null,
+          queries: [
+            { status: "checked", query: "best physio for sports injury in Toronto east end", named: true, position: 1, competitorsNamed: ["Eastside Sports Clinic"], answerExcerpt: "Harbourview Physiotherapy is a strong option for sports injuries in the east end; Eastside Sports Clinic is another…" },
+            { status: "checked", query: "physiotherapy clinic with direct billing near me", named: true, position: 2, competitorsNamed: ["Riverside Physio & Rehab"], answerExcerpt: "Riverside Physio & Rehab and Harbourview Physiotherapy both list direct billing…" },
+            { status: "checked", query: "concussion rehab specialist Toronto", named: false, position: null, competitorsNamed: ["Lakeshore Wellness"], answerExcerpt: "Lakeshore Wellness is known for vestibular and concussion programs…" },
+            { status: "checked", query: "pediatric physiotherapy Toronto", named: false, position: null, competitorsNamed: ["Lakeshore Wellness", "Eastside Sports Clinic"], answerExcerpt: "For children, Lakeshore Wellness and Eastside Sports Clinic have dedicated pediatric physiotherapists…" },
+            { status: "checked", query: "dry needling near me Toronto", named: true, position: 1, competitorsNamed: [], answerExcerpt: "Harbourview Physiotherapy offers dry needling as part of its manual therapy…" },
+            { status: "not_checked", query: "physio open Saturday Toronto east", named: false, position: null, competitorsNamed: [], answerExcerpt: "", notCheckedReason: "refused" },
+          ],
+        },
+        {
+          engineId: "google", productName: "Google Gemini", vendor: "Google", grounding: "model_knowledge",
+          model: null, state: "not_connected", missing: "GOOGLE_AI_API_KEY is not set", queries: [],
+        },
+        {
+          engineId: "perplexity", productName: "Perplexity", vendor: "Perplexity", grounding: "web_search",
+          model: "sonar", state: "answered", missing: null,
+          queries: [
+            { status: "checked", query: "best physio for sports injury in Toronto east end", named: true, position: 1, competitorsNamed: ["Riverside Physio & Rehab", "Eastside Sports Clinic"], answerExcerpt: "Harbourview Physiotherapy (4.7★, 60+ reviews) comes up first for sports injury rehab in the east end, followed by Riverside Physio & Rehab and Eastside Sports Clinic…" },
+            { status: "checked", query: "physiotherapy clinic with direct billing near me", named: true, position: 1, competitorsNamed: ["Riverside Physio & Rehab"], answerExcerpt: "Harbourview Physiotherapy advertises direct billing to most insurers; Riverside Physio & Rehab does as well…" },
+            { status: "checked", query: "concussion rehab specialist Toronto", named: false, position: null, competitorsNamed: ["Eastside Sports Clinic", "Lakeshore Wellness"], answerExcerpt: "Eastside Sports Clinic and Lakeshore Wellness both publish concussion rehab pages…" },
+            { status: "checked", query: "pediatric physiotherapy Toronto", named: true, position: 2, competitorsNamed: ["Lakeshore Wellness"], answerExcerpt: "Lakeshore Wellness and Harbourview Physiotherapy both list pediatric physiotherapy…" },
+            { status: "checked", query: "dry needling near me Toronto", named: true, position: 1, competitorsNamed: ["Eastside Sports Clinic"], answerExcerpt: "Harbourview Physiotherapy lists dry needling on its services page; Eastside Sports Clinic also offers it…" },
+            { status: "checked", query: "physio open Saturday Toronto east", named: true, position: 2, competitorsNamed: ["Riverside Physio & Rehab"], answerExcerpt: "Riverside Physio & Rehab and Harbourview Physiotherapy both show Saturday hours on Google…" },
+          ],
+        },
+      ],
     },
-    rankScans: [
-      {
-        id: "rank_1", locationId, keyword: "physiotherapy near me", gridSize: 5,
-        avgRank: 4.2, shareOfLocalPack: 0.44, ranAt: daysAgo(2),
-        points: Array.from({ length: 25 }, (_, k) => {
-          const row = Math.floor(k / 5), col = k % 5;
-          const center = Math.abs(row - 2) + Math.abs(col - 2);
-          const rank = center <= 1 ? 1 + Math.floor(r() * 2) : center <= 2 ? 3 + Math.floor(r() * 4) : 8 + Math.floor(r() * 8);
-          return { row, col, rank: rank > 20 ? null : rank };
-        }),
-      },
-    ],
+    rankScans: [buildDemoRankScan(r, locationId, daysAgo(2))],
     qrAssets: [
       { id: "qr_loc", locationId, scope: "location", label: "Front desk QR", slug: "harbourview", targetUrl: reviewUrl, scans: 214, pageOpens: 168, degraded: false },
       { id: "qr_stf_priya", locationId, scope: "staff", staffId: "stf_priya", label: "Priya's QR", slug: "harbourview-priya", targetUrl: reviewUrl, scans: 92, pageOpens: 71, degraded: false },
@@ -558,7 +684,7 @@ export function buildSeed(): FoundlyData {
       { id: "int_instagram", locationId, provider: "instagram", label: "Instagram professional account", status: "disconnected", detail: "Connect an authorized Business or Creator account" },
       { id: "int_resend", locationId, provider: "resend", label: "Email (Resend)", status: "connected", detail: "Sending domain verified", lastSyncAt: hoursAgo(1) },
       { id: "int_twilio", locationId, provider: "twilio", label: "SMS (Twilio · A2P 10DLC)", status: "pending", detail: "A2P registration pending — 1–5 day carrier approval", },
-      { id: "int_stripe", locationId, provider: "stripe", label: "Billing (Stripe)", status: "connected", detail: "Growth trial · CAD", lastSyncAt: hoursAgo(12) },
+      { id: "int_stripe", locationId, provider: "stripe", label: "Billing (Stripe)", status: "connected", detail: "Trial · CAD", lastSyncAt: hoursAgo(12) },
     ],
     auditLog: [
       { id: "aud_1", workspaceId, actor: "Alex Chen", action: "review.replied", targetType: "review", targetId: "rev_0", at: hoursAgo(4) },
@@ -569,7 +695,7 @@ export function buildSeed(): FoundlyData {
       { key: "rank_grid", description: "Local rank-grid map", enabled: true, rollout: "beta" },
       { key: "aeo", description: "AI Visibility / AEO module", enabled: true, rollout: "beta" },
       { key: "campaigns_pro", description: "Campaigns Pro journeys", enabled: false, rollout: "internal" },
-      { key: "whatsapp", description: "WhatsApp channel", enabled: false, rollout: "internal" },
+      { key: "whatsapp", description: "WhatsApp channel (manual click-to-chat)", enabled: true, rollout: "all" },
     ],
     notifications: [
       { id: "ntf_1", locationId, kind: "review", title: "New 5★ review detected", body: "Dana R. left a 5-star review — likely matched to a request you sent.", createdAt: hoursAgo(3), read: false },
@@ -595,15 +721,15 @@ export function buildSeed(): FoundlyData {
       },
       clients: [
           { locationId: "loc_harbourview", name: "Harbourview Physiotherapy", city: "Toronto", contactEmail: "harbourview@example.com", growthScore: 78, rating: 4.7, newReviews30d: 9, needsReply: 3, plan: "growth", lastReportSent: daysAgo(6), status: "healthy" },
-          { locationId: "loc_maple", name: "Maple Dental Studio", city: "Mississauga", contactEmail: "maple@example.com", growthScore: 71, rating: 4.6, newReviews30d: 6, needsReply: 5, plan: "pro", lastReportSent: daysAgo(6), status: "attention" },
+          { locationId: "loc_maple", name: "Maple Dental Studio", city: "Mississauga", contactEmail: "maple@example.com", growthScore: 71, rating: 4.6, newReviews30d: 6, needsReply: 5, plan: "growth", lastReportSent: daysAgo(6), status: "attention" },
           { locationId: "loc_summit", name: "Summit HVAC & Heating", city: "Brampton", contactEmail: "summit@example.com", growthScore: 58, rating: 4.3, newReviews30d: 2, needsReply: 8, plan: "growth", lastReportSent: daysAgo(34), status: "at_risk" },
-          { locationId: "loc_bright", name: "Brightside Chiropractic", city: "Toronto", contactEmail: "brightside@example.com", growthScore: 82, rating: 4.8, newReviews30d: 11, needsReply: 1, plan: "pro", lastReportSent: daysAgo(6), status: "healthy" },
+          { locationId: "loc_bright", name: "Brightside Chiropractic", city: "Toronto", contactEmail: "brightside@example.com", growthScore: 82, rating: 4.8, newReviews30d: 11, needsReply: 1, plan: "growth", lastReportSent: daysAgo(6), status: "healthy" },
       ],
     },
     platform: {
       tenants: [
         { id: "org_harbourview", name: "Harbourview Physiotherapy", vertical: "physiotherapy", plan: "growth", mrr: 99, locations: 1, status: "trialing", region: "CA" },
-        { id: "org_maple", name: "Maple Dental Studio", vertical: "dental", plan: "pro", mrr: 179, locations: 1, status: "active", region: "CA" },
+        { id: "org_maple", name: "Maple Dental Studio", vertical: "dental", plan: "growth", mrr: 99, locations: 1, status: "active", region: "CA" },
         { id: "org_summit", name: "Summit HVAC & Heating", vertical: "hvac", plan: "growth", mrr: 99, locations: 1, status: "past_due", region: "CA" },
         { id: "org_northside", name: "Northside Marketing (Agency)", vertical: "physiotherapy", plan: "agency", mrr: 897, locations: 12, status: "active", region: "CA" },
       ],

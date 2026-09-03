@@ -38,7 +38,7 @@ function tiers(): Tier[] {
       name: "Starter",
       price: 39,
       tagline: "For a single location getting into a steady rhythm.",
-      cta: "Start 14-day trial",
+      cta: "Start 30-day trial",
       href: "/sign-up",
       features: [
         "Everything in Free",
@@ -51,32 +51,18 @@ function tiers(): Tier[] {
     {
       name: "Growth",
       price: 99,
-      tagline: "The full loop, on autopilot — our most popular plan.",
-      cta: "Start 14-day trial",
+      tagline: "Every tool for one location — nothing held back.",
+      cta: "Start 30-day trial",
       href: "/sign-up",
       anchor: true,
       features: [
         "Everything in Starter",
-        "250 AI review drafts / month",
-        "GBP Co-Pilot: 3 tasks a week",
-        "Durability watchdog (30 & 60-day)",
+        "Unlimited AI review drafts",
+        "GBP Co-Pilot + profile gap audit",
+        "Local rank grid with the map",
+        "AI-visibility monitoring",
         "Consent-based winback campaigns",
         "Monthly Growth Report",
-      ],
-    },
-    {
-      name: "Pro",
-      price: 179,
-      tagline: "For competitive markets where rank and AI visibility win.",
-      cta: "Start 14-day trial",
-      href: "/sign-up",
-      features: [
-        "Everything in Growth",
-        "Unlimited AI review drafts",
-        "Local rank grid + AEO tracker",
-        "AI-visibility monitoring",
-        "Priority support",
-        "API & webhooks",
       ],
     },
   ];
@@ -93,11 +79,12 @@ export function PricingBoard() {
       <div className="mx-auto max-w-2xl rounded-card border border-primary/25 bg-primary-wash p-5 text-center">
         <div className="flex items-center justify-center gap-2">
           <Icon name="gift" size={18} className="text-primary" />
-          <span className="text-[14px] font-bold text-ink">14 days of Growth, free</span>
+          <span className="text-[14px] font-bold text-ink">30 days of every tool, free</span>
         </div>
         <p className="mt-1.5 text-[13px] text-sub">
-          Start on the full Growth plan with no credit card. When the trial ends, keep a free plan
-          forever — nothing auto-charges, nothing disappears.
+          Every tool we make — rank grid, AI visibility, the GBP co-pilot, campaigns — unlocked for
+          30 days with no credit card. When the trial ends, keep a free plan forever; nothing
+          auto-charges, nothing disappears.
         </p>
       </div>
 
@@ -116,7 +103,7 @@ export function PricingBoard() {
       </div>
 
       {/* Core tiers */}
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {tiers().map((t) => (
           <TierCard key={t.name} tier={t} symbol={symbol} annual={annual} />
         ))}

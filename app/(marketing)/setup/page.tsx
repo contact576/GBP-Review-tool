@@ -1,19 +1,26 @@
+import { notFound } from "next/navigation";
 import { checkDatabase } from "@/lib/db/ensure";
 import { hasAiKey } from "@/lib/ai/model";
 import { appUrl } from "@/lib/utils/app-url";
+import { smsEnabled, smsMissingEnvVars } from "@/lib/sms/twilio";
 import { Icon, type IconName } from "@/components/icons";
 import { LinkButton } from "@/components/ds/Button";
 import { InitDbButton, TestAiButton, TestPlacesButton } from "./SetupActions";
+import { isSetupAdmin } from "./access";
 
-export const metadata = { title: "Setup checklist" };
+export const metadata = { title: "Setup checklist", robots: { index: false } };
 export const dynamic = "force-dynamic";
 
 /**
- * Self-service setup checklist — shows only presence/health booleans, never
- * secret values. Lets a non-technical owner verify their Vercel environment
- * variables and initialize the database with one click.
+ * Platform-admin setup checklist — shows only presence/health booleans, never
+ * secret values. Previously public (V2), it disclosed the full deployment
+ * configuration posture (which secrets/keys are set) to any anonymous visitor,
+ * acting as a reconnaissance oracle for the other findings. It is now gated to
+ * a real platform_admin session; anyone else gets a 404 (no existence signal).
  */
 export default async function SetupPage() {
+  if (!(await isSetupAdmin())) notFound();
+
   const db = await checkDatabase();
   const ai = hasAiKey();
   const openAi = Boolean(process.env.OPENAI_API_KEY);
@@ -27,18 +34,22 @@ export default async function SetupPage() {
   const resend = Boolean(process.env.RESEND_API_KEY);
   const stripe = Boolean(process.env.STRIPE_SECRET_KEY);
   const stripeWebhook = Boolean(process.env.STRIPE_WEBHOOK_SECRET);
-  const stripePrice = Boolean(
-    process.env.STRIPE_PRICE_STARTER_MONTHLY ||
-      process.env.STRIPE_PRICE_GROWTH_MONTHLY ||
-      process.env.STRIPE_PRICE_PRO_MONTHLY ||
-      process.env.STRIPE_PRICE_MULTI_MONTHLY ||
-      process.env.STRIPE_PRICE_AGENCY_MONTHLY,
-  );
-  const twilio = Boolean(
-    process.env.TWILIO_ACCOUNT_SID &&
-      process.env.TWILIO_AUTH_TOKEN &&
-      (process.env.TWILIO_MESSAGING_SERVICE_SID || process.env.TWILIO_FROM_NUMBER),
-  );
+  // Exactly the vars startCheckoutAction / resolvePlanForPrice read. A bare
+  // STRIPE_PRICE_<TIER> is a legacy monthly fallback; "pro" was folded into
+  // Growth and is deliberately not listed.
+  const stripePriceVars = (["STARTER", "GROWTH", "MULTI", "AGENCY"] as const).flatMap((tier) => [
+    { name: `STRIPE_PRICE_${tier}_MONTHLY`, set: Boolean(process.env[`STRIPE_PRICE_${tier}_MONTHLY`] || process.env[`STRIPE_PRICE_${tier}`]) },
+    { name: `STRIPE_PRICE_${tier}_ANNUAL`, set: Boolean(process.env[`STRIPE_PRICE_${tier}_ANNUAL`]) },
+  ]);
+  const stripePricesMissing = stripePriceVars.filter((v) => !v.set).map((v) => v.name);
+  const stripePrice = stripePricesMissing.length === 0;
+  const stripeMissing = [
+    ...(stripe ? [] : ["STRIPE_SECRET_KEY"]),
+    ...(stripeWebhook ? [] : ["STRIPE_WEBHOOK_SECRET"]),
+    ...stripePricesMissing,
+  ];
+  const twilioMissing = smsMissingEnvVars();
+  const twilio = smsEnabled();
   const base = await appUrl();
 
   return (
@@ -141,15 +152,15 @@ export default async function SetupPage() {
           ok={stripe && stripeWebhook && stripePrice}
           warn={stripe && (!stripeWebhook || !stripePrice)}
           title="Billing lifecycle (Stripe)"
-          okText="Secret, webhook, and a paid price are detected — checkout, portal, and entitlement reconciliation are active."
-          warnText="Stripe is partially configured. Add STRIPE_WEBHOOK_SECRET and paid price IDs before selling plans."
-          missingText="Not set — plan upgrades show an honest connect-billing state."
+          okText="Secret, webhook secret, and all eight plan prices are detected — checkout, portal, and entitlement reconciliation are active."
+          warnText={`Stripe is partially configured — plans with a missing price show "connect billing" and, without the webhook secret, no paid plan ever activates. Missing: ${stripeMissing.join(", ")}. Run npm run stripe:bootstrap to create them, then npm run stripe:verify.`}
+          missingText={`Not set — plan upgrades show an honest connect-billing state. Needed: ${stripeMissing.join(", ")} (npm run stripe:bootstrap prints every value).`}
         />
         <Item
           ok={twilio}
           title="SMS delivery (Twilio)"
           okText="Credentials and a sender are detected — consent-led SMS, delivery callbacks, and STOP/HELP handling are active."
-          missingText="Not set — SMS delivery remains disabled. Email requests continue to work when Resend is connected."
+          missingText={`Not set — SMS delivery remains disabled and review requests fall back to email. Missing: ${twilioMissing.join(", ")}. A2P 10DLC registration is done in the Twilio Console.`}
         />
       </div>
 

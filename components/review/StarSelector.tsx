@@ -4,7 +4,11 @@ import { useState } from "react";
 import { cn } from "@/lib/utils/cn";
 import { Icon } from "@/components/icons";
 
-const RATING_LABELS = ["Tap a star to rate", "Poor", "Fair", "Good", "Great", "Excellent"] as const;
+/**
+ * The customer-facing experience ladder. Index 0 is the un-rated prompt, so the
+ * words line up with the star count they describe: 2 = Okay ... 5 = Awesome.
+ */
+const RATING_LABELS = ["Tap a star to rate", "Poor", "Okay", "Good", "Best", "Awesome"] as const;
 
 /** Accessible star rating — a labelled radio group (keyboard + SR operable). */
 export function StarSelector({

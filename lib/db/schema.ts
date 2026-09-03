@@ -34,6 +34,8 @@ import type {
   ProfileSuggestion,
   ProfileMutationJob,
   AiContentAsset,
+  FraudTriageDecision,
+  PlatformHistoryRecord,
 } from "../data/types";
 
 /**
@@ -119,6 +121,10 @@ export const location = pgTable("location", {
   gbpSnapshot: jsonb("gbp_snapshot").$type<GbpProfileSnapshot>(),
   gbpAudit: jsonb("gbp_audit").$type<LocalGrowthAudit>(),
   suggestionInbox: jsonb("suggestion_inbox").$type<ProfileSuggestion[]>(),
+  /** Owner-entered website, used when Google has not supplied one. */
+  website: text("website"),
+  /** Owner-entered description, used when Google has not supplied one. */
+  ownerDescription: text("owner_description"),
 });
 
 export const appUser = pgTable("app_user", {
@@ -133,6 +139,8 @@ export const appUser = pgTable("app_user", {
   emailVerified: boolean("email_verified").notNull().default(false),
   googleSub: text("google_sub"),
   createdAt: text("created_at"),
+  // V8: bumping this revokes every outstanding session JWT for the user.
+  sessionVersion: integer("session_version").notNull().default(0),
 });
 
 export const passwordResetToken = pgTable("password_reset_token", {
@@ -320,6 +328,8 @@ export const subscription = pgTable("subscription", {
   interval: text("interval").notNull(),
   status: text("status").notNull(),
   trialEndsAt: text("trial_ends_at"),
+  /** Trial notice send markers — additive column, see ADDITIVE_STATEMENTS. */
+  trialNotices: jsonb("trial_notices").$type<Subscription["trialNotices"]>(),
   currency: text("currency").notNull(),
   stripeCustomerId: text("stripe_customer_id"),
   stripeSubscriptionId: text("stripe_subscription_id"),
@@ -423,6 +433,45 @@ export const googleCredential = pgTable("google_credential", {
   googleAccount: text("google_account"),
   scopes: text("scopes").notNull(),
   connectedAt: text("connected_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+/**
+ * Per-workspace outbound email sender. One row per workspace, written from
+ * Settings → Channels so an owner can switch email on without a redeploy.
+ *
+ * `provider` is "resend" (hosted API), "smtp" (their own mailbox) or "gmail"
+ * (OAuth — sends through the Gmail API from the owner's own address). The
+ * single `encryptedSecret` column holds whichever secret that provider needs —
+ * the Resend API key, the SMTP password, or the Google refresh token — as an
+ * AES-256-GCM envelope, never plaintext. `verifiedAt` is stamped only by a
+ * real test send that succeeded, so the UI can never claim "verified" on an
+ * untested config.
+ *
+ * Gmail-only columns (all nullable, added additively): `googleAccount` is the
+ * mailbox the grant belongs to, `scopes` what Google actually granted,
+ * `connectedAt` when consent happened, and `status` is null while healthy or
+ * "needs_reconnect" once a refresh comes back invalid_grant — so the Channels
+ * page can say "Reconnect Gmail" instead of failing silently on every send.
+ */
+export const emailCredential = pgTable("email_credential", {
+  workspaceId: text("workspace_id").primaryKey(),
+  provider: text("provider").notNull(),
+  encryptedSecret: text("encrypted_secret").notNull(),
+  fromEmail: text("from_email").notNull(),
+  fromName: text("from_name"),
+  replyTo: text("reply_to"),
+  smtpHost: text("smtp_host"),
+  smtpPort: integer("smtp_port"),
+  smtpUser: text("smtp_user"),
+  smtpSecure: boolean("smtp_secure"),
+  googleAccount: text("google_account"),
+  scopes: text("scopes"),
+  connectedAt: text("connected_at"),
+  status: text("status"),
+  verifiedAt: text("verified_at"),
+  lastError: text("last_error"),
+  createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
 
@@ -534,3 +583,41 @@ export const aiContentAsset = pgTable(
   },
   (table) => [uniqueIndex("ai_content_asset_suggestion_uq").on(table.workspaceId, table.suggestionId)],
 );
+
+// ── Platform ops (internal console) ─────────────────────────
+
+/**
+ * One row per UTC day: the platform as the ops console measured it that day.
+ * Written by the daily monitor cron (and lazily by the console itself the
+ * first time it is opened on a day), read back to compute month-over-month
+ * retention — logo churn and NRR need a "then" to compare "now" against.
+ *
+ * Deliberately NOT tenant-scoped: it is an aggregate over every tenant and
+ * belongs to the platform, not to any workspace (see UNSCOPED_TABLES).
+ */
+export const platformSnapshot = pgTable(
+  "platform_snapshot",
+  {
+    id: text("id").primaryKey(),
+    day: text("day").notNull(),
+    capturedAt: text("captured_at").notNull(),
+    tenants: jsonb("tenants").$type<PlatformHistoryRecord["tenants"]>().notNull(),
+    kpis: jsonb("kpis").$type<PlatformHistoryRecord["kpis"]>().notNull(),
+  },
+  (table) => [uniqueIndex("platform_snapshot_day_uq").on(table.day)],
+);
+
+/**
+ * An operator's decision on a fraud flag. Flags themselves are computed live
+ * from tenant data with deterministic ids, so the decision is keyed by that id
+ * and re-applies on every recompute; the tenant key is carried so the row is
+ * isolated like any other record about that tenant.
+ */
+export const fraudTriage = pgTable("fraud_triage", {
+  flagId: text("flag_id").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+  decision: text("decision").$type<FraudTriageDecision>().notNull(),
+  operator: text("operator").notNull(),
+  note: text("note"),
+  at: text("at").notNull(),
+});

@@ -1,10 +1,10 @@
-import { getSessionAndData } from "@/lib/data";
+import { getAgencySessionAndData } from "@/lib/data";
 import { DemoBanner } from "@/components/app/DemoBanner";
 import { AgencyShell } from "./_components/AgencyShell";
 import { redirect } from "next/navigation";
 
 export default async function AgencyLayout({ children }: { children: React.ReactNode }) {
-  const { session, data } = await getSessionAndData();
+  const { session, data } = await getAgencySessionAndData();
   if (session.role !== "agency_admin" && data.subscription.tier !== "agency") redirect("/app");
   const wl = data.agency.whiteLabel;
 

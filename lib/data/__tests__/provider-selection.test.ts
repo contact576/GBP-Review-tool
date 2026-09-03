@@ -20,7 +20,12 @@ let mod: typeof import("@/lib/data");
 
 beforeAll(async () => {
   mod = await import("@/lib/data");
-});
+  // Warm the cached Postgres provider in the hook, not inside a test. The first
+  // getRealProvider() call dynamically imports the (large) drizzle provider,
+  // which can exceed vitest's 5s default test timeout on a loaded machine and
+  // fail spuriously. No connection is opened — only a module import.
+  await mod.getRealProvider();
+}, 60_000);
 
 const realSession: Session = {
   userId: "usr_x",

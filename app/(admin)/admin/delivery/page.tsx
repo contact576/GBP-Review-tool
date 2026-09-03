@@ -1,4 +1,4 @@
-import { getSessionAndData } from "@/lib/data";
+import { getPlatformSnapshot, getSessionAndData } from "@/lib/data";
 import { PageHeader } from "@/components/app/PageHeader";
 import { Badge } from "@/components/ds/misc";
 import { Icon } from "@/components/icons";
@@ -16,9 +16,9 @@ import {
 import { DeliveryTable } from "./DeliveryTable";
 
 export default async function AdminDeliveryPage() {
-  const { session, data } = await getSessionAndData();
-  const telemetry = readPlatformTelemetry(data.platform, session.isDemo);
-  const incidents = [...data.platform.deliveryIncidents].sort(
+  const [{ session }, platform] = await Promise.all([getSessionAndData(), getPlatformSnapshot()]);
+  const telemetry = readPlatformTelemetry(platform, session.isDemo);
+  const incidents = [...platform.deliveryIncidents].sort(
     (a, b) => sevRank[a.severity] - sevRank[b.severity] || b.count - a.count,
   );
   const totalAffected = incidents.reduce((a, i) => a + i.count, 0);

@@ -10,12 +10,20 @@ export function getAnthropic(): Anthropic | null {
   return client;
 }
 
-/** Low-level text completion. Returns null on any failure so callers fall back. */
+/**
+ * Low-level text completion. Returns null on any failure so callers fall back.
+ *
+ * `temperature` is opt-in per call. Drafting a review passes 1 so two customers
+ * with the same taps never get the same sentences; the clarity-edit path passes
+ * nothing, keeping the API default so an edit stays faithful to what the
+ * customer already wrote.
+ */
 export async function completeText(args: {
   model: string;
   system: string;
   user: string;
   maxTokens?: number;
+  temperature?: number;
 }): Promise<string | null> {
   const anthropic = getAnthropic();
   if (!anthropic) return null;
@@ -25,6 +33,7 @@ export async function completeText(args: {
       max_tokens: args.maxTokens ?? 700,
       system: args.system,
       messages: [{ role: "user", content: args.user }],
+      ...(typeof args.temperature === "number" ? { temperature: args.temperature } : {}),
     });
     const parts = msg.content
       .map((block) => (block.type === "text" ? block.text : ""))

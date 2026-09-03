@@ -24,11 +24,11 @@ describe("subscription cap remap on tier change", () => {
   });
 
   it("raises caps when upgraded to a higher tier", async () => {
-    await memoryProvider.setSubscription(DEMO_WORKSPACE_ID, { tier: "pro", status: "active" });
+    await memoryProvider.setSubscription(DEMO_WORKSPACE_ID, { tier: "growth", status: "active" });
     const data = await memoryProvider.getData(DEMO_WORKSPACE_ID);
-    expect(data?.subscription.tier).toBe("pro");
-    expect(data?.subscription.usage.aiDraftsLimit).toBe(PLANS.pro.limits.aiDraftsPerMonth); // -1
-    expect(data?.subscription.usage.smsCreditsTotal).toBe(PLANS.pro.limits.smsCredits); // 500
+    expect(data?.subscription.tier).toBe("growth");
+    expect(data?.subscription.usage.aiDraftsLimit).toBe(PLANS.growth.limits.aiDraftsPerMonth); // -1
+    expect(data?.subscription.usage.smsCreditsTotal).toBe(PLANS.growth.limits.smsCredits); // 500
   });
 
   it("preserves used counters across a tier change", async () => {

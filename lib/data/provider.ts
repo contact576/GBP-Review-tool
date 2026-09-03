@@ -27,6 +27,7 @@ import type {
   Region,
   Integration,
   Subscription,
+  TrialNotices,
   RankGridScan,
   AeoSnapshot,
   AgencyClient,
@@ -36,7 +37,14 @@ import type {
   MonitoringRun,
   AiContentAsset,
   AuditLog,
+  Milestone,
   Notification,
+  BusinessDetailsPatch,
+  FraudTriage,
+  PlatformAuditEntry,
+  PlatformHistoryRecord,
+  PlatformTenantDetail,
+  PlatformTenantUser,
 } from "./types";
 
 export type ProfileSuggestionPatch = Partial<
@@ -110,6 +118,9 @@ export interface AuthUser {
   role: User["role"];
   workspaceId: string;
   isDemo: boolean;
+  /** Monotonic counter embedded in the session JWT; bumping it revokes every
+   * outstanding session for the user (V8). Absent → treated as 0. */
+  sessionVersion?: number;
 }
 
 export type RegisterResult =
@@ -335,6 +346,57 @@ export interface DataProvider {
   getData(workspaceId: string): Promise<FoundlyData | null>;
   listOrganizationWorkspaces(workspaceId: string): Promise<OrganizationWorkspaceSummary[]>;
   listAgencyClients(workspaceId: string): Promise<AgencyClient[]>;
+  /**
+   * Platform-wide roster and KPIs for the ops console. The DB provider
+   * computes it across every real tenant; the memory provider returns the
+   * demo fixture stored on the caller's workspace.
+   */
+  getPlatformSnapshot(workspaceId: string): Promise<FoundlyData["platform"]>;
+
+  // ── Platform ops (internal console) ───────────────────────
+  /** One tenant (organization) in full: workspaces, users, subscription, recent audit. */
+  getTenantDetail(organizationId: string): Promise<PlatformTenantDetail | null>;
+  /** Newest-first audit entries across every real tenant, with the tenant named. */
+  listPlatformAuditLog(limit: number): Promise<PlatformAuditEntry[]>;
+  /** Users on one workspace, with whether each can actually sign in. */
+  listWorkspaceUsers(workspaceId: string): Promise<PlatformTenantUser[]>;
+  /** Store (or replace) the daily platform history record for its day. */
+  savePlatformHistory(record: PlatformHistoryRecord): Promise<void>;
+  /** Stored daily history, oldest first. */
+  listPlatformHistory(limit?: number): Promise<PlatformHistoryRecord[]>;
+  /** Record an operator's decision on a fraud flag (replaces any earlier one). */
+  saveFraudTriage(entry: FraudTriage): Promise<void>;
+  /**
+   * Delete one workspace and every row that belongs to it. Refuses the demo
+   * workspace and any workspace holding a platform_admin. Returns the ids of
+   * the users removed so the caller can revoke their sessions.
+   */
+  deleteWorkspace(workspaceId: string): Promise<{ ok: true; userIds: string[] } | { ok: false; error: string }>;
+  /** Delete an organization: every workspace in it, then the organization row. */
+  deleteOrganization(organizationId: string): Promise<{ ok: true; workspaceIds: string[] } | { ok: false; error: string }>;
+
+  // ── Agency (client book) ──────────────────────────────────
+  /** Save the agency's own wholesale / retail rates (the economics inputs). */
+  setAgencyRates(workspaceId: string, rates: { wholesaleRate: number; retailAverage: number }): Promise<void>;
+  /** Patch one client's stored book entry (contact email, invite marker). */
+  updateAgencyClient(
+    workspaceId: string,
+    locationId: string,
+    patch: Partial<Pick<AgencyClient, "contactEmail" | "invitedAt">>,
+  ): Promise<AgencyClient | null>;
+  /** Drop a client from the agency's book (the workspace itself is deleted separately). */
+  removeAgencyClient(workspaceId: string, locationId: string): Promise<void>;
+  /**
+   * Point a workspace's owner account at a real person: the client's own
+   * email and name. Only allowed while that account has no credentials (a
+   * sibling workspace created by an agency carries an uncredentialed owner
+   * row); returns the user id so an invite / password-setup token can be
+   * minted for it.
+   */
+  setWorkspaceOwnerIdentity(
+    workspaceId: string,
+    identity: { email: string; name: string },
+  ): Promise<{ ok: true; userId: string } | { ok: false; error: string }>;
   createOrganizationWorkspace(
     workspaceId: string,
     input: CreateOrganizationWorkspaceInput,
@@ -360,6 +422,15 @@ export interface DataProvider {
     name: string;
     referredByWorkspaceId?: string;
   }): Promise<AuthUser | null>;
+  /** Current session-version for a user, or null if the user is unknown (V8). */
+  getUserSessionVersion(userId: string): Promise<number | null>;
+  /** Increment a user's session-version, invalidating all existing sessions (V8). */
+  bumpUserSessionVersion(userId: string): Promise<void>;
+  /** Set a user's email-verified flag (V17). */
+  setEmailVerified(userId: string, verified: boolean): Promise<void>;
+  /** Whether the workspace owner's email is verified. Fails open (true) when the
+   * owner row is unknown, so callers never hard-block on missing data (V17). */
+  isWorkspaceEmailVerified(workspaceId: string): Promise<boolean>;
 
   // Focused reads
   getCustomer(workspaceId: string, id: CustomerId): Promise<Customer | null>;
@@ -466,6 +537,7 @@ export interface DataProvider {
         | "status"
         | "tier"
         | "interval"
+        | "trialEndsAt"
         | "stripeCustomerId"
         | "stripeSubscriptionId"
         | "stripePriceId"
@@ -473,6 +545,17 @@ export interface DataProvider {
         | "cancelAtPeriodEnd"
       >
     >,
+  ): Promise<void>;
+  /**
+   * Every non-demo subscription whose status is `trialing`, for the daily trial
+   * notice cron. Cheap on purpose: subscription rows only, no tenant fan-out.
+   */
+  listTrialingSubscriptions(): Promise<Subscription[]>;
+  /** Record that a trial notice went out — the cron's once-per-workspace marker. */
+  markTrialNoticeSent(
+    workspaceId: string,
+    kind: keyof TrialNotices,
+    sentAt: string,
   ): Promise<void>;
 
   // Google data sync
@@ -498,6 +581,20 @@ export interface DataProvider {
     suggestionId: string,
     patch: ProfileSuggestionPatch,
   ): Promise<ProfileSuggestion | null>;
+  /**
+   * Save owner-entered business facts. Google stays authoritative wherever it is
+   * connected; these fill the gap for workspaces that are not.
+   */
+  updateBusinessDetails(workspaceId: string, patch: BusinessDetailsPatch): Promise<void>;
+  /**
+   * Add one suggestion to the inbox. Used by the owner-initiated content path,
+   * which has no audit finding behind it — the audit builder still owns every
+   * suggestion it creates during a Business Profile sync.
+   */
+  appendProfileSuggestion(
+    workspaceId: string,
+    suggestion: ProfileSuggestion,
+  ): Promise<ProfileSuggestion>;
   createProfileMutationJob(
     workspaceId: string,
     job: ProfileMutationJob,
@@ -552,8 +649,17 @@ export interface DataProvider {
   ): Promise<StaffInvite | { error: string }>;
   addStaffMember(workspaceId: string, displayName: string): Promise<StaffMember>;
 
+  // Milestones
+  /**
+   * Record an earned milestone. Idempotent on id — the award pass runs on every
+   * sync, so re-offering an existing milestone must not duplicate it.
+   */
+  appendMilestone(workspaceId: string, milestone: Milestone): Promise<void>;
+
   // Notifications
   markNotificationsRead(workspaceId: string): Promise<void>;
+  /** Mark a single notification read. Unknown ids are a no-op, never an error. */
+  markNotificationRead(workspaceId: string, notificationId: string): Promise<void>;
 
   // Demo
   resetDemo(): Promise<void>;

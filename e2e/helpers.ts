@@ -76,6 +76,26 @@ export async function scanQr(page: Page, slug: string): Promise<void> {
   await page.waitForURL(/\/r\/[A-Za-z0-9_]+/);
 }
 
+/**
+ * Walk the customer panel from the service question through to the writing
+ * surface: skip/choose a service, pick a star rating, then Continue.
+ * Leaves the page on the draft/own-words step.
+ */
+export async function rateExperience(
+  page: Page,
+  stars: 1 | 2 | 3 | 4 | 5,
+  service?: string,
+): Promise<void> {
+  // Step 1 is only rendered when the workspace has a service list.
+  const skip = page.getByRole("button", { name: /^(Skip this|Continue)$/ });
+  if (await page.getByRole("heading", { name: /What did you come to/ }).isVisible().catch(() => false)) {
+    if (service) await page.getByRole("button", { name: service, exact: true }).click();
+    await skip.first().click();
+  }
+  await page.getByRole("radio", { name: `${stars} star${stars === 1 ? "" : "s"}` }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+}
+
 /** One AI draft card, located by its tone badge. */
 export function draftCard(page: Page, tone: string) {
   return page.locator("div.rounded-card").filter({ hasText: tone });

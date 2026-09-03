@@ -64,7 +64,7 @@ export default function HomePage() {
               </LinkButton>
             </div>
             <p className="mt-4 text-[13px] text-faint">
-              14 days of Growth free · no credit card · keep a free plan forever.
+              30 days of every tool free · no credit card · keep a free plan forever.
             </p>
           </div>
 
@@ -209,7 +209,7 @@ export default function HomePage() {
           <>
             <LinkButton href="/score" size="lg" icon="sparkles">Get my free Growth Score</LinkButton>
             <LinkButton href="/sign-up" size="lg" variant="secondary" className={heroSecondaryBtn}>
-              Start 14-day trial
+              Start 30-day trial
             </LinkButton>
           </>
         }

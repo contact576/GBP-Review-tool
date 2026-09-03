@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
+import { trialLockAllowsPath } from "@/lib/billing/trial";
 import { Icon } from "@/components/icons";
 import { Badge } from "@/components/ds/misc";
 import { ToastProvider } from "@/components/ds/Toast";
@@ -33,26 +34,45 @@ export function AppShell({
   ownerName,
   ownerEmail,
   trialDaysLeft,
+  trialEnded,
+  trialLocked,
   unread,
   locations,
   currentWorkspaceId,
   agencyMode,
   isDemo,
+  hasBanner,
 }: {
   children: React.ReactNode;
   business: string;
   ownerName: string;
   ownerEmail?: string;
+  /** Whole days left on a live trial; undefined when not trialing. */
   trialDaysLeft?: number;
+  /** The trial's end date has passed and nothing paid replaced it. */
+  trialEnded?: boolean;
+  /**
+   * This session is locked out of the app until it pays or continues on Free
+   * (decided server-side in app/(app)/layout.tsx). The shell re-applies the
+   * redirect on client-side navigation, which a shared layout never sees.
+   */
+  trialLocked?: boolean;
   unread?: number;
   locations: OrganizationWorkspaceSummary[];
   currentWorkspaceId: string;
   agencyMode?: boolean;
   isDemo?: boolean;
+  /** A 40px strip (demo, or agency acting-as) sits above the shell. */
+  hasBanner?: boolean;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [moreOpen, setMoreOpen] = useState(false);
   const dashboardHome = pathname === "/app";
+
+  useEffect(() => {
+    if (trialLocked && !trialLockAllowsPath(pathname)) router.replace("/app/trial-ending");
+  }, [trialLocked, pathname, router]);
 
   return (
     <ToastProvider>
@@ -60,7 +80,7 @@ export function AppShell({
         <aside
           className={cn(
             "on-hero fixed bottom-0 left-0 z-30 hidden w-[248px] flex-col overflow-hidden bg-hero text-white shadow-[10px_0_35px_rgba(6,45,37,.08)] lg:flex",
-            isDemo ? "top-10" : "top-0",
+            hasBanner || isDemo ? "top-10" : "top-0",
           )}
         >
           <div className="flex h-[88px] items-center px-7">
@@ -174,9 +194,15 @@ export function AppShell({
                   <Badge tone="primary" icon="grid">Agency</Badge>
                 </Link>
               ) : null}
-              {!dashboardHome && typeof trialDaysLeft === "number" && trialDaysLeft > 0 ? (
+              {trialEnded ? (
                 <Link href="/app/settings/billing" className="hidden sm:inline-flex">
-                  <Badge tone="gold" icon="clock">Trial · {trialDaysLeft}d left</Badge>
+                  <Badge tone="danger" icon="clock">Trial ended</Badge>
+                </Link>
+              ) : typeof trialDaysLeft === "number" ? (
+                <Link href="/app/settings/billing" className="hidden sm:inline-flex">
+                  <Badge tone="gold" icon="clock">
+                    Trial · {trialDaysLeft} {trialDaysLeft === 1 ? "day" : "days"} left
+                  </Badge>
                 </Link>
               ) : null}
               <Link
@@ -248,7 +274,6 @@ export function AppShell({
                   >
                     <Icon name={item.icon} size={20} className="text-primary" />
                     <span className="text-[12px] font-medium leading-tight text-ink">{item.label}</span>
-                    {item.pro ? <Badge tone="gold">Pro</Badge> : null}
                   </Link>
                 ))}
               </div>

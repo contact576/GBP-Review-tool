@@ -39,3 +39,8 @@ yarn-error.log*
 
 # drizzle
 /drizzle/meta
+.env*
+
+# Live-verification screenshot artifact
+live-dashboard.png
+demo-*.png

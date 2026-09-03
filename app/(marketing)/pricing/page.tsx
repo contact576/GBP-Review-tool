@@ -6,7 +6,7 @@ import { PricingBoard } from "./PricingBoard";
 export const metadata: Metadata = {
   title: "Pricing",
   description:
-    "Simple, honest pricing. Start with 14 days of Growth free — no credit card — then keep a free plan forever. Plans for single locations, teams, and white-label agencies.",
+    "Simple, honest pricing. Start with 30 days of every tool free — no credit card — then keep a free plan forever. Plans for single locations, teams, and white-label agencies.",
 };
 
 const FAQ = [
@@ -16,7 +16,7 @@ const FAQ = [
   },
   {
     q: "Do I need a credit card to start?",
-    a: "No. The 14-day Growth trial needs no card. We only ask for payment if you choose to stay on a paid plan.",
+    a: "No. The 30-day full-access trial needs no card. We only ask for payment if you choose to stay on a paid plan.",
   },
   {
     q: "Can I switch plans or regions later?",
@@ -40,7 +40,7 @@ export default function PricingPage() {
               Pricing that grows with you
             </h1>
             <p className="mx-auto mt-4 max-w-lg text-[16px] leading-relaxed text-sub">
-              Start free, prove it works, then scale. Every paid plan begins with 14 days of Growth —
+              Start free, prove it works, then scale. Every paid plan begins with 30 days of every tool —
               no credit card, no fake countdowns.
             </p>
           </div>
@@ -70,10 +70,10 @@ export default function PricingPage() {
       <CtaBand
         eyebrow="No card to start"
         title="Try the full Growth plan free"
-        lede="Run the whole loop for 14 days, then keep a free plan forever. Nothing auto-charges."
+        lede="Run the whole loop for 30 days, then keep a free plan forever. Nothing auto-charges."
         actions={
           <>
-            <LinkButton href="/sign-up" size="lg" icon="sparkles">Start 14-day trial</LinkButton>
+            <LinkButton href="/sign-up" size="lg" icon="sparkles">Start 30-day trial</LinkButton>
             <LinkButton href="/score" size="lg" variant="secondary" className={heroSecondaryBtn}>
               Get my free Score
             </LinkButton>

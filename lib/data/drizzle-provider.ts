@@ -1,14 +1,29 @@
 import { and, eq, gt, inArray, isNotNull, isNull, like, lte, or, sql } from "drizzle-orm";
+import {
+  aggregatePlatform,
+  type DeliveryFailureRow,
+  type DurabilityRow,
+  type PlatformWorkspaceRow,
+} from "@/lib/platform/aggregate";
+import {
+  BURST_LOOKBACK_DAYS,
+  type FraudCustomerRow,
+  type FraudRequestRow,
+  type FraudReviewRow,
+  type FraudStaffRow,
+  type FraudUserRow,
+} from "@/lib/platform/fraud";
 import type { BatchItem } from "drizzle-orm/batch";
 import { nanoid } from "nanoid";
-import { getDb, type FoundlyDb } from "../db/client";
+import { getDb, getSql, type FoundlyDb } from "../db/client";
 import { ensureSchema } from "../db/ensure";
 import * as t from "../db/schema";
 import { emptyFoundlyData, makeSlug } from "./empty";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { canonicalPhone } from "@/lib/sms/phone";
-import { PLANS } from "@/lib/billing/plans";
+import { PLANS, normalizePlan } from "@/lib/billing/plans";
 import { mergeSuggestionInbox } from "@/lib/suggestions/inbox";
+import { googleIntegrationDetail, googleIntegrationStatus } from "./google-sync-status";
 import { buildAudienceSnapshot } from "@/lib/campaigns/audience";
 import {
   buildGooglePublicUpdate,
@@ -78,7 +93,18 @@ import type {
   ContentPublishingJob,
   MonitoringRun,
   AiContentAsset,
+  BusinessDetailsPatch,
+  AgencyClient,
+  AgencyClientLive,
+  FraudTriage,
+  PlatformAuditEntry,
+  PlatformHistoryRecord,
+  PlatformTenantDetail,
+  PlatformTenantUser,
+  PlatformTenantWorkspace,
 } from "./types";
+import { rollupAgencyBook } from "@/lib/agency/rollup";
+import { TENANT_SCOPED_TABLES } from "../db/schema-sql";
 
 /**
  * Postgres/Drizzle DataProvider — the real persistence path (DATABASE_URL set).
@@ -217,6 +243,7 @@ function toAuthUser(row: UserRow): AuthUser {
     role: row.role as AuthUser["role"],
     workspaceId: row.workspaceId,
     isDemo: false, // the database never holds demo data
+    sessionVersion: row.sessionVersion ?? 0,
   };
 }
 
@@ -241,7 +268,7 @@ function mapWorkspace(row: WorkspaceRow): Workspace {
     industryConfig: row.industryConfig ?? undefined,
     region: row.region as Workspace["region"],
     timezone: row.timezone,
-    plan: row.plan as Workspace["plan"],
+    plan: normalizePlan(row.plan),
     createdAt: row.createdAt,
     isDemo: row.isDemo,
     whiteLabel: row.whiteLabel ?? undefined,
@@ -272,6 +299,8 @@ function mapLocation(row: LocationRow): Location {
     gbpSnapshot: row.gbpSnapshot ?? undefined,
     gbpAudit: row.gbpAudit ?? undefined,
     suggestionInbox: row.suggestionInbox ?? undefined,
+    website: row.website ?? undefined,
+    ownerDescription: row.ownerDescription ?? undefined,
     profile: {
       description: row.profileDescription,
       primaryCategory: row.profilePrimaryCategory,
@@ -487,10 +516,14 @@ function mapSubscription(row: SubscriptionRow): Subscription {
   return {
     id: row.id,
     workspaceId: row.workspaceId,
-    tier: row.tier as Subscription["tier"],
+    // Normalized on the way out so a retired tier still sitting in the column
+    // (e.g. "pro", folded into Growth) can never reach `PLANS[tier]` as an
+    // undefined lookup and take a page down.
+    tier: normalizePlan(row.tier),
     interval: row.interval as Subscription["interval"],
     status: row.status as Subscription["status"],
     trialEndsAt: row.trialEndsAt ?? undefined,
+    trialNotices: row.trialNotices ?? undefined,
     currency: row.currency as Subscription["currency"],
     stripeCustomerId: row.stripeCustomerId ?? undefined,
     stripeSubscriptionId: row.stripeSubscriptionId ?? undefined,
@@ -536,6 +569,40 @@ function mapAudit(row: AuditRow): AuditLog {
     at: row.at,
     meta: row.meta ?? undefined,
   };
+}
+
+function mapFraudTriage(row: typeof t.fraudTriage.$inferSelect): FraudTriage {
+  return {
+    flagId: row.flagId,
+    workspaceId: row.workspaceId,
+    decision: row.decision,
+    operator: row.operator,
+    note: row.note ?? undefined,
+    at: row.at,
+  };
+}
+
+/** A user as the ops console sees it — credential PRESENCE only, never the hash. */
+function mapTenantUser(row: UserRow): PlatformTenantUser {
+  return {
+    id: row.id,
+    workspaceId: row.workspaceId,
+    email: row.email,
+    name: row.name,
+    role: row.role as PlatformTenantUser["role"],
+    emailVerified: row.emailVerified,
+    hasLogin: Boolean(row.passwordHash || row.googleSub),
+    createdAt: row.createdAt ?? undefined,
+  };
+}
+
+function initialsOf(name: string): string {
+  return name
+    .split(/\s+/)
+    .map((word) => word[0] ?? "")
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 }
 
 function mapQr(row: QrRow): QrAsset {
@@ -621,6 +688,8 @@ function buildLocationRow(l: Location): typeof t.location.$inferInsert {
     gbpSnapshot: l.gbpSnapshot,
     gbpAudit: l.gbpAudit,
     suggestionInbox: l.suggestionInbox,
+    website: l.website ?? null,
+    ownerDescription: l.ownerDescription ?? null,
   };
 }
 
@@ -1112,8 +1181,10 @@ function buildMetaRow(data: FoundlyData): typeof t.datasetMeta.$inferInsert {
 }
 
 // ── Atomic workspace creation (register / Google sign-up) ────
-// neon-http has no interactive transactions; db.batch() executes all
-// statements in a single atomic request.
+// A real interactive transaction: either the whole tenant (org, workspace,
+// location, owner, subscription, meta) lands or none of it does. A partial
+// failure here would otherwise leave an account that can authenticate but has
+// no workspace to read.
 async function createWorkspaceWithOwner(
   db: FoundlyDb,
   data: FoundlyData,
@@ -1121,28 +1192,31 @@ async function createWorkspaceWithOwner(
 ): Promise<void> {
   const ws = data.workspace.id;
   const now = nowIso();
-  const statements: BatchItem<"pg">[] = [
-    db.insert(t.organization).values(buildOrgRow(data.organization, ws)),
-    db.insert(t.workspace).values(buildWorkspaceRow(data.workspace)),
-    db.insert(t.location).values(buildLocationRow(data.location)),
-    db.insert(t.appUser).values(
+  await db.transaction(async (tx) => {
+    await tx.insert(t.organization).values(buildOrgRow(data.organization, ws));
+    await tx.insert(t.workspace).values(buildWorkspaceRow(data.workspace));
+    await tx.insert(t.location).values(buildLocationRow(data.location));
+    await tx.insert(t.appUser).values(
       buildUserRow(data.owner, {
         passwordHash: auth.passwordHash ?? null,
         googleSub: auth.googleSub ?? null,
         emailVerified: true, // auto-verified until email sending is configured
         createdAt: now,
       }),
-    ),
-    db.insert(t.subscription).values(buildSubscriptionRow(data.subscription)),
-    db.insert(t.datasetMeta).values(buildMetaRow(data)),
-  ];
-  data.qrAssets.forEach((q, i) => {
-    statements.push(db.insert(t.qrAsset).values(buildQrRow(q, ws, i)));
+    );
+    await tx.insert(t.subscription).values(buildSubscriptionRow(data.subscription));
+    await tx.insert(t.datasetMeta).values(buildMetaRow(data));
+    if (data.qrAssets.length > 0) {
+      await tx
+        .insert(t.qrAsset)
+        .values(data.qrAssets.map((q, i) => buildQrRow(q, ws, i)));
+    }
+    if (data.notifications.length > 0) {
+      await tx
+        .insert(t.notification)
+        .values(data.notifications.map((n, i) => buildNotificationRow(n, ws, i)));
+    }
   });
-  data.notifications.forEach((n, i) => {
-    statements.push(db.insert(t.notification).values(buildNotificationRow(n, ws, i)));
-  });
-  await db.batch(statements as [BatchItem<"pg">, ...BatchItem<"pg">[]]);
 }
 
 function mapMutationJob(row: MutationJobRow): ProfileMutationJob {
@@ -1268,34 +1342,41 @@ async function createOrganizationLocation(
   data: FoundlyData,
 ): Promise<void> {
   const ws = data.workspace.id;
-  const statements: BatchItem<"pg">[] = [
-    db.insert(t.workspace).values(buildWorkspaceRow(data.workspace)),
-    db.insert(t.location).values(buildLocationRow(data.location)),
-    db.insert(t.appUser).values(
+  await db.transaction(async (tx) => {
+    await tx.insert(t.workspace).values(buildWorkspaceRow(data.workspace));
+    await tx.insert(t.location).values(buildLocationRow(data.location));
+    await tx.insert(t.appUser).values(
       buildUserRow(data.owner, {
         passwordHash: null,
         googleSub: null,
         emailVerified: true,
         createdAt: data.workspace.createdAt,
       }),
-    ),
-    db.insert(t.subscription).values(buildSubscriptionRow(data.subscription)),
-    db.insert(t.datasetMeta).values(buildMetaRow(data)),
-  ];
-  data.qrAssets.forEach((qr, index) => {
-    statements.push(db.insert(t.qrAsset).values(buildQrRow(qr, ws, index)));
-  });
-  data.notifications.forEach((notification, index) => {
-    statements.push(
-      db.insert(t.notification).values(buildNotificationRow(notification, ws, index)),
     );
+    await tx.insert(t.subscription).values(buildSubscriptionRow(data.subscription));
+    await tx.insert(t.datasetMeta).values(buildMetaRow(data));
+    if (data.qrAssets.length > 0) {
+      await tx
+        .insert(t.qrAsset)
+        .values(data.qrAssets.map((qr, index) => buildQrRow(qr, ws, index)));
+    }
+    if (data.notifications.length > 0) {
+      await tx
+        .insert(t.notification)
+        .values(
+          data.notifications.map((notification, index) =>
+            buildNotificationRow(notification, ws, index),
+          ),
+        );
+    }
   });
-  await db.batch(statements as [BatchItem<"pg">, ...BatchItem<"pg">[]]);
 }
 
 // ── Clear + seed (shared with the seed-runner) ──────────────
 export async function clearAllTables(): Promise<void> {
   const db = getDb();
+  await db.delete(t.fraudTriage);
+  await db.delete(t.platformSnapshot);
   await db.delete(t.profileMutationJob);
   await db.delete(t.instagramCredential);
   await db.delete(t.googleCredential);
@@ -1469,10 +1550,22 @@ export const drizzleProvider: DataProvider = {
         .from(t.location)
         .where(eq(t.location.workspaceId, workspaceId))
         .limit(1),
+      // The workspace's principal account. Usually the owner — but an agency
+      // or platform admin's own workspace has no separate owner row: the admin
+      // IS the account holder. Demanding role = "owner" here 500'd every page
+      // for those consoles ("Foundly DB is missing owner", 2026-09-03).
       db
         .select()
         .from(t.appUser)
-        .where(and(eq(t.appUser.workspaceId, workspaceId), eq(t.appUser.role, "owner")))
+        .where(
+          and(
+            eq(t.appUser.workspaceId, workspaceId),
+            inArray(t.appUser.role, ["owner", "agency_admin", "platform_admin"]),
+          ),
+        )
+        .orderBy(
+          sql`case ${t.appUser.role} when 'owner' then 0 when 'agency_admin' then 1 else 2 end`,
+        )
         .limit(1),
       db
         .select()
@@ -1617,79 +1710,528 @@ export const drizzleProvider: DataProvider = {
       .limit(1);
     const current = currentRows[0];
     if (!current) return [];
-    const workspaces = await db
+    // One join, not a getData() per sibling.
+    //
+    // This runs on EVERY /app/* page (the location switcher in the shell). It
+    // used to loop `getData(workspace.id)` — ~21 queries each, awaited
+    // sequentially — to fill seven scalar fields, so a 5-location org paid 105
+    // round trips to render a dropdown. Everything needed lives on three tables,
+    // and only `metrics` is pulled from the 15-column dataset_meta row.
+    const rows = await db
+      .select({
+        workspaceId: t.workspace.id,
+        isDemo: t.workspace.isDemo,
+        locationId: t.location.id,
+        name: t.location.name,
+        city: t.location.city,
+        rating: t.location.rating,
+        reviewCount: t.location.reviewCount,
+        metrics: t.datasetMeta.metrics,
+      })
+      .from(t.workspace)
+      .innerJoin(t.location, eq(t.location.workspaceId, t.workspace.id))
+      .innerJoin(t.datasetMeta, eq(t.datasetMeta.workspaceId, t.workspace.id))
+      .where(eq(t.workspace.organizationId, current.organizationId));
+
+    return rows.map((row) => {
+      const latest = [...(row.metrics ?? [])].sort((a, b) => a.date.localeCompare(b.date)).pop();
+      const trustedScore = row.isDemo || Boolean(latest?.sources?.scores);
+      return {
+        workspaceId: row.workspaceId,
+        locationId: row.locationId,
+        name: row.name,
+        city: row.city,
+        rating: row.rating,
+        reviewCount: row.reviewCount,
+        growthScore: trustedScore ? latest?.growthScore ?? null : null,
+      };
+    });
+  },
+
+  async getPlatformSnapshot() {
+    // Every real tenant: demo workspaces and the ops team's own workspace
+    // (any workspace holding a platform_admin user) are not customers.
+    const pg = getSql();
+    const now = new Date();
+    const iso = (daysAgo: number) => new Date(now.getTime() - daysAgo * 86_400_000).toISOString();
+    const workspaces = await pg<PlatformWorkspaceRow[]>`
+      select w.id as "workspaceId", w.organization_id as "organizationId",
+             coalesce(o.name, '') as "organizationName", l.name as "locationName",
+             w.vertical, w.region, s.tier, s.interval, s.status, w.created_at as "createdAt",
+             (select u.email from app_user u where u.workspace_id = w.id
+                and u.role in ('owner','agency_admin') order by u.created_at nulls last limit 1) as "ownerEmail"
+      from workspace w
+      join location l on l.workspace_id = w.id
+      join subscription s on s.workspace_id = w.id
+      left join organization o on o.workspace_id = w.id
+      where w.is_demo = false
+        and not exists (select 1 from app_user pa where pa.workspace_id = w.id and pa.role = 'platform_admin')
+      order by w.created_at`;
+    const deliveryFailures = await pg<DeliveryFailureRow[]>`
+      select workspace_id as "workspaceId", channel, status, count(*)::int as count, max(created_at) as "latestAt"
+      from review_request
+      where status in ('failed','suppressed') and is_test = false and created_at >= ${iso(30)}
+      group by 1, 2, 3`;
+    const durability = await pg<DurabilityRow[]>`
+      select workspace_id as "workspaceId",
+             count(*)::int as posted,
+             count(*) filter (where durability <> 'vanished' and published_at <= ${iso(30)})::int as "survived30d",
+             count(*) filter (where durability <> 'vanished' and published_at <= ${iso(60)})::int as "survived60d",
+             count(*) filter (where durability = 'vanished')::int as vanished
+      from review
+      group by 1`;
+    const weekly = await pg<{ count: number }[]>`
+      select count(*)::int as count from review r
+      join workspace w on w.id = r.workspace_id
+      where w.is_demo = false and r.published_at >= ${iso(7)}`;
+
+    // Fraud detector inputs (lib/platform/fraud.ts). Bounded windows: the
+    // velocity signal needs 31 days of matched reviews, the burst signal 7
+    // days of requests; self-review needs every customer who was ever sent a
+    // real request, which is a join rather than a full customer scan.
+    const tenantIds = workspaces.map((row) => row.workspaceId);
+    // Sequential on purpose, and never fatal: the roster, billing and delivery
+    // figures above are already earned, so a failure in the detector inputs
+    // or the history read must degrade that section to "Not measured" — not
+    // take the whole console down with a 500.
+    let fraud: Parameters<typeof aggregatePlatform>[0]["fraud"];
+    let history: PlatformHistoryRecord[] | undefined;
+    try {
+      history = await drizzleProvider.listPlatformHistory();
+    } catch (error) {
+      console.error("[platform] history read failed:", error instanceof Error ? error.message : error);
+    }
+    if (tenantIds.length) {
+      try {
+        const fraudRequests = await pg<FraudRequestRow[]>`
+          select workspace_id as "workspaceId", id, customer_id as "customerId", staff_id as "staffId",
+                 status, created_at as "createdAt", is_test as "isTest"
+          from review_request
+          where workspace_id in ${pg(tenantIds)} and is_test = false
+            and (created_at >= ${iso(BURST_LOOKBACK_DAYS)} or status in ('posted_google','opened','clicked','sent','delivered'))`;
+        const fraudReviews = await pg<FraudReviewRow[]>`
+          select workspace_id as "workspaceId", published_at as "publishedAt", matched_request_id as "matchedRequestId"
+          from review
+          where workspace_id in ${pg(tenantIds)} and matched_request_id is not null and published_at >= ${iso(31)}`;
+        const fraudCustomers = await pg<FraudCustomerRow[]>`
+          select distinct c.workspace_id as "workspaceId", c.id, c.name, c.email
+          from customer c
+          where c.workspace_id in ${pg(tenantIds)}
+            and exists (select 1 from review_request r where r.customer_id = c.id and r.workspace_id = c.workspace_id and r.is_test = false)`;
+        const fraudStaff = await pg<FraudStaffRow[]>`
+          select workspace_id as "workspaceId", id, display_name as "displayName"
+          from staff_member where workspace_id in ${pg(tenantIds)}`;
+        const fraudUsers = await pg<FraudUserRow[]>`
+          select workspace_id as "workspaceId", email from app_user where workspace_id in ${pg(tenantIds)}`;
+        const triage = await pg<(typeof t.fraudTriage.$inferSelect)[]>`
+          select flag_id as "flagId", workspace_id as "workspaceId", decision, operator, note, at from fraud_triage`;
+        fraud = {
+          requests: fraudRequests,
+          reviews: fraudReviews,
+          customers: fraudCustomers,
+          staff: fraudStaff,
+          users: fraudUsers,
+          triage: triage.map(mapFraudTriage),
+        };
+      } catch (error) {
+        console.error("[platform] fraud inputs failed:", error instanceof Error ? error.message : error);
+        fraud = undefined;
+      }
+    } else {
+      fraud = { requests: [], reviews: [], customers: [], staff: [], users: [], triage: [] };
+    }
+
+    return aggregatePlatform({
+      workspaces,
+      deliveryFailures,
+      durability,
+      reviewsLast7d: weekly[0]?.count ?? 0,
+      now,
+      fraud,
+      history,
+    });
+  },
+
+  // ── Platform ops (internal console) ───────────────────────
+  async getTenantDetail(organizationId) {
+    const db = getDb();
+    const pg = getSql();
+    const orgRows = await db.select().from(t.organization).where(eq(t.organization.id, organizationId)).limit(1);
+    const orgRow = orgRows[0];
+    if (!orgRow) return null;
+    const wsRows = await db
+      .select({ workspace: t.workspace, location: t.location, subscription: t.subscription })
+      .from(t.workspace)
+      .innerJoin(t.location, eq(t.location.workspaceId, t.workspace.id))
+      .innerJoin(t.subscription, eq(t.subscription.workspaceId, t.workspace.id))
+      .where(and(eq(t.workspace.organizationId, organizationId), eq(t.workspace.isDemo, false)))
+      .orderBy(t.workspace.createdAt);
+    if (!wsRows.length) return null;
+    const ids = wsRows.map((row) => row.workspace.id);
+    const since30 = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    const [counts, userRows, googleRows, emailRows, auditRows, activity] = await Promise.all([
+      pg<{
+        workspaceId: string; customers: number; requests: number; requestsFailed30d: number;
+        reviews: number; needsReply: number; staff: number;
+      }[]>`
+        select w.id as "workspaceId",
+          (select count(*)::int from customer c where c.workspace_id = w.id) as customers,
+          (select count(*)::int from review_request r where r.workspace_id = w.id and r.is_test = false) as requests,
+          (select count(*)::int from review_request r where r.workspace_id = w.id and r.is_test = false
+              and r.status in ('failed','suppressed') and r.created_at >= ${since30}) as "requestsFailed30d",
+          (select count(*)::int from review v where v.workspace_id = w.id) as reviews,
+          (select count(*)::int from review v where v.workspace_id = w.id and v.needs_reply = true) as "needsReply",
+          (select count(*)::int from staff_member s where s.workspace_id = w.id and s.active = true) as staff
+        from workspace w where w.id in ${pg(ids)}`,
+      db.select().from(t.appUser).where(inArray(t.appUser.workspaceId, ids)),
+      db.select({ workspaceId: t.googleCredential.workspaceId }).from(t.googleCredential).where(inArray(t.googleCredential.workspaceId, ids)),
+      db.select({ workspaceId: t.emailCredential.workspaceId }).from(t.emailCredential).where(inArray(t.emailCredential.workspaceId, ids)),
+      db.select().from(t.auditLog).where(inArray(t.auditLog.workspaceId, ids)).orderBy(sql`${t.auditLog.at} desc`).limit(25),
+      pg<{ workspaceId: string; at: string | null }[]>`
+        select w.id as "workspaceId", greatest(
+          (select max(a.at) from audit_log a where a.workspace_id = w.id),
+          (select max(r.created_at) from review_request r where r.workspace_id = w.id),
+          (select max(c.created_at) from customer c where c.workspace_id = w.id)
+        ) as at from workspace w where w.id in ${pg(ids)}`,
+    ]);
+    const countsBy = new Map(counts.map((row) => [row.workspaceId, row]));
+    const activityBy = new Map(activity.map((row) => [row.workspaceId, row.at]));
+    const google = new Set(googleRows.map((row) => row.workspaceId));
+    const emailSender = new Set(emailRows.map((row) => row.workspaceId));
+    const nameBy = new Map(wsRows.map((row) => [row.workspace.id, row.location.name]));
+
+    const workspaces: PlatformTenantWorkspace[] = wsRows.map((row) => {
+      const c = countsBy.get(row.workspace.id);
+      return {
+        workspaceId: row.workspace.id,
+        locationId: row.location.id,
+        name: row.location.name,
+        city: row.location.city,
+        vertical: row.workspace.vertical,
+        region: (row.workspace.region === "CA" ? "CA" : "US") as Workspace["region"],
+        createdAt: row.workspace.createdAt,
+        rating: row.location.rating,
+        reviewCount: row.location.reviewCount,
+        googleLinked: Boolean(row.location.googlePlaceId),
+        gbpConnected: google.has(row.workspace.id),
+        emailSenderConnected: emailSender.has(row.workspace.id),
+        subscription: mapSubscription(row.subscription),
+        counts: {
+          customers: c?.customers ?? 0,
+          requests: c?.requests ?? 0,
+          requestsFailed30d: c?.requestsFailed30d ?? 0,
+          reviews: c?.reviews ?? 0,
+          needsReply: c?.needsReply ?? 0,
+          staff: c?.staff ?? 0,
+        },
+        lastActivityAt: activityBy.get(row.workspace.id) ?? undefined,
+      };
+    });
+
+    const snapshotRows: PlatformWorkspaceRow[] = wsRows.map((row) => ({
+      workspaceId: row.workspace.id,
+      organizationId,
+      organizationName: orgRow.name,
+      locationName: row.location.name,
+      vertical: row.workspace.vertical,
+      region: row.workspace.region,
+      tier: row.subscription.tier,
+      interval: row.subscription.interval,
+      status: row.subscription.status,
+      ownerEmail:
+        userRows.find((u) => u.workspaceId === row.workspace.id && (u.role === "owner" || u.role === "agency_admin"))?.email ??
+        null,
+      createdAt: row.workspace.createdAt,
+    }));
+    // Reuse the roster maths so the tenant page and the roster never disagree
+    // on plan, status or MRR. Test-account exclusion is bypassed on purpose:
+    // an operator opening a tenant by id wants to see it whatever its domain.
+    const tenant = aggregatePlatform({
+      workspaces: snapshotRows.map((row) => ({ ...row, ownerEmail: null })),
+      deliveryFailures: [],
+      durability: [],
+      reviewsLast7d: 0,
+      now: new Date(),
+    }).tenants[0];
+    if (!tenant) return null;
+    tenant.ownerEmail = snapshotRows[0]?.ownerEmail ?? undefined;
+
+    return {
+      organization: mapOrg(orgRow),
+      tenant,
+      workspaces,
+      users: userRows.map(mapTenantUser),
+      audit: auditRows.map((row) => ({
+        ...mapAudit(row),
+        tenant: nameBy.get(row.workspaceId) ?? orgRow.name,
+        organizationId,
+      })),
+    };
+  },
+
+  async listPlatformAuditLog(limit) {
+    const pg = getSql();
+    const rows = await pg<(AuditRow & { tenant: string; organizationId: string })[]>`
+      select a.id, a.workspace_id as "workspaceId", a.actor, a.action, a.target_type as "targetType",
+             a.target_id as "targetId", a.at, a.meta, a.seq,
+             coalesce(o.name, l.name) as tenant, w.organization_id as "organizationId"
+      from audit_log a
+      join workspace w on w.id = a.workspace_id
+      join location l on l.workspace_id = w.id
+      left join organization o on o.id = w.organization_id
+      where w.is_demo = false
+        and not exists (select 1 from app_user pa where pa.workspace_id = w.id and pa.role = 'platform_admin')
+      order by a.at desc
+      limit ${Math.max(1, Math.min(limit, 500))}`;
+    return rows.map((row) => ({ ...mapAudit(row), tenant: row.tenant, organizationId: row.organizationId }));
+  },
+
+  async listWorkspaceUsers(workspaceId) {
+    const rows = await getDb().select().from(t.appUser).where(eq(t.appUser.workspaceId, workspaceId));
+    return rows.map(mapTenantUser);
+  },
+
+  async savePlatformHistory(record) {
+    await getDb()
+      .insert(t.platformSnapshot)
+      .values({ id: record.id, day: record.day, capturedAt: record.capturedAt, tenants: record.tenants, kpis: record.kpis })
+      .onConflictDoUpdate({
+        target: t.platformSnapshot.day,
+        set: { capturedAt: record.capturedAt, tenants: record.tenants, kpis: record.kpis },
+      });
+  },
+
+  async listPlatformHistory(limit = 400) {
+    const rows = await getDb()
+      .select()
+      .from(t.platformSnapshot)
+      .orderBy(sql`${t.platformSnapshot.day} desc`)
+      .limit(limit);
+    return rows
+      .map((row) => ({ id: row.id, day: row.day, capturedAt: row.capturedAt, tenants: row.tenants, kpis: row.kpis }))
+      .reverse();
+  },
+
+  async saveFraudTriage(entry) {
+    await getDb()
+      .insert(t.fraudTriage)
+      .values({
+        flagId: entry.flagId,
+        workspaceId: entry.workspaceId,
+        decision: entry.decision,
+        operator: entry.operator,
+        note: entry.note ?? null,
+        at: entry.at,
+      })
+      .onConflictDoUpdate({
+        target: t.fraudTriage.flagId,
+        set: { decision: entry.decision, operator: entry.operator, note: entry.note ?? null, at: entry.at },
+      });
+  },
+
+  async deleteWorkspace(workspaceId) {
+    const db = getDb();
+    const wsRows = await db.select().from(t.workspace).where(eq(t.workspace.id, workspaceId)).limit(1);
+    const wsRow = wsRows[0];
+    if (!wsRow) return { ok: false, error: "That workspace no longer exists." };
+    if (wsRow.isDemo) return { ok: false, error: "The demo workspace cannot be deleted." };
+    const users = await db.select({ id: t.appUser.id, role: t.appUser.role }).from(t.appUser).where(eq(t.appUser.workspaceId, workspaceId));
+    if (users.some((user) => user.role === "platform_admin")) {
+      return { ok: false, error: "A workspace holding a platform admin cannot be deleted from here." };
+    }
+    const userIds = users.map((user) => user.id);
+    const pg = getSql();
+    // Every tenant-scoped table, from the same list the RLS policies use — so
+    // a table added to the schema is deleted from here the moment it is
+    // isolated, and can never be left behind as an orphan.
+    await pg.begin(async (tx) => {
+      for (const { table, tenantColumn } of TENANT_SCOPED_TABLES) {
+        if (table === "workspace" || table === "organization") continue;
+        await tx`delete from ${tx(table)} where ${tx(tenantColumn)} = ${workspaceId}`;
+      }
+      if (userIds.length) {
+        await tx`delete from password_reset_token where user_id in ${tx(userIds)}`;
+      }
+      await tx`delete from workspace where id = ${workspaceId}`;
+    });
+    return { ok: true, userIds };
+  },
+
+  async deleteOrganization(organizationId) {
+    const db = getDb();
+    const wsRows = await db
       .select({ id: t.workspace.id })
       .from(t.workspace)
-      .where(eq(t.workspace.organizationId, current.organizationId));
-    const summaries = [];
-    for (const workspace of workspaces) {
-      const data = await drizzleProvider.getData(workspace.id);
-      if (!data) continue;
-      const latest = [...data.metrics].sort((a, b) => a.date.localeCompare(b.date)).pop();
-      const trustedScore = data.workspace.isDemo || Boolean(latest?.sources?.scores);
-      summaries.push({
-        workspaceId: data.workspace.id,
-        locationId: data.location.id,
-        name: data.location.name,
-        city: data.location.city,
-        rating: data.location.rating,
-        reviewCount: data.location.reviewCount,
-        growthScore: trustedScore ? latest?.growthScore ?? null : null,
-      });
+      .where(eq(t.workspace.organizationId, organizationId));
+    const workspaceIds: string[] = [];
+    for (const row of wsRows) {
+      const result = await drizzleProvider.deleteWorkspace(row.id);
+      if (!result.ok) return result;
+      workspaceIds.push(row.id);
     }
-    return summaries;
+    await db.delete(t.organization).where(eq(t.organization.id, organizationId));
+    return { ok: true, workspaceIds };
+  },
+
+  // ── Agency (client book) ──────────────────────────────────
+  async setAgencyRates(workspaceId, rates) {
+    const db = getDb();
+    const rows = await db.select({ agency: t.datasetMeta.agency }).from(t.datasetMeta).where(eq(t.datasetMeta.workspaceId, workspaceId)).limit(1);
+    const agency = rows[0]?.agency;
+    if (!agency) return;
+    await db
+      .update(t.datasetMeta)
+      .set({ agency: { ...agency, wholesaleRate: rates.wholesaleRate, retailAverage: rates.retailAverage } })
+      .where(eq(t.datasetMeta.workspaceId, workspaceId));
+  },
+
+  async updateAgencyClient(workspaceId, locationId, patch) {
+    const db = getDb();
+    const rows = await db.select({ agency: t.datasetMeta.agency }).from(t.datasetMeta).where(eq(t.datasetMeta.workspaceId, workspaceId)).limit(1);
+    const agency = rows[0]?.agency;
+    if (!agency) return null;
+    let updated: AgencyClient | null = null;
+    const clients = agency.clients.map((client) => {
+      if (client.locationId !== locationId) return client;
+      updated = { ...client, ...patch };
+      return updated;
+    });
+    if (!updated) return null;
+    await db.update(t.datasetMeta).set({ agency: { ...agency, clients } }).where(eq(t.datasetMeta.workspaceId, workspaceId));
+    return updated;
+  },
+
+  async removeAgencyClient(workspaceId, locationId) {
+    const db = getDb();
+    const rows = await db.select({ agency: t.datasetMeta.agency }).from(t.datasetMeta).where(eq(t.datasetMeta.workspaceId, workspaceId)).limit(1);
+    const agency = rows[0]?.agency;
+    if (!agency) return;
+    await db
+      .update(t.datasetMeta)
+      .set({ agency: { ...agency, clients: agency.clients.filter((client) => client.locationId !== locationId) } })
+      .where(eq(t.datasetMeta.workspaceId, workspaceId));
+  },
+
+  async setWorkspaceOwnerIdentity(workspaceId, identity) {
+    const db = getDb();
+    const email = identity.email.trim().toLowerCase();
+    const rows = await db
+      .select()
+      .from(t.appUser)
+      .where(and(eq(t.appUser.workspaceId, workspaceId), eq(t.appUser.role, "owner")))
+      .limit(1);
+    const owner = rows[0];
+    if (!owner) return { ok: false, error: "This workspace has no owner account to invite." };
+    if (owner.passwordHash || owner.googleSub) {
+      return { ok: false, error: "This workspace's owner already has a login; they can sign in or reset their password." };
+    }
+    // The address must not already be a login elsewhere: the credentialed
+    // email index would reject the password set later, at the worst moment.
+    const existing = await findUserRowByEmail(db, email);
+    if (existing && existing.workspaceId !== workspaceId) {
+      return { ok: false, error: "That email already has a Foundly login on another workspace." };
+    }
+    await db
+      .update(t.appUser)
+      .set({
+        email,
+        name: identity.name.trim() || owner.name,
+        avatarInitials: initialsOf(identity.name.trim() || owner.name),
+        // The invite goes to this address; following it proves they hold it.
+        emailVerified: true,
+      })
+      .where(eq(t.appUser.id, owner.id));
+    return { ok: true, userId: owner.id };
   },
 
   async listAgencyClients(workspaceId) {
-    const current = await drizzleProvider.getData(workspaceId);
-    if (!current) return [];
-    if (current.workspace.isDemo) return current.agency.clients;
-    const siblingIds = new Set(
-      (await drizzleProvider.listOrganizationWorkspaces(workspaceId)).map((item) => item.workspaceId),
-    );
-    const cutoff = Date.now() - 30 * 86_400_000;
-    const clients = [];
-    for (const stored of current.agency.clients) {
-      const rows = await getDb()
-        .select({ workspaceId: t.location.workspaceId })
-        .from(t.location)
-        .where(eq(t.location.id, stored.locationId))
-        .limit(1);
-      const childWorkspaceId = rows[0]?.workspaceId;
-      if (!childWorkspaceId || !siblingIds.has(childWorkspaceId)) {
-        clients.push(stored);
-        continue;
-      }
-      const child = await drizzleProvider.getData(childWorkspaceId);
-      if (!child) {
-        clients.push(stored);
-        continue;
-      }
-      const latest = [...child.metrics].sort((a, b) => a.date.localeCompare(b.date)).pop();
-      const growthScore = latest?.sources?.scores ? latest.growthScore : 0;
-      const needsReply = child.reviews.filter((review) => review.needsReply).length;
-      const newReviews30d = child.reviews.filter(
-        (review) => new Date(review.publishedAt).getTime() >= cutoff,
-      ).length;
-      const status =
-        growthScore < 50 || needsReply > 7
-          ? "at_risk" as const
-          : growthScore < 70 || needsReply > 3
-            ? "attention" as const
-            : "healthy" as const;
-      clients.push({
-        ...stored,
-        name: child.location.name,
-        city: child.location.city,
-        growthScore,
-        rating: child.location.rating,
-        newReviews30d,
-        needsReply,
-        plan: child.subscription.tier,
-        status,
-      });
+    const db = getDb();
+    const [wsRows, metaRows] = await Promise.all([
+      db.select().from(t.workspace).where(eq(t.workspace.id, workspaceId)).limit(1),
+      db.select({ agency: t.datasetMeta.agency }).from(t.datasetMeta).where(eq(t.datasetMeta.workspaceId, workspaceId)).limit(1),
+    ]);
+    const wsRow = wsRows[0];
+    const stored = metaRows[0]?.agency.clients ?? [];
+    if (!wsRow || !stored.length) return stored;
+    if (wsRow.isDemo) return stored;
+
+    // One batch for the whole book, not a 21-query getData() per client: the
+    // book is rendered on every /agency page, and a 50-client agency used to
+    // pay ~1,000 round trips to draw it. Everything needed is on five tables,
+    // all filtered to the agency's own organization so a book entry can never
+    // read a workspace that is not a sibling.
+    const siblings = await db
+      .select({
+        workspaceId: t.workspace.id,
+        locationId: t.location.id,
+        name: t.location.name,
+        city: t.location.city,
+        rating: t.location.rating,
+        reviewCount: t.location.reviewCount,
+        googlePlaceId: t.location.googlePlaceId,
+        tier: t.subscription.tier,
+        metrics: t.datasetMeta.metrics,
+      })
+      .from(t.workspace)
+      .innerJoin(t.location, eq(t.location.workspaceId, t.workspace.id))
+      .innerJoin(t.subscription, eq(t.subscription.workspaceId, t.workspace.id))
+      .innerJoin(t.datasetMeta, eq(t.datasetMeta.workspaceId, t.workspace.id))
+      .where(and(eq(t.workspace.organizationId, wsRow.organizationId), sql`${t.workspace.id} <> ${workspaceId}`));
+    const wanted = new Set(stored.map((client) => client.locationId));
+    const children = siblings.filter((row) => wanted.has(row.locationId));
+    if (!children.length) return stored;
+    const childIds = children.map((row) => row.workspaceId);
+    const [reviewRows, ownerRows, credentialRows] = await Promise.all([
+      db
+        .select({ workspaceId: t.review.workspaceId, publishedAt: t.review.publishedAt, needsReply: t.review.needsReply })
+        .from(t.review)
+        .where(inArray(t.review.workspaceId, childIds)),
+      db
+        .select({
+          workspaceId: t.appUser.workspaceId,
+          email: t.appUser.email,
+          passwordHash: t.appUser.passwordHash,
+          googleSub: t.appUser.googleSub,
+        })
+        .from(t.appUser)
+        .where(and(inArray(t.appUser.workspaceId, childIds), eq(t.appUser.role, "owner"))),
+      db
+        .select({ workspaceId: t.googleCredential.workspaceId })
+        .from(t.googleCredential)
+        .where(inArray(t.googleCredential.workspaceId, childIds)),
+    ]);
+    const reviewsBy = new Map<string, { publishedAt: string; needsReply: boolean }[]>();
+    for (const row of reviewRows) {
+      const list = reviewsBy.get(row.workspaceId) ?? [];
+      list.push({ publishedAt: row.publishedAt, needsReply: row.needsReply });
+      reviewsBy.set(row.workspaceId, list);
     }
-    return clients;
+    const ownerBy = new Map(ownerRows.map((row) => [row.workspaceId, row]));
+    const connected = new Set(credentialRows.map((row) => row.workspaceId));
+    const live = new Map<string, AgencyClientLive>(
+      children.map((row) => {
+        const owner = ownerBy.get(row.workspaceId);
+        return [
+          row.locationId,
+          {
+            workspaceId: row.workspaceId,
+            locationId: row.locationId,
+            name: row.name,
+            city: row.city,
+            rating: row.rating,
+            reviewCount: row.reviewCount,
+            tier: normalizePlan(row.tier),
+            googleLinked: Boolean(row.googlePlaceId),
+            gbpConnected: connected.has(row.workspaceId),
+            ownerEmail: owner?.email,
+            ownerHasLogin: Boolean(owner?.passwordHash || owner?.googleSub),
+            metrics: row.metrics ?? [],
+            reviews: reviewsBy.get(row.workspaceId) ?? [],
+          },
+        ];
+      }),
+    );
+    return rollupAgencyBook(stored, live);
   },
 
   async createOrganizationWorkspace(workspaceId, input) {
@@ -1949,9 +2491,53 @@ export const drizzleProvider: DataProvider = {
       .returning({ userId: t.passwordResetToken.userId });
     const userId = claimed[0]?.userId;
     if (!userId) return false;
-    await db.update(t.appUser).set({ passwordHash }).where(eq(t.appUser.id, userId));
+    // Set the new password AND revoke every outstanding session (V8): a reset is
+    // the standard "I've been compromised" remediation, so old JWTs must die.
+    await db
+      .update(t.appUser)
+      .set({ passwordHash, sessionVersion: sql`${t.appUser.sessionVersion} + 1` })
+      .where(eq(t.appUser.id, userId));
     await db.delete(t.passwordResetToken).where(eq(t.passwordResetToken.userId, userId));
     return true;
+  },
+
+  async getUserSessionVersion(userId) {
+    const rows = await getDb()
+      .select({ sessionVersion: t.appUser.sessionVersion })
+      .from(t.appUser)
+      .where(eq(t.appUser.id, userId))
+      .limit(1);
+    return rows[0] ? rows[0].sessionVersion ?? 0 : null;
+  },
+
+  async bumpUserSessionVersion(userId) {
+    await getDb()
+      .update(t.appUser)
+      .set({ sessionVersion: sql`${t.appUser.sessionVersion} + 1` })
+      .where(eq(t.appUser.id, userId));
+  },
+
+  async setEmailVerified(userId, verified) {
+    await getDb()
+      .update(t.appUser)
+      .set({ emailVerified: verified })
+      .where(eq(t.appUser.id, userId));
+  },
+
+  async isWorkspaceEmailVerified(workspaceId) {
+    const rows = await getDb()
+      .select({ emailVerified: t.appUser.emailVerified })
+      .from(t.appUser)
+      .where(
+        and(
+          eq(t.appUser.workspaceId, workspaceId),
+          inArray(t.appUser.role, ["owner", "agency_admin", "platform_admin"]),
+        ),
+      )
+      .orderBy(sql`case ${t.appUser.role} when 'owner' then 0 when 'agency_admin' then 1 else 2 end`)
+      .limit(1);
+    // Fail open when there is no principal row to check.
+    return rows[0] ? rows[0].emailVerified : true;
   },
 
   async upsertGoogleUser({ googleSub, email, name, referredByWorkspaceId }) {
@@ -3185,6 +3771,7 @@ export const drizzleProvider: DataProvider = {
     if (patch.status !== undefined) set.status = patch.status;
     if (patch.tier !== undefined) set.tier = patch.tier;
     if (patch.interval !== undefined) set.interval = patch.interval;
+    if (patch.trialEndsAt !== undefined) set.trialEndsAt = patch.trialEndsAt;
     if (patch.stripeCustomerId !== undefined) set.stripeCustomerId = patch.stripeCustomerId;
     if (patch.stripeSubscriptionId !== undefined) set.stripeSubscriptionId = patch.stripeSubscriptionId;
     if (patch.stripePriceId !== undefined) set.stripePriceId = patch.stripePriceId;
@@ -3213,6 +3800,27 @@ export const drizzleProvider: DataProvider = {
     await db
       .update(t.subscription)
       .set(set)
+      .where(eq(t.subscription.workspaceId, workspaceId));
+  },
+
+  async listTrialingSubscriptions() {
+    const rows = await getDb()
+      .select({ sub: t.subscription })
+      .from(t.subscription)
+      .innerJoin(t.workspace, eq(t.workspace.id, t.subscription.workspaceId))
+      .where(and(eq(t.subscription.status, "trialing"), eq(t.workspace.isDemo, false)));
+    return rows.map((row) => mapSubscription(row.sub));
+  },
+
+  async markTrialNoticeSent(workspaceId, kind, sentAt) {
+    // A single jsonb merge, so two overlapping cron runs can't clobber each
+    // other's marker (each only adds its own key).
+    const patch = JSON.stringify({ [kind]: sentAt });
+    await getDb()
+      .update(t.subscription)
+      .set({
+        trialNotices: sql`coalesce(${t.subscription.trialNotices}, '{}'::jsonb) || ${patch}::jsonb`,
+      })
       .where(eq(t.subscription.workspaceId, workspaceId));
   },
 
@@ -3353,6 +3961,29 @@ export const drizzleProvider: DataProvider = {
     return member;
   },
 
+  // ── Milestones ────────────────────────────────────────────
+  async appendMilestone(workspaceId, milestone) {
+    const db = getDb();
+    // Same tenancy guard as appendNotification: a milestone carrying another
+    // workspace's location id is a bug, not a row to store.
+    const ctx = await loadContext(db, workspaceId);
+    if (milestone.locationId !== ctx.location.id) throw new Error("Milestone location mismatch.");
+    const rows = await db
+      .select({ milestones: t.datasetMeta.milestones })
+      .from(t.datasetMeta)
+      .where(eq(t.datasetMeta.workspaceId, workspaceId))
+      .limit(1);
+    const current = rows[0]?.milestones;
+    if (!current) return;
+    // Idempotent on id AND kind, matching the memory provider: the award pass
+    // re-offers earned milestones on every sync and must never duplicate one.
+    if (current.some((m) => m.id === milestone.id || m.kind === milestone.kind)) return;
+    await db
+      .update(t.datasetMeta)
+      .set({ milestones: [milestone, ...current] })
+      .where(eq(t.datasetMeta.workspaceId, workspaceId));
+  },
+
   // ── Notifications ─────────────────────────────────────────
   async markNotificationsRead(workspaceId) {
     const db = getDb();
@@ -3360,6 +3991,16 @@ export const drizzleProvider: DataProvider = {
       .update(t.notification)
       .set({ read: true })
       .where(eq(t.notification.workspaceId, workspaceId));
+  },
+
+  async markNotificationRead(workspaceId, notificationId) {
+    const db = getDb();
+    // Workspace-scoped as well as id-scoped: an id from another tenant must not
+    // be writable even though notification ids are globally unique.
+    await db
+      .update(t.notification)
+      .set({ read: true })
+      .where(and(eq(t.notification.workspaceId, workspaceId), eq(t.notification.id, notificationId)));
   },
 
   // ── Google data sync ──────────────────────────────────────
@@ -3376,10 +4017,25 @@ export const drizzleProvider: DataProvider = {
 
     const update = buildGooglePublicUpdate(res.details, location, nowIso());
 
-    // 1) Real aggregate onto the location row.
+    // 1) Real aggregate onto the location row. The public audit is a fallback,
+    // never an overwrite: a Business Profile snapshot sees posts, Q&A, replies
+    // and services that Places cannot, so its audit and inbox always win.
+    const usePublicAudit = !location.gbpSnapshot;
     await db
       .update(t.location)
-      .set({ rating: update.rating, reviewCount: update.reviewCount })
+      .set({
+        rating: update.rating,
+        reviewCount: update.reviewCount,
+        ...(usePublicAudit
+          ? {
+              gbpAudit: update.audit,
+              suggestionInbox: mergeSuggestionInbox(
+                location.suggestionInbox ?? [],
+                update.suggestions,
+              ),
+            }
+          : {}),
+      })
       .where(and(eq(t.location.id, ctx.location.id), eq(t.location.workspaceId, workspaceId)));
 
     // 2) Refresh the public sample (keep GBP/owner reviews).
@@ -3434,6 +4090,13 @@ export const drizzleProvider: DataProvider = {
       rating: update.rating,
       reviewCount: update.reviewCount,
       reviewsImported: update.reviews.length,
+      ...(usePublicAudit
+        ? {
+            capabilityScore: update.audit.applicableProfileScore,
+            auditFindings: update.audit.findings.length,
+            suggestionsCreated: update.suggestions.length,
+          }
+        : {}),
     };
   },
 
@@ -3442,23 +4105,50 @@ export const drizzleProvider: DataProvider = {
     const ctx = await loadContext(db, workspaceId);
     const location = mapLocation(ctx.location);
     const credential = await loadGoogleCredential(db, workspaceId);
-    const { fetchGoogleProfile, locationFromProfileSnapshot } = await import("@/lib/google/profile-sync");
-    const outcome = await fetchGoogleProfile(
+    const { fetchGoogleProfile, fetchApifyProfile, locationFromProfileSnapshot } = await import(
+      "@/lib/google/profile-sync"
+    );
+    // Set when the owned sync could not serve and public data stood in for it.
+    let fromPublicData = false;
+    let publicDataReason: "approval_pending" | "not_connected" | undefined;
+    let publicDataDetail: string | undefined;
+    let outcome = await fetchGoogleProfile(
       credential,
       location,
       nowIso(),
       await loadInstagramCredential(db, workspaceId),
     );
-    if (!outcome.ok) return { ok: false, error: outcome.error };
 
-    if (outcome.pendingApproval) {
-      await setGoogleIntegration(
-        db,
-        workspaceId,
-        "needs_attention",
-        "Connected — Google Business Profile API approval pending (Google approves per-project; typically 1–2 weeks)",
-      );
-      return { ok: true, pendingApproval: true };
+    // Mirrors the memory provider exactly. Whenever Google itself cannot supply
+    // the profile — no connection, an expired token, or approval still pending
+    // — import it from public data instead. The snapshot records itself as
+    // `google_public_scrape` and marks every owner-only surface
+    // not_authorized, so none of it is presented as an owned sync.
+    if (!outcome.ok || outcome.pendingApproval) {
+      const reason = outcome.ok ? "approval_pending" : "not_connected";
+      const googleError = outcome.ok ? undefined : outcome.error;
+      const pendingDetail = outcome.ok ? outcome.pendingDetail : undefined;
+      const publicOutcome = await fetchApifyProfile(location, nowIso());
+      if (publicOutcome.ok) {
+        outcome = publicOutcome;
+        fromPublicData = true;
+        publicDataReason = reason;
+        publicDataDetail = pendingDetail;
+      } else if (googleError) {
+        // Public data could not stand in either. Report Google's own problem
+        // rather than the scraper's, which is the one the owner can act on.
+        return { ok: false, error: googleError };
+      } else {
+        await setGoogleIntegration(
+          db,
+          workspaceId,
+          "needs_attention",
+          pendingDetail
+            ? `Connected — ${pendingDetail}`
+            : "Connected — Google Business Profile API approval pending (Google approves per-project; typically 1–2 weeks)",
+        );
+        return { ok: true, pendingApproval: true };
+      }
     }
 
     const syncedLocation = outcome.profileSnapshot
@@ -3550,11 +4240,18 @@ export const drizzleProvider: DataProvider = {
         .set({ metrics })
         .where(eq(t.datasetMeta.workspaceId, workspaceId));
     }
+    const googleStatusInput = {
+      source: fromPublicData ? "google_public_scrape" : outcome.profileSnapshot?.source,
+      publicDataReason,
+      publicDataDetail,
+      reviewCount: outcome.reviewCount,
+      performanceError: outcome.performanceError,
+    };
     await setGoogleIntegration(
       db,
       workspaceId,
-      outcome.performanceError ? "needs_attention" : "connected",
-      `Google Business Profile synced — ${outcome.reviewCount ?? imported.length} reviews`,
+      googleIntegrationStatus(googleStatusInput),
+      googleIntegrationDetail(googleStatusInput, imported.length),
     );
     const external = outcome.profileSnapshot?.externalEvidence;
     if (external) {
@@ -3666,6 +4363,32 @@ export const drizzleProvider: DataProvider = {
       .set({ suggestionInbox: nextInbox })
       .where(eq(t.location.workspaceId, workspaceId));
     return updated;
+  },
+
+  async updateBusinessDetails(workspaceId: string, patch: BusinessDetailsPatch) {
+    const db = getDb();
+    const set: Record<string, string | null> = {};
+    if (patch.website !== undefined) set.website = patch.website || null;
+    if (patch.ownerDescription !== undefined) set.ownerDescription = patch.ownerDescription || null;
+    if (!Object.keys(set).length) return;
+    await db.update(t.location).set(set).where(eq(t.location.workspaceId, workspaceId));
+  },
+
+  async appendProfileSuggestion(workspaceId: string, suggestion: ProfileSuggestion) {
+    if (suggestion.workspaceId !== workspaceId) throw new Error("Suggestion workspace mismatch.");
+    const db = getDb();
+    const rows = await db
+      .select({ suggestionInbox: t.location.suggestionInbox })
+      .from(t.location)
+      .where(eq(t.location.workspaceId, workspaceId))
+      .limit(1);
+    const inbox = rows[0]?.suggestionInbox ?? [];
+    if (inbox.some((item) => item.id === suggestion.id)) return suggestion;
+    await db
+      .update(t.location)
+      .set({ suggestionInbox: [suggestion, ...inbox] })
+      .where(eq(t.location.workspaceId, workspaceId));
+    return suggestion;
   },
 
   async createProfileMutationJob(workspaceId, job) {

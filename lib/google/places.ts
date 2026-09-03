@@ -20,6 +20,11 @@ const FIELD_MASK = [
   "places.userRatingCount",
   "places.primaryTypeDisplayName",
 ].join(",");
+/**
+ * Everything Places (New) exposes that the profile audit can actually check.
+ * Each field here becomes an audit signal, so adding one means adding a check —
+ * the audit never claims to have seen a field that is not in this mask.
+ */
 const DETAILS_FIELD_MASK = [
   "id",
   "displayName",
@@ -27,6 +32,7 @@ const DETAILS_FIELD_MASK = [
   "rating",
   "userRatingCount",
   "primaryTypeDisplayName",
+  "types",
   "googleMapsUri",
   "location",
   "businessStatus",
@@ -127,6 +133,67 @@ export async function searchBusinesses(
   return runTextSearch({ textQuery, regionCode: region ?? "US" }, 6);
 }
 
+/**
+ * Words that describe an industry rather than identify a business. A match
+ * resting only on these is not a match: "Dental" typed into the score tool must
+ * not silently resolve to whichever dental practice Places ranked first.
+ */
+const GENERIC_TOKENS = new Set([
+  "and", "the", "inc", "llc", "ltd", "co", "corp", "company", "group", "services",
+  "service", "clinic", "centre", "center", "studio", "shop", "store", "salon",
+  "spa", "dental", "dentist", "dentistry", "physio", "physiotherapy", "chiro",
+  "chiropractic", "hvac", "heating", "cooling", "plumbing", "plumber", "auto",
+  "repair", "restaurant", "cafe", "law", "legal", "lawyers", "med", "medical",
+  "renovation", "renovations", "contracting", "solutions", "local", "business",
+]);
+
+/** Lowercase, strip accents and punctuation, split into meaningful tokens. */
+function tokenize(value: string): string[] {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    // Apostrophes join a word rather than break it: O'Brien is one token, and
+    // splitting it stops the listing spelled "OBrien" from ever matching.
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(" ")
+    .filter((t) => t.length > 1);
+}
+
+/**
+ * Does `placeName` plausibly name the business the user typed?
+ *
+ * Places Text Search always returns *something*, ranked by relevance to the
+ * whole query — so a query polluted by an unrelated term (the score tool used
+ * to append the category select's default) comes back with a real, confident,
+ * completely different business. Presenting that as "your public Google
+ * listing" is worse than showing nothing, so callers use this to decide whether
+ * the top hit may be treated as the user's own listing.
+ *
+ * Containment is checked in both directions: the typed name often carries extra
+ * words the listing lacks ("… Toronto"), and just as often lacks words the
+ * listing carries ("Bright Smile" -> "Bright Smile Dental Clinic"). At least one
+ * shared token must be distinctive, so an industry word alone never matches.
+ */
+export function isPlausibleNameMatch(typed: string, placeName: string): boolean {
+  const typedTokens = tokenize(typed);
+  const placeTokens = tokenize(placeName);
+  if (typedTokens.length === 0 || placeTokens.length === 0) return false;
+
+  const typedSet = new Set(typedTokens);
+  const placeSet = new Set(placeTokens);
+  const shared = [...typedSet].filter((t) => placeSet.has(t));
+  if (shared.length === 0) return false;
+  if (!shared.some((t) => !GENERIC_TOKENS.has(t))) return false;
+
+  const containment = Math.max(
+    shared.length / typedSet.size,
+    shared.length / placeSet.size,
+  );
+  return containment >= 0.6;
+}
+
 function toSummary(raw: RawPlace): PlaceSummary | null {
   if (!raw.id) return null;
   const address = raw.formattedAddress ?? "";
@@ -218,6 +285,22 @@ export interface PlaceDetails {
    * `reviewCount` for the true total.
    */
   reviews: PublicReview[];
+
+  // ── Public profile fields the audit checks ──────────────────
+  /** Website on the public Google listing, if any. */
+  websiteUri?: string;
+  /** Public phone number on the listing, if any. */
+  phone?: string;
+  /** True when Google publishes regular opening hours for the listing. */
+  hasHours: boolean;
+  /** Number of weekday entries Google publishes (0-7). */
+  openDayCount: number;
+  /** How many photos are attached to the public listing. */
+  photoCount: number;
+  /** Google's editorial summary, when present. */
+  editorialSummary?: string;
+  /** All Google place types on the listing (proxy for category coverage). */
+  types: string[];
 }
 
 export type PlaceDetailsResult =
@@ -239,6 +322,7 @@ interface RawDetails {
   rating?: number;
   userRatingCount?: number;
   primaryTypeDisplayName?: { text?: string };
+  types?: string[];
   googleMapsUri?: string;
   location?: { latitude?: number; longitude?: number };
   businessStatus?: string;
@@ -276,6 +360,7 @@ export async function getPlaceDetails(placeId: string): Promise<PlaceDetailsResu
     }
     const raw = (await res.json()) as RawDetails;
     const address = raw.formattedAddress ?? "";
+    const weekdays = raw.regularOpeningHours?.weekdayDescriptions ?? [];
     return {
       ok: true,
       details: {
@@ -294,6 +379,15 @@ export async function getPlaceDetails(placeId: string): Promise<PlaceDetailsResu
         businessStatus: raw.businessStatus,
         profile: toProfileFields(raw),
         reviews: (raw.reviews ?? []).slice(0, 5).map(toPublicReview),
+        websiteUri: raw.websiteUri,
+        phone: raw.nationalPhoneNumber,
+        hasHours: weekdays.length > 0 || (raw.regularOpeningHours?.periods?.length ?? 0) > 0,
+        // "Monday: Closed" still counts as published hours; a listing with no
+        // weekday lines at all is what the audit flags.
+        openDayCount: weekdays.length,
+        photoCount: raw.photos?.length ?? 0,
+        editorialSummary: raw.editorialSummary?.text,
+        types: raw.types ?? [],
       },
     };
   } catch (err) {

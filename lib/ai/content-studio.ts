@@ -121,6 +121,26 @@ export function isContentSuggestionPreview(value: unknown): value is ContentSugg
   return raw.schemaVersion === 1 && typeof raw.kind === "string" && typeof raw.body === "string" && raw.generatedBy !== null;
 }
 
+/**
+ * Kinds an owner may start themselves, with no audit finding behind them.
+ *
+ * Deliberately excludes "owner_reply" and "qna": both need a specific Google
+ * review or question to answer, and those only exist once the Business Profile
+ * APIs are importing them. Offering them here would produce a draft with
+ * nothing real to attach to.
+ */
+export const MANUAL_CONTENT_KINDS = ["local_post", "profile_copy"] as const;
+
+export type ManualContentKind = (typeof MANUAL_CONTENT_KINDS)[number];
+
+export function isManualContentKind(value: unknown): value is ManualContentKind {
+  return typeof value === "string" && (MANUAL_CONTENT_KINDS as readonly string[]).includes(value);
+}
+
+export function manualContentKindLabel(kind: ManualContentKind): string {
+  return kind === "local_post" ? "Google post" : "Business description";
+}
+
 export function suggestionToGenerationKind(suggestion: ProfileSuggestion): ContentGenerationKind | null {
   if (suggestion.kind === "local_post") return "local_post";
   if (suggestion.kind === "owner_reply") return "owner_reply";

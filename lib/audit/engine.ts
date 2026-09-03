@@ -70,6 +70,16 @@ const FACT_CONFIRMATION_TARGETS = new Set<AuditFindingTarget>([
   "keyword_coverage",
 ]);
 
+/**
+ * Stable finding id for a Business Profile capability. Exported so surfaces can
+ * join a finding back to the capability it came from (and therefore to the
+ * capability's `missing` / `partial` / `unknown` status) without re-deriving the
+ * slug rule.
+ */
+export function capabilityFindingId(capabilityKey: string): string {
+  return `finding_${slug(capabilityKey)}`;
+}
+
 export function buildLocalGrowthAudit(input: {
   location: Location;
   snapshot: GbpProfileSnapshot;
@@ -175,7 +185,7 @@ export function buildLocalGrowthAudit(input: {
     const blocked = capability.status === "unknown";
     const currentValue = field ? evidence.find((fact) => fact.field === field)?.value : undefined;
     return [makeFinding({
-      id: `finding_${slug(capability.key)}`,
+      id: capabilityFindingId(capability.key),
       target,
       title: findingTitle(capability.label, capability.status),
       rationale: `${capability.evidence} ${recommendationGuardrail(target)}`,
