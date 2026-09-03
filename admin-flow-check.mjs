@@ -59,11 +59,36 @@ await step("billing and delivery pages are measured", async () => {
   }
 });
 
-await step("fraud page still says Not measured (no detector runs)", async () => {
+await step("fraud page is measured and names the detectors that ran", async () => {
   await page.goto(`${base}/admin/fraud`, { waitUntil: "domcontentloaded", timeout: 90_000 });
   await page.locator("h1").first().waitFor({ timeout: 60_000 });
   const body = await page.textContent("body");
-  if (!/Not measured/i.test(body)) throw new Error("fraud page claims to be measured");
+  if (/Fraud detection not connected/i.test(body)) throw new Error("fraud page still unmeasured");
+  if (!/Velocity anomaly · running/i.test(body)) throw new Error("velocity detector not reported as running");
+  if (!/Same device · not run/i.test(body)) throw new Error("same-device honesty line missing");
+});
+
+await step("audit page reads every tenant's ledger", async () => {
+  await page.goto(`${base}/admin/audit`, { waitUntil: "domcontentloaded", timeout: 90_000 });
+  await page.locator("h1").first().waitFor({ timeout: 60_000 });
+  const body = await page.textContent("body");
+  if (!/Scope · all tenants/i.test(body)) throw new Error("audit page is not platform-wide");
+});
+
+await step(`tenant detail page opens for ${tenantName}`, async () => {
+  await page.goto(`${base}/admin/tenants`, { waitUntil: "domcontentloaded", timeout: 90_000 });
+  const link = page.locator('a[href^="/admin/tenants/"]', { hasText: tenantName }).first();
+  await link.waitFor({ timeout: 60_000 });
+  await Promise.all([
+    page.waitForURL((u) => /^\/admin\/tenants\/.+/.test(u.pathname), { timeout: 120_000 }),
+    link.click(),
+  ]);
+  await page.locator("h1").first().waitFor({ timeout: 60_000 });
+  const body = await page.textContent("body");
+  if (/This page hit a problem/i.test(body)) throw new Error("tenant page hit the error boundary");
+  for (const needle of ["Subscription", "Users", "Delete tenant", "Extend trial"]) {
+    if (!body.includes(needle)) throw new Error(`tenant page missing "${needle}"`);
+  }
 });
 
 await step("Open tenant enters the tenant's owner console with the support banner", async () => {

@@ -1,5 +1,9 @@
 import Link from "next/link";
-import { getPlatformSnapshot, getSessionAndData } from "@/lib/data";
+import { after } from "next/server";
+import { getPlatformSnapshot, getProviderFor, getSessionAndData, homeWorkspaceIdFor } from "@/lib/data";
+import { recordPlatformHistory } from "@/lib/platform/history-runner";
+import { utcDay } from "@/lib/platform/retention";
+import { formatDate } from "@/lib/utils/format";
 import { PageHeader } from "@/components/app/PageHeader";
 import { Icon, type IconName } from "@/components/icons";
 import { StatTile } from "@/components/charts/StatTile";
@@ -115,15 +119,28 @@ function UnmeasuredAlertCard({ icon, label, href }: { icon: IconName; label: str
 
 export default async function AdminOverviewPage() {
   const [{ session }, platform] = await Promise.all([getSessionAndData(), getPlatformSnapshot()]);
-  const { deliveryIncidents, fraudFlags, tenants, kpis } = platform;
+  const { deliveryIncidents, tenants, kpis } = platform;
   const telemetry = readPlatformTelemetry(platform, session.isDemo);
   const fraudMeasured = sectionMeasured(platform, telemetry, "fraud");
   const retentionMeasured = sectionMeasured(platform, telemetry, "retention");
+  // Flags an operator has already dismissed or confirmed are off the queue.
+  const fraudFlags = platform.fraudFlags.filter((flag) => !flag.triage);
 
   const backlog = deliveryIncidents.reduce((a, i) => a + i.count, 0);
   const deliverySev = maxSev(deliveryIncidents.map((i) => i.severity));
   const fraudSev = maxSev(fraudFlags.map((f) => f.severity));
   const pastDue = tenants.filter((t) => t.status === "past_due");
+
+  // History starts the first time an operator looks, not a day later: if
+  // today's snapshot is not stored yet, store it after the response goes out.
+  // Idempotent per day, so racing the cron is harmless.
+  if (telemetry.source === "live_aggregate" && platform.history?.latestAt !== utcDay(new Date())) {
+    const provider = await getProviderFor(session);
+    const home = homeWorkspaceIdFor(session);
+    after(() => recordPlatformHistory({ provider, snapshot: platform, homeWorkspaceId: home, onlyIfMissing: true }).catch(() => undefined));
+  }
+  const history = platform.history;
+  const historyDaysLeft = history ? Math.max(0, history.requiredDays - history.days) : null;
 
   return (
     <div className="space-y-6">
@@ -189,15 +206,49 @@ export default async function AdminOverviewPage() {
               <StatTile label="Active locations" value={formatNumber(kpis.activeLocations)} deltaCaption="Billable GBP profiles" />
               <StatTile label="Platform MRR" value={formatMoney(kpis.mrr)} deltaCaption="Recurring revenue" />
               <StatTile label="Trial conversion" value={`${Math.round(kpis.trialConversion * 100)}%`} deltaCaption={retentionMeasured ? "Trial → paid" : "Paying ÷ (paying + in trial), today"} />
-              {retentionMeasured ? (
-                <>
-                  <StatTile label="Logo churn" value={`${(kpis.logoChurn * 100).toFixed(1)}%`} deltaCaption="Monthly, by account" />
-                  <StatTile label="Net revenue retention" value={`${Math.round(kpis.nrr * 100)}%`} deltaCaption="Expansion vs churn" />
-                </>
+              {retentionMeasured && platform.retention ? (
+                platform.retention.priorPaying === 0 ? (
+                  <>
+                    <NotMeasuredTile label="Logo churn" caption={`No paying tenants on ${formatDate(platform.retention.priorAt)}`} />
+                    <NotMeasuredTile label="Net revenue retention" caption={`No paying tenants on ${formatDate(platform.retention.priorAt)}`} />
+                  </>
+                ) : (
+                  <>
+                    <StatTile
+                      label="Logo churn"
+                      value={`${(kpis.logoChurn * 100).toFixed(1)}%`}
+                      favorableWhenUp={false}
+                      deltaCaption={`${platform.retention.churned} of ${platform.retention.priorPaying} paying on ${formatDate(platform.retention.priorAt)} lapsed`}
+                    />
+                    <StatTile
+                      label="Net revenue retention"
+                      value={`${Math.round(kpis.nrr * 100)}%`}
+                      deltaCaption={`${formatMoney(platform.retention.retainedMrr)} today from a ${formatMoney(platform.retention.priorMrr)} cohort`}
+                    />
+                  </>
+                )
               ) : (
                 <>
-                  <NotMeasuredTile label="Logo churn" caption="Needs month-over-month history" />
-                  <NotMeasuredTile label="Net revenue retention" caption="Needs month-over-month history" />
+                  <NotMeasuredTile
+                    label="Logo churn"
+                    caption={
+                      history
+                        ? historyDaysLeft
+                          ? `${history.days} of ${history.requiredDays} days of history · measurable in ${historyDaysLeft} day${historyDaysLeft === 1 ? "" : "s"}`
+                          : "Needs a snapshot at least a month old"
+                        : "Needs month-over-month history"
+                    }
+                  />
+                  <NotMeasuredTile
+                    label="Net revenue retention"
+                    caption={
+                      history
+                        ? history.days
+                          ? `Daily snapshots since ${history.firstAt ? formatDate(history.firstAt) : "today"}`
+                          : "First daily snapshot is being recorded now"
+                        : "Needs month-over-month history"
+                    }
+                  />
                 </>
               )}
               <StatTile label="Detected reviews · wk" value={formatNumber(kpis.weeklyDetectedReviews)} deltaCaption="Across all tenants" />

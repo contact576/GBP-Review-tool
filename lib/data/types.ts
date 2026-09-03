@@ -1164,6 +1164,49 @@ export interface AgencyClient {
   plan: PlanTier;
   lastReportSent?: string;
   status: "healthy" | "attention" | "at_risk";
+  // ── Live fields, filled by the provider's rollup (absent on the stored
+  //    book entry and on seeded fixtures) ──────────────────────────────
+  /** The client's own workspace — what "Open client workspace" enters. */
+  workspaceId?: WorkspaceId;
+  /** Total Google reviews on the linked listing. */
+  reviewCount?: number;
+  /**
+   * Measured Growth Scores, oldest → newest, from the client's metric history.
+   * Only trusted (Google-sourced) snapshots are included, so the trail is
+   * either real or empty — never an invented curve.
+   */
+  trend?: number[];
+  /** The listing is matched to a Google Place. */
+  googleLinked?: boolean;
+  /** The client's Google Business Profile is connected (OAuth credential). */
+  gbpConnected?: boolean;
+  /** Email on the client's owner account (the login the client would use). */
+  ownerEmail?: string;
+  /** The client has a real login (password or Google) on their workspace. */
+  ownerHasLogin?: boolean;
+  /** When an owner invite was last sent to the client, if ever. */
+  invitedAt?: string;
+}
+
+/**
+ * Everything the agency console needs to know about one client that is not
+ * on the stored book entry — read live from the client's own workspace.
+ */
+export interface AgencyClientLive {
+  workspaceId: WorkspaceId;
+  locationId: LocationId;
+  name: string;
+  city: string;
+  rating: number;
+  reviewCount: number;
+  tier: PlanTier;
+  googleLinked: boolean;
+  gbpConnected: boolean;
+  ownerEmail?: string;
+  ownerHasLogin: boolean;
+  /** Metric snapshots, any order; the rollup sorts and filters them. */
+  metrics: Pick<MetricSnapshot, "date" | "growthScore" | "sources">[];
+  reviews: Pick<Review, "publishedAt" | "needsReply">[];
 }
 
 export interface Agency {
@@ -1271,8 +1314,105 @@ export interface PlatformCoverage {
   delivery: boolean;
   durability: boolean;
   fraud: boolean;
+  /**
+   * Which fraud signals actually ran. A kind marked false has no detector
+   * behind it in this deployment (same-device needs a fingerprint the capture
+   * flow does not collect), so its absence from the queue proves nothing.
+   */
+  fraudSignals?: Record<FraudSignalKind, boolean>;
   /** Logo churn and net revenue retention need month-over-month history. */
   retention: boolean;
+}
+
+/**
+ * The cohort maths behind logo churn and NRR: today's tenants compared with
+ * the platform as it stood roughly a month ago (the stored history snapshot
+ * closest to 30 days back).
+ */
+export interface PlatformRetention {
+  /** When the comparison snapshot was captured. */
+  priorAt: string;
+  /** Tenants that were paying in the prior snapshot. */
+  priorPaying: number;
+  /** Of those, how many are no longer paying today. */
+  churned: number;
+  /** MRR of the prior paying cohort, then. */
+  priorMrr: number;
+  /** MRR of that same cohort, today (expansion and contraction included). */
+  retainedMrr: number;
+}
+
+/** Why retention is (or is not) measured, and how much history exists. */
+export interface PlatformHistoryStatus {
+  /** Daily snapshots stored so far. */
+  days: number;
+  firstAt?: string;
+  latestAt?: string;
+  /** Snapshots must span at least this many days before retention is computed. */
+  requiredDays: number;
+}
+
+/** One stored daily snapshot of the platform — the input for retention. */
+export interface PlatformHistoryRecord {
+  id: Id;
+  /** UTC calendar day, YYYY-MM-DD. One record per day. */
+  day: string;
+  capturedAt: string;
+  tenants: { id: Id; mrr: number; status: PlatformTenant["status"]; plan: PlanTier }[];
+  kpis: { totalTenants: number; activeLocations: number; mrr: number };
+}
+
+/** A tenant's audit entry as the ops console sees it — with the tenant named. */
+export interface PlatformAuditEntry extends AuditLog {
+  tenant: string;
+  organizationId: Id;
+}
+
+export interface PlatformTenantUser {
+  id: UserId;
+  workspaceId: WorkspaceId;
+  email: string;
+  name: string;
+  role: Role;
+  emailVerified: boolean;
+  /** Has a password or a Google identity — can actually sign in. */
+  hasLogin: boolean;
+  createdAt?: string;
+}
+
+export interface PlatformTenantWorkspace {
+  workspaceId: WorkspaceId;
+  locationId: LocationId;
+  name: string;
+  city: string;
+  vertical: Vertical;
+  region: Region;
+  createdAt: string;
+  rating: number;
+  reviewCount: number;
+  googleLinked: boolean;
+  gbpConnected: boolean;
+  emailSenderConnected: boolean;
+  subscription: Subscription;
+  counts: {
+    customers: number;
+    requests: number;
+    requestsFailed30d: number;
+    reviews: number;
+    needsReply: number;
+    staff: number;
+  };
+  lastActivityAt?: string;
+}
+
+/** Everything the ops console shows on one tenant's page. */
+export interface PlatformTenantDetail {
+  organization: Organization;
+  tenant: PlatformTenant;
+  workspaces: PlatformTenantWorkspace[];
+  users: PlatformTenantUser[];
+  /** Most recent audit entries across the tenant's workspaces, newest first. */
+  audit: PlatformAuditEntry[];
 }
 
 export interface DeliveryIncident {
@@ -1285,13 +1425,31 @@ export interface DeliveryIncident {
   at: string;
 }
 
+export type FraudSignalKind = "same_device" | "staff_self_review" | "velocity_anomaly";
+
+export type FraudTriageDecision = "dismissed" | "confirmed";
+
+/** An operator's decision on one flag, persisted against the flag's stable id. */
+export interface FraudTriage {
+  flagId: Id;
+  workspaceId: WorkspaceId;
+  decision: FraudTriageDecision;
+  operator: string;
+  note?: string;
+  at: string;
+}
+
 export interface FraudFlag {
   id: Id;
   tenant: string;
-  kind: "same_device" | "staff_self_review" | "velocity_anomaly";
+  kind: FraudSignalKind;
   detail: string;
   severity: "low" | "medium" | "high";
   at: string;
+  /** The tenant workspace the signal was observed in. Absent on seeded fixtures. */
+  workspaceId?: WorkspaceId;
+  /** Present once an operator has dismissed or confirmed the flag. */
+  triage?: FraudTriage;
 }
 
 export interface DurabilityRecord {
@@ -1355,6 +1513,10 @@ export interface FoundlyData {
     coverage?: PlatformCoverage;
     /** Workspaces owned by reserved test domains, left out of every figure. */
     testAccountsExcluded?: number;
+    /** The cohort comparison behind logoChurn / nrr, when retention is covered. */
+    retention?: PlatformRetention;
+    /** How much daily history exists (drives when retention becomes measurable). */
+    history?: PlatformHistoryStatus;
   };
 }
 

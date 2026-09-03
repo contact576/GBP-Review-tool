@@ -101,6 +101,44 @@ await step("back in the agency, /app is refused again", async () => {
   await page.waitForURL((u) => u.pathname === "/agency", { timeout: 60_000 });
 });
 
+await step("client page offers listing, access and removal management", async () => {
+  if (!clientHref) throw new Error("no client href");
+  await page.goto(`${base}${clientHref}`, { waitUntil: "domcontentloaded", timeout: 90_000 });
+  await page.locator("h1, main").first().waitFor({ timeout: 60_000 });
+  const body = await page.textContent("body");
+  if (/This page hit a problem/i.test(body)) throw new Error("error boundary");
+  for (const needle of ["Listing", "Contact & login", "Remove this client", "Sync now"]) {
+    if (!body.includes(needle)) throw new Error(`client page missing "${needle}"`);
+  }
+});
+
+await step("economics page can save the agency's rates", async () => {
+  await page.goto(`${base}/agency/economics`, { waitUntil: "domcontentloaded", timeout: 90_000 });
+  await page.locator('button:has-text("Save rates")').waitFor({ timeout: 60_000 });
+});
+
+await step("Open my workspace enters the agency's own workspace with the self banner", async () => {
+  await page.goto(`${base}/agency`, { waitUntil: "domcontentloaded", timeout: 90_000 });
+  await page.locator('button:has-text("Open my workspace")').waitFor({ timeout: 60_000 });
+  await page.waitForTimeout(1000);
+  await Promise.all([
+    page.waitForURL((u) => u.pathname === "/app", { timeout: 120_000 }),
+    page.click('button:has-text("Open my workspace")'),
+  ]);
+  const banner = page.locator('[data-testid="agency-acting-banner"]');
+  await banner.waitFor({ timeout: 60_000 });
+  const mode = await banner.getAttribute("data-mode");
+  if (mode !== "self") throw new Error(`banner mode ${mode}`);
+  const res = await page.goto(`${base}/app/settings/integrations`, { waitUntil: "domcontentloaded", timeout: 90_000 });
+  if (!res || res.status() >= 400) throw new Error(`integrations HTTP ${res?.status()}`);
+  const body = await page.textContent("body");
+  if (/This page hit a problem/i.test(body)) throw new Error("integrations error boundary");
+  await Promise.all([
+    page.waitForURL((u) => u.pathname === "/agency", { timeout: 120_000 }),
+    page.click('[data-testid="agency-acting-banner"] button'),
+  ]);
+});
+
 await browser.close();
 const realConsole = consoleErrors.filter((t) => !/hydrat|#418|#423/i.test(t));
 console.log(`\nproblems: ${problems.length}${problems.length ? "\n  " + problems.join("\n  ") : ""}`);

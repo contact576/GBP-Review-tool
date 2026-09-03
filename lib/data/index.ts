@@ -130,11 +130,46 @@ export function homeWorkspaceIdFor(session: Session): string {
  * Independent of which workspace the session points at, so it keeps working
  * while a platform admin is inside a tenant.
  */
+const loadPlatformSnapshot = cache(
+  async (provider: DataProvider, homeWorkspaceId: string) => provider.getPlatformSnapshot(homeWorkspaceId),
+);
+
 export async function getPlatformSnapshot(): Promise<FoundlyData["platform"]> {
   const session = await getSession();
   if (!session) redirect("/sign-in");
   const provider = await getProviderFor(session);
-  return provider.getPlatformSnapshot(homeWorkspaceIdFor(session));
+  // Request-cached: the overview page reads it to render AND to decide whether
+  // today's history record still needs writing — one aggregate, not two.
+  return loadPlatformSnapshot(provider, homeWorkspaceIdFor(session));
+}
+
+/** One tenant in full for the ops console. Null when the organization is unknown. */
+export async function getTenantDetail(organizationId: string): Promise<import("./types").PlatformTenantDetail | null> {
+  const session = await getSession();
+  if (!session) redirect("/sign-in");
+  if (session.role !== "platform_admin") return null;
+  const provider = await getProviderFor(session);
+  return provider.getTenantDetail(organizationId);
+}
+
+/**
+ * Newest-first audit entries across every tenant, for the ops console. The
+ * demo session sees its own seeded ledger, labelled as such by the page.
+ */
+export async function getPlatformAuditLog(limit: number): Promise<import("./types").PlatformAuditEntry[]> {
+  const session = await getSession();
+  if (!session) redirect("/sign-in");
+  if (session.role !== "platform_admin") return [];
+  const provider = await getProviderFor(session);
+  if (session.isDemo) {
+    const data = await loadWorkspaceData(provider, session.workspaceId);
+    return (data?.auditLog ?? []).map((entry) => ({
+      ...entry,
+      tenant: data?.location.name ?? "Demo",
+      organizationId: data?.organization.id ?? "",
+    }));
+  }
+  return provider.listPlatformAuditLog(limit);
 }
 
 /** Session + the AGENCY's data, for every /agency surface. */

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ds/Button";
 import { openTenantWorkspaceAction } from "@/lib/actions";
 import { Badge } from "@/components/ds/misc";
@@ -112,7 +113,16 @@ export function TenantsTable({ tenants, canOpen = true }: { tenants: PlatformTen
       ariaLabel: "Sort by tenant",
       render: (t) => (
         <div className="min-w-0">
-          <div className="text-[14px] font-semibold text-ink">{t.name}</div>
+          {t.primaryWorkspaceId ? (
+            <Link
+              href={`/admin/tenants/${encodeURIComponent(t.id)}`}
+              className="text-[14px] font-semibold text-ink hover:underline focus-visible:underline focus-visible:outline-none"
+            >
+              {t.name}
+            </Link>
+          ) : (
+            <div className="text-[14px] font-semibold text-ink">{t.name}</div>
+          )}
           {t.ownerEmail ? <div className="truncate text-[12px] text-faint">{t.ownerEmail}</div> : null}
         </div>
       ),
@@ -193,8 +203,8 @@ export function TenantsTable({ tenants, canOpen = true }: { tenants: PlatformTen
       />
 
       <p className="text-[12px] tabular-nums text-faint">
-        {rows.length} of {tenants.length} tenants shown · impersonation is disabled in this deployment and audit-logged
-        when enabled.
+        {rows.length} of {tenants.length} tenants shown · open a tenant&rsquo;s name for its plan, trial, users and
+        deletion · Open tenant starts an audited support session.
       </p>
     </div>
   );

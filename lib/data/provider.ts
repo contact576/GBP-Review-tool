@@ -40,6 +40,11 @@ import type {
   Milestone,
   Notification,
   BusinessDetailsPatch,
+  FraudTriage,
+  PlatformAuditEntry,
+  PlatformHistoryRecord,
+  PlatformTenantDetail,
+  PlatformTenantUser,
 } from "./types";
 
 export type ProfileSuggestionPatch = Partial<
@@ -347,6 +352,51 @@ export interface DataProvider {
    * demo fixture stored on the caller's workspace.
    */
   getPlatformSnapshot(workspaceId: string): Promise<FoundlyData["platform"]>;
+
+  // ── Platform ops (internal console) ───────────────────────
+  /** One tenant (organization) in full: workspaces, users, subscription, recent audit. */
+  getTenantDetail(organizationId: string): Promise<PlatformTenantDetail | null>;
+  /** Newest-first audit entries across every real tenant, with the tenant named. */
+  listPlatformAuditLog(limit: number): Promise<PlatformAuditEntry[]>;
+  /** Users on one workspace, with whether each can actually sign in. */
+  listWorkspaceUsers(workspaceId: string): Promise<PlatformTenantUser[]>;
+  /** Store (or replace) the daily platform history record for its day. */
+  savePlatformHistory(record: PlatformHistoryRecord): Promise<void>;
+  /** Stored daily history, oldest first. */
+  listPlatformHistory(limit?: number): Promise<PlatformHistoryRecord[]>;
+  /** Record an operator's decision on a fraud flag (replaces any earlier one). */
+  saveFraudTriage(entry: FraudTriage): Promise<void>;
+  /**
+   * Delete one workspace and every row that belongs to it. Refuses the demo
+   * workspace and any workspace holding a platform_admin. Returns the ids of
+   * the users removed so the caller can revoke their sessions.
+   */
+  deleteWorkspace(workspaceId: string): Promise<{ ok: true; userIds: string[] } | { ok: false; error: string }>;
+  /** Delete an organization: every workspace in it, then the organization row. */
+  deleteOrganization(organizationId: string): Promise<{ ok: true; workspaceIds: string[] } | { ok: false; error: string }>;
+
+  // ── Agency (client book) ──────────────────────────────────
+  /** Save the agency's own wholesale / retail rates (the economics inputs). */
+  setAgencyRates(workspaceId: string, rates: { wholesaleRate: number; retailAverage: number }): Promise<void>;
+  /** Patch one client's stored book entry (contact email, invite marker). */
+  updateAgencyClient(
+    workspaceId: string,
+    locationId: string,
+    patch: Partial<Pick<AgencyClient, "contactEmail" | "invitedAt">>,
+  ): Promise<AgencyClient | null>;
+  /** Drop a client from the agency's book (the workspace itself is deleted separately). */
+  removeAgencyClient(workspaceId: string, locationId: string): Promise<void>;
+  /**
+   * Point a workspace's owner account at a real person: the client's own
+   * email and name. Only allowed while that account has no credentials (a
+   * sibling workspace created by an agency carries an uncredentialed owner
+   * row); returns the user id so an invite / password-setup token can be
+   * minted for it.
+   */
+  setWorkspaceOwnerIdentity(
+    workspaceId: string,
+    identity: { email: string; name: string },
+  ): Promise<{ ok: true; userId: string } | { ok: false; error: string }>;
   createOrganizationWorkspace(
     workspaceId: string,
     input: CreateOrganizationWorkspaceInput,
@@ -487,6 +537,7 @@ export interface DataProvider {
         | "status"
         | "tier"
         | "interval"
+        | "trialEndsAt"
         | "stripeCustomerId"
         | "stripeSubscriptionId"
         | "stripePriceId"

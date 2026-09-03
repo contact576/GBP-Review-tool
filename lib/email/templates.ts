@@ -67,6 +67,35 @@ export function staffInviteEmail(input: {
   };
 }
 
+/**
+ * An agency handing a client the keys to their own workspace. The link is a
+ * one-time password-setup token (the reset flow), valid for days rather than
+ * the reset's hour, because the client did not ask for it right now.
+ */
+export function clientInviteEmail(input: {
+  business: string;
+  agencyName: string;
+  link: string;
+  expiresInDays: number;
+  brand?: string;
+}): { subject: string; html: string; text: string } {
+  const subject = `${input.agencyName} set up your ${input.business} reviews workspace`;
+  const body =
+    `${input.agencyName} manages your online reviews and has set up a workspace for ${input.business}. ` +
+    `Choose a password to see your reviews, review requests and Google Business Profile progress any time.`;
+  return {
+    subject,
+    html: wrap(
+      h(`Your ${input.business} workspace is ready`) +
+        p(body) +
+        button(input.link, "Choose your password") +
+        p(`<br/>This link works for ${input.expiresInDays} days. If the button doesn't work, copy this link: ${input.link}`),
+      { brand: input.brand ?? input.agencyName },
+    ),
+    text: `${body}\n\nChoose your password: ${input.link}\n\nThis link works for ${input.expiresInDays} days.`,
+  };
+}
+
 export function passwordResetEmail(input: { link: string; brand?: string }): {
   subject: string;
   html: string;

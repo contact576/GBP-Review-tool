@@ -9,10 +9,13 @@ export function ClientActions({
   brandName,
   clientId,
   contactEmail,
+  canOpen = true,
 }: {
   brandName: string;
   clientId: string;
   contactEmail?: string;
+  /** False when the client's workspace can no longer be read. */
+  canOpen?: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [opening, startOpen] = useTransition();
@@ -44,7 +47,7 @@ export function ClientActions({
           fullWidth
           className="sm:flex-1"
           loading={opening}
-          disabled={pending}
+          disabled={pending || !canOpen}
           onClick={open}
         >
           Open client workspace

@@ -33,6 +33,7 @@ import {
 } from "@/lib/email/config";
 import {
   agencyGrowthReportEmail,
+  clientInviteEmail,
   emailTestEmail,
   passwordResetEmail,
   reviewRequestEmail,
@@ -40,6 +41,7 @@ import {
   verificationEmail,
   welcomeEmail,
 } from "@/lib/email/templates";
+import { historyRecordFrom } from "@/lib/platform/retention";
 import { reviewRequestSms } from "@/lib/sms/templates";
 import { sendSms, smsEnabled } from "@/lib/sms/twilio";
 import { canonicalPhone, isE164 } from "@/lib/sms/phone";
@@ -48,7 +50,7 @@ import { appUrl } from "@/lib/utils/app-url";
 import { consumeRateLimit } from "@/lib/security/api";
 import { trustedClientIp } from "@/lib/security/client-ip";
 import { parseReferralCode } from "@/lib/referrals/code";
-import { TRIAL_DAYS } from "@/lib/billing/plans";
+import { PLAN_ORDER, TRIAL_DAYS } from "@/lib/billing/plans";
 import { isTrialExpired, subscriptionHasFeature } from "@/lib/billing/trial";
 import type {
   CaptureCustomerInput,
@@ -79,6 +81,7 @@ import type {
   ProfileSuggestionStatus,
   AiContentAsset,
   ProfileSuggestion,
+  FraudTriageDecision,
 } from "@/lib/data/types";
 import { prepareProfileMutation, stableStringify } from "@/lib/google/profile-mutation";
 import { executeProfileMutation } from "@/lib/google/mutation-runner";
@@ -2813,6 +2816,569 @@ export async function createAgencyClientAction(input: {
   }
   revalidatePath("/agency", "layout");
   return { ok: true, google };
+}
+
+// ── Agency: managing one client ─────────────────────────────
+/**
+ * Every client action starts here: the caller must be the agency (or an
+ * owner on the Agency plan), `ws` is always the AGENCY's workspace, and the
+ * agency's data is loaded once for the checks below.
+ */
+async function agencyContext() {
+  const { provider, ws, session } = await agencyScoped("owner", "agency_admin");
+  const data = await provider.getData(ws);
+  if (!data || (session.role !== "agency_admin" && data.subscription.tier !== "agency")) return null;
+  return { provider, ws, session, data };
+}
+
+/**
+ * Resolve a book entry to the client's workspace, with the same proof
+ * `switchWorkspaceAction` demands: it must be a sibling in the agency's
+ * organization and never the agency's own workspace.
+ */
+async function agencyClientTarget(provider: DataProvider, ws: string, locationId: string) {
+  const wanted = String(locationId ?? "").trim();
+  if (!wanted) return null;
+  const siblings = await provider.listOrganizationWorkspaces(ws);
+  return siblings.find((workspace) => workspace.locationId === wanted && workspace.workspaceId !== ws) ?? null;
+}
+
+async function agencyAudit(
+  provider: DataProvider,
+  ws: string,
+  session: Session,
+  action: string,
+  targetType: string,
+  targetId: string,
+  meta?: Record<string, string | number | boolean>,
+) {
+  await provider.appendAuditLog(ws, {
+    id: `aud_${randomBytes(8).toString("hex")}`,
+    workspaceId: ws,
+    actor: session.email || session.name || "Agency",
+    action,
+    targetType,
+    targetId,
+    at: new Date().toISOString(),
+    meta,
+  });
+}
+
+type ActionResult = { ok: true } | { ok: false; error: string };
+
+export async function updateAgencyRatesAction(input: {
+  wholesaleRate: number;
+  retailAverage: number;
+}): Promise<ActionResult> {
+  const ctx = await agencyContext();
+  if (!ctx) return { ok: false, error: "Client management requires the Agency plan." };
+  const wholesaleRate = Number(input.wholesaleRate);
+  const retailAverage = Number(input.retailAverage);
+  for (const value of [wholesaleRate, retailAverage]) {
+    if (!Number.isFinite(value) || value < 0 || value > 100_000) {
+      return { ok: false, error: "Rates must be between 0 and 100,000 per location per month." };
+    }
+  }
+  await ctx.provider.setAgencyRates(ctx.ws, {
+    wholesaleRate: Math.round(wholesaleRate * 100) / 100,
+    retailAverage: Math.round(retailAverage * 100) / 100,
+  });
+  await agencyAudit(ctx.provider, ctx.ws, ctx.session, "agency.rates_updated", "agency", ctx.data.agency.id, {
+    wholesaleRate,
+    retailAverage,
+  });
+  revalidatePath("/agency", "layout");
+  return { ok: true };
+}
+
+export async function updateAgencyClientContactAction(
+  locationId: string,
+  contactEmail: string,
+): Promise<ActionResult> {
+  const ctx = await agencyContext();
+  if (!ctx) return { ok: false, error: "Client management requires the Agency plan." };
+  const email = String(contactEmail ?? "").trim().toLowerCase().slice(0, 254);
+  if (!EMAIL_RE.test(email)) return { ok: false, error: "Enter a valid contact email." };
+  const updated = await ctx.provider.updateAgencyClient(ctx.ws, String(locationId ?? "").trim(), { contactEmail: email });
+  if (!updated) return { ok: false, error: "That client is not in your book." };
+  await agencyAudit(ctx.provider, ctx.ws, ctx.session, "agency.client_contact_updated", "client", updated.locationId, {
+    contactEmail: email,
+  });
+  revalidatePath("/agency", "layout");
+  return { ok: true };
+}
+
+export interface AgencyGooglePlace {
+  placeId: string;
+  name: string;
+  address: string;
+  city: string;
+  rating: number;
+  reviewCount: number;
+  category: string;
+}
+
+/** Search Google for a client's listing — candidates only, nothing is written. */
+export async function searchAgencyClientGoogleAction(
+  locationId: string,
+  query: string,
+): Promise<{ ok: true; places: AgencyGooglePlace[] } | { ok: false; error: string }> {
+  const ctx = await agencyContext();
+  if (!ctx) return { ok: false, error: "Client management requires the Agency plan." };
+  if (ctx.session.isDemo) return { ok: false, error: "The demo uses sample data — sign up to search Google." };
+  const target = await agencyClientTarget(ctx.provider, ctx.ws, locationId);
+  if (!target) return { ok: false, error: "That client is not part of this agency." };
+  const q = String(query ?? "").trim().slice(0, 160);
+  if (q.length < 2) return { ok: false, error: "Type the business name (and city) to search." };
+  const child = await ctx.provider.getData(target.workspaceId);
+  const found = await searchBusinesses(q, child?.workspace.region ?? "US");
+  if (!found.ok) return { ok: false, error: found.detail || "Google search failed. Try again." };
+  return {
+    ok: true,
+    places: found.places.slice(0, 6).map((place) => ({
+      placeId: place.placeId,
+      name: place.name,
+      address: place.address,
+      city: place.city,
+      rating: place.rating,
+      reviewCount: place.reviewCount,
+      category: place.category,
+    })),
+  };
+}
+
+/** Link a client's workspace to the chosen Google listing and pull its public data. */
+export async function linkAgencyClientGoogleAction(
+  locationId: string,
+  place: AgencyGooglePlace,
+): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+  const ctx = await agencyContext();
+  if (!ctx) return { ok: false, error: "Client management requires the Agency plan." };
+  if (ctx.session.isDemo) return { ok: false, error: "The demo uses sample data — sign up to link a listing." };
+  const target = await agencyClientTarget(ctx.provider, ctx.ws, locationId);
+  if (!target) return { ok: false, error: "That client is not part of this agency." };
+  const placeId = typeof place?.placeId === "string" ? place.placeId.trim() : "";
+  if (!/^[A-Za-z0-9_-]{1,256}$/.test(placeId)) return { ok: false, error: "Pick a Google listing to link." };
+  const rating = Number(place.rating);
+  const reviewCount = Number(place.reviewCount);
+  await ctx.provider.updateLocationGoogle(target.workspaceId, {
+    placeId,
+    name: String(place.name ?? "").trim().slice(0, 200) || undefined,
+    address: String(place.address ?? "").trim().slice(0, 300) || undefined,
+    city: String(place.city ?? "").trim().slice(0, 120) || undefined,
+    category: String(place.category ?? "").trim().slice(0, 120) || undefined,
+    rating: Number.isFinite(rating) && rating >= 0 && rating <= 5 ? Math.round(rating * 10) / 10 : undefined,
+    reviewCount: Number.isInteger(reviewCount) && reviewCount >= 0 ? reviewCount : undefined,
+  });
+  const sync = await ctx.provider.syncGooglePublic(target.workspaceId).catch(() => null);
+  await agencyAudit(ctx.provider, ctx.ws, ctx.session, "agency.client_google_linked", "client", target.locationId, {
+    placeId,
+    name: String(place.name ?? ""),
+  });
+  revalidatePath("/agency", "layout");
+  const stars = sync?.ok && typeof sync.rating === "number" ? `${sync.rating.toFixed(1)}★ from ${sync.reviewCount ?? 0} reviews` : null;
+  return {
+    ok: true,
+    message: stars
+      ? `Linked to ${place.name} and synced its public Google data: ${stars}.`
+      : `Linked to ${place.name}. Google's public data will appear after the next sync.`,
+  };
+}
+
+/** Pull the client's Google data now — public listing, and the profile when connected. */
+export async function syncAgencyClientAction(
+  locationId: string,
+): Promise<{ ok: boolean; message: string }> {
+  const ctx = await agencyContext();
+  if (!ctx) return { ok: false, message: "Client management requires the Agency plan." };
+  if (ctx.session.isDemo) return { ok: false, message: "The demo uses sample data — sign up to sync real Google data." };
+  const target = await agencyClientTarget(ctx.provider, ctx.ws, locationId);
+  if (!target) return { ok: false, message: "That client is not part of this agency." };
+  const pub = await ctx.provider.syncGooglePublic(target.workspaceId);
+  const profile = await ctx.provider.syncGoogleProfile(target.workspaceId).catch(() => null);
+  const synced = await ctx.provider.getData(target.workspaceId);
+  if (synced) {
+    await awardMilestones({ provider: ctx.provider, workspaceId: target.workspaceId, data: synced, now: new Date() }).catch(() => undefined);
+  }
+  revalidatePath("/agency", "layout");
+  if (!pub.ok) return { ok: false, message: pub.error ?? "Couldn't reach Google — please try again." };
+  const stars = typeof pub.rating === "number" ? pub.rating.toFixed(1) : "—";
+  const profileNote = profile?.ok && !profile.pendingApproval
+    ? ` Imported ${profile.reviewsImported ?? 0} reviews from the connected Business Profile.`
+    : profile?.pendingApproval
+      ? " The full Business Profile import is waiting on Google."
+      : "";
+  return { ok: true, message: `Synced ${target.name}: ${stars}★ from ${pub.reviewCount ?? 0} Google reviews.${profileNote}` };
+}
+
+/** How long a client-owner invite link stays valid. */
+const CLIENT_INVITE_DAYS = 7;
+
+/**
+ * Give the client their own login. Their workspace already exists with an
+ * owner account that has no credentials (the agency created it); this points
+ * that account at the client's contact email and sends a one-time
+ * password-setup link. When no email sender is configured the link is
+ * returned so the agency can pass it on themselves.
+ */
+export async function inviteAgencyClientOwnerAction(
+  locationId: string,
+): Promise<{ ok: true; emailed: boolean; link?: string; message: string } | { ok: false; error: string }> {
+  const ctx = await agencyContext();
+  if (!ctx) return { ok: false, error: "Client management requires the Agency plan." };
+  if (ctx.session.isDemo) return { ok: false, error: "The demo cannot send invitations — sign up to invite a client." };
+  const target = await agencyClientTarget(ctx.provider, ctx.ws, locationId);
+  if (!target) return { ok: false, error: "That client is not part of this agency." };
+  const entry = ctx.data.agency.clients.find((client) => client.locationId === target.locationId);
+  const contactEmail = entry?.contactEmail?.trim().toLowerCase() ?? "";
+  if (!EMAIL_RE.test(contactEmail)) {
+    return { ok: false, error: "Add the client's contact email first — the invitation goes there." };
+  }
+  const identity = await ctx.provider.setWorkspaceOwnerIdentity(target.workspaceId, {
+    email: contactEmail,
+    name: target.name,
+  });
+  if (!identity.ok) return identity;
+
+  const token = randomBytes(32).toString("base64url");
+  const createdAt = new Date();
+  await ctx.provider.savePasswordResetToken({
+    tokenHash: resetTokenHash(token),
+    userId: identity.userId,
+    createdAt: createdAt.toISOString(),
+    expiresAt: new Date(createdAt.getTime() + CLIENT_INVITE_DAYS * 86_400_000).toISOString(),
+  });
+  const base = await appUrl();
+  const link = `${base}/reset-password?token=${encodeURIComponent(token)}`;
+  const sentAt = createdAt.toISOString();
+
+  let emailed = false;
+  if (await emailEnabledFor(ctx.ws)) {
+    const template = clientInviteEmail({
+      business: target.name,
+      agencyName: ctx.data.agency.whiteLabel.brandName,
+      link,
+      expiresInDays: CLIENT_INVITE_DAYS,
+    });
+    const delivered = await sendEmail({
+      to: contactEmail,
+      subject: template.subject,
+      html: template.html,
+      text: template.text,
+      replyTo: ctx.data.organization.billingEmail,
+      workspaceId: ctx.ws,
+    });
+    emailed = delivered.ok;
+  }
+  await ctx.provider.updateAgencyClient(ctx.ws, target.locationId, { invitedAt: sentAt });
+  await agencyAudit(ctx.provider, ctx.ws, ctx.session, "agency.client_invited", "client", target.locationId, {
+    contactEmail,
+    emailed,
+  });
+  revalidatePath("/agency", "layout");
+  return emailed
+    ? { ok: true, emailed, message: `Invitation sent to ${contactEmail}. The link works for ${CLIENT_INVITE_DAYS} days.` }
+    : {
+        ok: true,
+        emailed,
+        link,
+        message: `No email sender is connected, so the invitation was not emailed. Send ${contactEmail} this link yourself — it works for ${CLIENT_INVITE_DAYS} days.`,
+      };
+}
+
+/**
+ * Remove a client: their workspace and everything in it is deleted, and the
+ * book entry goes with it. Irreversible, so the caller must type the
+ * client's name. A book entry whose workspace is already gone is simply
+ * dropped from the book.
+ */
+export async function removeAgencyClientAction(
+  locationId: string,
+  confirmName: string,
+): Promise<ActionResult> {
+  const ctx = await agencyContext();
+  if (!ctx) return { ok: false, error: "Client management requires the Agency plan." };
+  if (ctx.session.isDemo) return { ok: false, error: "The demo book cannot be changed." };
+  const wanted = String(locationId ?? "").trim();
+  const entry = ctx.data.agency.clients.find((client) => client.locationId === wanted);
+  if (!entry) return { ok: false, error: "That client is not in your book." };
+  const target = await agencyClientTarget(ctx.provider, ctx.ws, wanted);
+  const expected = (target?.name ?? entry.name).trim().toLowerCase();
+  if (String(confirmName ?? "").trim().toLowerCase() !== expected) {
+    return { ok: false, error: `Type the client's name exactly — ${target?.name ?? entry.name} — to confirm.` };
+  }
+  let removedUsers: string[] = [];
+  if (target) {
+    const deleted = await ctx.provider.deleteWorkspace(target.workspaceId);
+    if (!deleted.ok) return deleted;
+    removedUsers = deleted.userIds;
+  }
+  await ctx.provider.removeAgencyClient(ctx.ws, wanted);
+  await agencyAudit(ctx.provider, ctx.ws, ctx.session, "agency.client_removed", "client", wanted, {
+    name: target?.name ?? entry.name,
+    workspaceId: target?.workspaceId ?? "",
+    usersRemoved: removedUsers.length,
+  });
+  revalidatePath("/agency", "layout");
+  return { ok: true };
+}
+
+/**
+ * The agency's OWN listing lives in its own workspace, which the agency
+ * console never shows in full. Entering it uses the same acting mechanism as
+ * a client: `homeWorkspaceId` is set (to the same workspace), which is what
+ * admits an agency admin to /app, and the banner offers the way back.
+ */
+export async function enterOwnWorkspaceAction(): Promise<{ ok: false; error: string }> {
+  const { session, ws: home } = await agencyScoped("agency_admin");
+  if (session.isDemo) return { ok: false, error: "The demo agency has no workspace of its own to open." };
+  await createSession({ ...session, workspaceId: home, homeWorkspaceId: home });
+  redirect("/app");
+}
+
+// ── Platform ops: managing one tenant ───────────────────────
+const TENANT_STATUSES: ReadonlySet<Subscription["status"]> = new Set([
+  "trialing",
+  "active",
+  "past_due",
+  "free",
+  "canceled",
+  "paused",
+]);
+
+async function opsContext() {
+  const { provider, session, ws: home } = await agencyScoped("platform_admin");
+  return { provider, session, home };
+}
+
+/** A tenant workspace an operator may act on: real, not the demo, not ours. */
+async function opsTenantWorkspace(provider: DataProvider, workspaceId: string) {
+  const target = String(workspaceId ?? "").trim();
+  if (!target) return { ok: false as const, error: "Pick a tenant workspace." };
+  const data = await provider.getData(target);
+  if (!data) return { ok: false as const, error: "That workspace no longer exists." };
+  if (data.workspace.isDemo) return { ok: false as const, error: "The demo workspace is not a tenant." };
+  const users = await provider.listWorkspaceUsers(target);
+  if (users.some((user) => user.role === "platform_admin")) {
+    return { ok: false as const, error: "That workspace belongs to the ops team, not a tenant." };
+  }
+  return { ok: true as const, target, data, users };
+}
+
+/** Every support action is written to the TENANT's ledger, naming the operator. */
+async function tenantAudit(
+  provider: DataProvider,
+  workspaceId: string,
+  session: Session,
+  action: string,
+  targetType: string,
+  targetId: string,
+  meta?: Record<string, string | number | boolean>,
+) {
+  await provider.appendAuditLog(workspaceId, {
+    id: `aud_${randomBytes(8).toString("hex")}`,
+    workspaceId,
+    actor: session.email || "Foundly support",
+    action,
+    targetType,
+    targetId,
+    at: new Date().toISOString(),
+    meta: { ...(meta ?? {}), operator: session.email, role: "platform_admin" },
+  });
+}
+
+export async function setTenantSubscriptionAction(
+  workspaceId: string,
+  patch: { tier?: PlanTier; status?: Subscription["status"]; interval?: "monthly" | "annual" },
+): Promise<ActionResult> {
+  const { provider, session } = await opsContext();
+  if (session.isDemo) return { ok: false, error: "Demo sessions cannot change a tenant." };
+  const tenant = await opsTenantWorkspace(provider, workspaceId);
+  if (!tenant.ok) return tenant;
+  const clean: Parameters<DataProvider["setSubscription"]>[1] = {};
+  if (patch.tier !== undefined) {
+    if (!PLAN_ORDER.includes(patch.tier)) return { ok: false, error: "That plan does not exist." };
+    clean.tier = patch.tier;
+  }
+  if (patch.status !== undefined) {
+    if (!TENANT_STATUSES.has(patch.status)) return { ok: false, error: "That status does not exist." };
+    clean.status = patch.status;
+  }
+  if (patch.interval !== undefined) {
+    if (patch.interval !== "monthly" && patch.interval !== "annual") return { ok: false, error: "Interval must be monthly or annual." };
+    clean.interval = patch.interval;
+  }
+  if (!Object.keys(clean).length) return { ok: false, error: "Nothing to change." };
+  const before = tenant.data.subscription;
+  await provider.setSubscription(tenant.target, clean);
+  await tenantAudit(provider, tenant.target, session, "support.subscription_changed", "subscription", before.id, {
+    fromTier: before.tier,
+    toTier: clean.tier ?? before.tier,
+    fromStatus: before.status,
+    toStatus: clean.status ?? before.status,
+    fromInterval: before.interval,
+    toInterval: clean.interval ?? before.interval,
+  });
+  revalidatePath("/admin", "layout");
+  return { ok: true };
+}
+
+export async function extendTenantTrialAction(workspaceId: string, days: number): Promise<ActionResult> {
+  const { provider, session } = await opsContext();
+  if (session.isDemo) return { ok: false, error: "Demo sessions cannot change a tenant." };
+  const tenant = await opsTenantWorkspace(provider, workspaceId);
+  if (!tenant.ok) return tenant;
+  const extra = Number(days);
+  if (!Number.isInteger(extra) || extra < 1 || extra > 365) return { ok: false, error: "Extend by 1 to 365 days." };
+  const sub = tenant.data.subscription;
+  const now = Date.now();
+  const currentEnd = sub.trialEndsAt ? new Date(sub.trialEndsAt).getTime() : NaN;
+  const base = Number.isFinite(currentEnd) && currentEnd > now ? currentEnd : now;
+  const trialEndsAt = new Date(base + extra * 86_400_000).toISOString();
+  await provider.setSubscription(tenant.target, { status: "trialing", trialEndsAt });
+  await tenantAudit(provider, tenant.target, session, "support.trial_extended", "subscription", sub.id, {
+    days: extra,
+    from: sub.trialEndsAt ?? "",
+    to: trialEndsAt,
+    fromStatus: sub.status,
+  });
+  revalidatePath("/admin", "layout");
+  return { ok: true };
+}
+
+export async function forceTenantSignOutAction(workspaceId: string, userId: string): Promise<ActionResult> {
+  const { provider, session } = await opsContext();
+  if (session.isDemo) return { ok: false, error: "Demo sessions cannot change a tenant." };
+  const tenant = await opsTenantWorkspace(provider, workspaceId);
+  if (!tenant.ok) return tenant;
+  const user = tenant.users.find((candidate) => candidate.id === String(userId ?? "").trim());
+  if (!user) return { ok: false, error: "That user is not on this tenant." };
+  await provider.bumpUserSessionVersion(user.id);
+  await tenantAudit(provider, tenant.target, session, "support.sessions_revoked", "user", user.id, { email: user.email });
+  revalidatePath("/admin", "layout");
+  return { ok: true };
+}
+
+export async function setTenantUserEmailVerifiedAction(
+  workspaceId: string,
+  userId: string,
+  verified: boolean,
+): Promise<ActionResult> {
+  const { provider, session } = await opsContext();
+  if (session.isDemo) return { ok: false, error: "Demo sessions cannot change a tenant." };
+  const tenant = await opsTenantWorkspace(provider, workspaceId);
+  if (!tenant.ok) return tenant;
+  const user = tenant.users.find((candidate) => candidate.id === String(userId ?? "").trim());
+  if (!user) return { ok: false, error: "That user is not on this tenant." };
+  await provider.setEmailVerified(user.id, Boolean(verified));
+  await tenantAudit(provider, tenant.target, session, "support.email_verified_set", "user", user.id, {
+    email: user.email,
+    verified: Boolean(verified),
+  });
+  revalidatePath("/admin", "layout");
+  return { ok: true };
+}
+
+/**
+ * Delete a whole tenant — every workspace in the organization and all their
+ * rows. Irreversible; the operator types the tenant's name. The record of the
+ * deletion goes to the ops team's own ledger, because the tenant's is gone.
+ */
+export async function deleteTenantAction(organizationId: string, confirmName: string): Promise<ActionResult> {
+  const { provider, session, home } = await opsContext();
+  if (session.isDemo) return { ok: false, error: "Demo sessions cannot delete a tenant." };
+  const detail = await provider.getTenantDetail(String(organizationId ?? "").trim());
+  if (!detail) return { ok: false, error: "That tenant no longer exists." };
+  if (detail.users.some((user) => user.role === "platform_admin")) {
+    return { ok: false, error: "That organization belongs to the ops team." };
+  }
+  if (String(confirmName ?? "").trim().toLowerCase() !== detail.tenant.name.trim().toLowerCase()) {
+    return { ok: false, error: `Type the tenant's name exactly — ${detail.tenant.name} — to confirm.` };
+  }
+  const result = await provider.deleteOrganization(detail.organization.id);
+  if (!result.ok) return result;
+  await provider.appendAuditLog(home, {
+    id: `aud_${randomBytes(8).toString("hex")}`,
+    workspaceId: home,
+    actor: session.email || "Foundly support",
+    action: "support.tenant_deleted",
+    targetType: "organization",
+    targetId: detail.organization.id,
+    at: new Date().toISOString(),
+    meta: {
+      name: detail.tenant.name,
+      workspaces: result.workspaceIds.length,
+      users: detail.users.length,
+      ownerEmail: detail.tenant.ownerEmail ?? "",
+    },
+  });
+  revalidatePath("/admin", "layout");
+  return { ok: true };
+}
+
+/**
+ * Record an operator's decision on a fraud flag. The flag must exist in the
+ * snapshot computed right now and belong to the workspace named, so a stale
+ * or forged id cannot write a decision against the wrong tenant. Confirming a
+ * flag also tells the tenant: an audit entry and a notification in their
+ * console, because a capture practice that trips Google's filters is theirs
+ * to fix.
+ */
+export async function triageFraudFlagAction(
+  flagId: string,
+  workspaceId: string,
+  decision: FraudTriageDecision,
+  note?: string,
+): Promise<ActionResult> {
+  const { provider, session, home } = await opsContext();
+  if (session.isDemo) return { ok: false, error: "Demo sessions cannot triage." };
+  if (decision !== "dismissed" && decision !== "confirmed") return { ok: false, error: "Pick dismiss or confirm." };
+  const id = String(flagId ?? "").trim();
+  const snapshot = await provider.getPlatformSnapshot(home);
+  const flag = snapshot.fraudFlags.find((candidate) => candidate.id === id && candidate.workspaceId === workspaceId);
+  if (!flag?.workspaceId) return { ok: false, error: "That flag is no longer in the queue." };
+  const cleanNote = String(note ?? "").trim().slice(0, 400) || undefined;
+  await provider.saveFraudTriage({
+    flagId: flag.id,
+    workspaceId: flag.workspaceId,
+    decision,
+    operator: session.email || "Foundly support",
+    note: cleanNote,
+    at: new Date().toISOString(),
+  });
+  if (decision === "confirmed") {
+    await tenantAudit(provider, flag.workspaceId, session, "fraud.flag_confirmed", "fraud_flag", flag.id, {
+      kind: flag.kind,
+      severity: flag.severity,
+      detail: flag.detail,
+      ...(cleanNote ? { note: cleanNote } : {}),
+    });
+    const data = await provider.getData(flag.workspaceId);
+    if (data) {
+      await provider.appendNotification(flag.workspaceId, {
+        id: `ntf_fraud_${flag.id.slice(0, 40)}`,
+        locationId: data.location.id,
+        kind: "system",
+        title: "Foundly flagged a review-capture pattern",
+        body: `${flag.detail}. This is the kind of pattern that trips Google's review filters — please review how requests are being sent.`,
+        createdAt: new Date().toISOString(),
+        read: false,
+      }).catch(() => undefined);
+    }
+  }
+  revalidatePath("/admin", "layout");
+  return { ok: true };
+}
+
+/** Store today's platform snapshot in the history table (idempotent per day). */
+export async function recordPlatformHistoryAction(): Promise<{ ok: true; day: string } | { ok: false; error: string }> {
+  const { provider, session, home } = await opsContext();
+  if (session.isDemo) return { ok: false, error: "The demo has no platform history." };
+  const snapshot = await provider.getPlatformSnapshot(home);
+  const record = historyRecordFrom(snapshot, new Date());
+  await provider.savePlatformHistory(record);
+  revalidatePath("/admin", "layout");
+  return { ok: true, day: record.day };
 }
 
 export async function changePlanAction(tier: PlanTier) {

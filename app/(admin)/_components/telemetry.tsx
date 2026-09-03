@@ -40,11 +40,11 @@ export function readPlatformTelemetry(platform: Platform, isDemo: boolean): Plat
 export function sectionMeasured(
   platform: Platform,
   telemetry: PlatformTelemetry,
-  section: keyof NonNullable<Platform["coverage"]>,
+  section: Exclude<keyof NonNullable<Platform["coverage"]>, "fraudSignals">,
 ): boolean {
   if (!telemetry.measured) return false;
   if (!platform.coverage) return true; // fixtures and stored blobs cover everything they carry
-  return platform.coverage[section];
+  return Boolean(platform.coverage[section]);
 }
 
 // ── Canonical wording (one place, so every panel says the same thing) ──

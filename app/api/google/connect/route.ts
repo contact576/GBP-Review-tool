@@ -23,7 +23,13 @@ export async function GET() {
   if (!session) {
     return NextResponse.redirect(new URL("/sign-in", origin));
   }
-  if (session.role !== "owner" && session.role !== "manager") {
+  // An agency or platform admin working inside a workspace they opened from
+  // their own console (`homeWorkspaceId` set) acts as its owner everywhere
+  // else, so they may connect its Google profile too — the credential lands on
+  // `session.workspaceId`, which is that workspace, never the admin's own.
+  const acting =
+    (session.role === "agency_admin" || session.role === "platform_admin") && Boolean(session.homeWorkspaceId);
+  if (session.role !== "owner" && session.role !== "manager" && !acting) {
     return NextResponse.redirect(new URL("/app/settings/integrations?error=forbidden", origin));
   }
   if (!googleSignInEnabled()) {

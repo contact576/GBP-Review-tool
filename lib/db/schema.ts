@@ -34,6 +34,8 @@ import type {
   ProfileSuggestion,
   ProfileMutationJob,
   AiContentAsset,
+  FraudTriageDecision,
+  PlatformHistoryRecord,
 } from "../data/types";
 
 /**
@@ -581,3 +583,41 @@ export const aiContentAsset = pgTable(
   },
   (table) => [uniqueIndex("ai_content_asset_suggestion_uq").on(table.workspaceId, table.suggestionId)],
 );
+
+// ── Platform ops (internal console) ─────────────────────────
+
+/**
+ * One row per UTC day: the platform as the ops console measured it that day.
+ * Written by the daily monitor cron (and lazily by the console itself the
+ * first time it is opened on a day), read back to compute month-over-month
+ * retention — logo churn and NRR need a "then" to compare "now" against.
+ *
+ * Deliberately NOT tenant-scoped: it is an aggregate over every tenant and
+ * belongs to the platform, not to any workspace (see UNSCOPED_TABLES).
+ */
+export const platformSnapshot = pgTable(
+  "platform_snapshot",
+  {
+    id: text("id").primaryKey(),
+    day: text("day").notNull(),
+    capturedAt: text("captured_at").notNull(),
+    tenants: jsonb("tenants").$type<PlatformHistoryRecord["tenants"]>().notNull(),
+    kpis: jsonb("kpis").$type<PlatformHistoryRecord["kpis"]>().notNull(),
+  },
+  (table) => [uniqueIndex("platform_snapshot_day_uq").on(table.day)],
+);
+
+/**
+ * An operator's decision on a fraud flag. Flags themselves are computed live
+ * from tenant data with deterministic ids, so the decision is keyed by that id
+ * and re-applies on every recompute; the tenant key is carried so the row is
+ * isolated like any other record about that tenant.
+ */
+export const fraudTriage = pgTable("fraud_triage", {
+  flagId: text("flag_id").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+  decision: text("decision").$type<FraudTriageDecision>().notNull(),
+  operator: text("operator").notNull(),
+  note: text("note"),
+  at: text("at").notNull(),
+});

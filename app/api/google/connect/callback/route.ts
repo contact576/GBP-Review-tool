@@ -33,7 +33,11 @@ export async function GET(req: NextRequest) {
     res.cookies.delete(OAUTH_STATE_COOKIE);
     return res;
   }
-  if (session.role !== "owner" && session.role !== "manager") return done("?error=forbidden");
+  // Same admission as the connect route: an acting agency/platform admin may
+  // finish the connection for the workspace they opened.
+  const acting =
+    (session.role === "agency_admin" || session.role === "platform_admin") && Boolean(session.homeWorkspaceId);
+  if (session.role !== "owner" && session.role !== "manager" && !acting) return done("?error=forbidden");
   if (!googleSignInEnabled()) return done("?error=google_not_configured");
 
   const provider = await getProviderFor(session);

@@ -123,3 +123,53 @@ describe("aggregatePlatform", () => {
     expect(snapshot.testAccountsExcluded).toBe(2);
   });
 });
+
+describe("aggregatePlatform — fraud and retention coverage", () => {
+  const rosterWs = ws({ workspaceId: "ws_a", organizationId: "org_1", organizationName: "Acme" });
+
+  it("covers fraud only when the rows were fetched, and names the signals that ran", () => {
+    const without = aggregatePlatform({ workspaces: [rosterWs], deliveryFailures: [], durability: [], reviewsLast7d: 0, now });
+    expect(without.coverage?.fraud).toBe(false);
+    expect(without.coverage?.fraudSignals).toBeUndefined();
+
+    const withRows = aggregatePlatform({
+      workspaces: [rosterWs],
+      deliveryFailures: [],
+      durability: [],
+      reviewsLast7d: 0,
+      now,
+      fraud: {
+        requests: [{ workspaceId: "ws_a", id: "r1", customerId: "cus_1", staffId: null, status: "posted_google", createdAt: now.toISOString(), isTest: false }],
+        reviews: [],
+        customers: [{ workspaceId: "ws_a", id: "cus_1", name: "Priya Sharma", email: null }],
+        staff: [{ workspaceId: "ws_a", id: "stf_1", displayName: "Priya Sharma" }],
+        users: [],
+        triage: [],
+      },
+    });
+    expect(withRows.coverage?.fraud).toBe(true);
+    expect(withRows.coverage?.fraudSignals).toEqual({ velocity_anomaly: true, staff_self_review: true, same_device: false });
+    expect(withRows.fraudFlags).toHaveLength(1);
+    expect(withRows.fraudFlags[0]).toMatchObject({ tenant: "Acme", kind: "staff_self_review", severity: "high" });
+  });
+
+  it("reports retention as not covered until the history is old enough, then measures it", () => {
+    const young = aggregatePlatform({ workspaces: [rosterWs], deliveryFailures: [], durability: [], reviewsLast7d: 0, now, history: [
+      { id: "ph_x", day: "2026-09-01", capturedAt: "2026-09-01T06:00:00Z", tenants: [], kpis: { totalTenants: 0, activeLocations: 0, mrr: 0 } },
+    ] });
+    expect(young.coverage?.retention).toBe(false);
+    expect(young.history).toMatchObject({ days: 1, requiredDays: 28 });
+    expect(young.retention).toBeUndefined();
+
+    const old = aggregatePlatform({ workspaces: [rosterWs], deliveryFailures: [], durability: [], reviewsLast7d: 0, now, history: [
+      { id: "ph_y", day: "2026-08-01", capturedAt: "2026-08-01T06:00:00Z", tenants: [
+        { id: "org_1", mrr: 99, status: "active", plan: "growth" },
+        { id: "org_gone", mrr: 39, status: "active", plan: "starter" },
+      ], kpis: { totalTenants: 2, activeLocations: 2, mrr: 138 } },
+    ] });
+    expect(old.coverage?.retention).toBe(true);
+    expect(old.retention).toMatchObject({ priorPaying: 2, churned: 1, priorMrr: 138, retainedMrr: 99 });
+    expect(old.kpis.logoChurn).toBeCloseTo(0.5);
+    expect(old.kpis.nrr).toBeCloseTo(99 / 138);
+  });
+});

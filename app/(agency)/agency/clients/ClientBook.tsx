@@ -29,11 +29,6 @@ function sortValue(c: AgencyClient, key: SortKey): number | string {
   return typeof v === "number" ? v : String(v).toLowerCase();
 }
 
-/** Tiny illustrative growth trail derived from the score (no per-client series in the model). */
-function trail(score: number): number[] {
-  return [score - 9, score - 6, score - 7, score - 3, score - 1, score];
-}
-
 /** Band the growth score to a token colour — the number carries the meaning, the ring is a supplement. */
 function scoreBand(score: number): string {
   if (score >= 75) return "text-primary";
@@ -82,9 +77,12 @@ export function ClientBook({ clients, plans }: { clients: AgencyClient[]; plans:
             >
               {c.name}
             </Link>
-            <span className="hidden sm:block">
-              <Sparkline data={trail(c.growthScore)} width={56} height={20} />
-            </span>
+            {/* Measured Growth Scores only — no trail is drawn until there are two real points. */}
+            {c.trend && c.trend.length >= 2 ? (
+              <span className="hidden sm:block" title={`Growth Score over the last ${c.trend.length} syncs`}>
+                <Sparkline data={c.trend} width={56} height={20} />
+              </span>
+            ) : null}
           </div>
           <div className="mt-0.5 text-[11px] text-faint">{plans[c.plan] ?? c.plan}</div>
         </div>

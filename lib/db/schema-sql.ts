@@ -123,6 +123,17 @@ export const ADDITIVE_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS \"review_reply_ws_idx\" ON \"review_reply\" (\"workspace_id\");",
   "CREATE INDEX IF NOT EXISTS \"app_user_ws_role_idx\" ON \"app_user\" (\"workspace_id\",\"role\");",
   "CREATE INDEX IF NOT EXISTS \"workspace_org_idx\" ON \"workspace\" (\"organization_id\");",
+
+  // Internal ops console (2026-09). Daily platform history, so churn and NRR
+  // have a "then" to compare against; and the operator's fraud-triage ledger.
+  "CREATE TABLE IF NOT EXISTS \"platform_snapshot\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"day\" text NOT NULL,\n\t\"captured_at\" text NOT NULL,\n\t\"tenants\" jsonb NOT NULL,\n\t\"kpis\" jsonb NOT NULL\n);",
+  "CREATE UNIQUE INDEX IF NOT EXISTS \"platform_snapshot_day_uq\" ON \"platform_snapshot\" USING btree (\"day\");",
+  "CREATE TABLE IF NOT EXISTS \"fraud_triage\" (\n\t\"flag_id\" text PRIMARY KEY NOT NULL,\n\t\"workspace_id\" text NOT NULL,\n\t\"decision\" text NOT NULL,\n\t\"operator\" text NOT NULL,\n\t\"note\" text,\n\t\"at\" text NOT NULL\n);",
+  "CREATE INDEX IF NOT EXISTS \"fraud_triage_ws_idx\" ON \"fraud_triage\" (\"workspace_id\");",
+  // Platform-wide reads the ops console runs on every page: the audit ledger
+  // ordered by time across tenants, and the fraud detector's request window.
+  "CREATE INDEX IF NOT EXISTS \"audit_log_at_idx\" ON \"audit_log\" (\"at\");",
+  "CREATE INDEX IF NOT EXISTS \"review_request_created_idx\" ON \"review_request\" (\"created_at\");",
 ];
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -247,6 +258,9 @@ export const TENANT_SCOPED_TABLES: readonly TenantScopedTable[] = [
   // reads here would expose sending credentials, so it is scoped like any
   // other credential table.
   { table: "email_credential", tenantColumn: "workspace_id" },
+  // An operator's decision about one tenant's capture signal — it is a record
+  // about that tenant, so it is isolated with the tenant's rows.
+  { table: "fraud_triage", tenantColumn: "workspace_id" },
   { table: "gbp_task", tenantColumn: "workspace_id" },
   { table: "google_credential", tenantColumn: "workspace_id" },
   { table: "instagram_credential", tenantColumn: "workspace_id" },
@@ -286,6 +300,13 @@ export const UNSCOPED_TABLES: readonly { table: string; reason: string }[] = [
       "No workspace_id column; looked up by token_hash before the tenant is " +
       "known. Needs an additive workspace_id + backfill before it can be " +
       "covered. Currently protected only by token unguessability.",
+  },
+  {
+    table: "platform_snapshot",
+    reason:
+      "Platform-wide daily aggregate written by the ops cron; it is a roll-up " +
+      "over every tenant and carries no tenant key by design. Read and " +
+      "written only by platform_admin code paths (lib/actions.ts guards).",
   },
 ];
 

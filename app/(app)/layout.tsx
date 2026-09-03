@@ -44,7 +44,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     : session.role === "platform_admin" && session.homeWorkspaceId
       ? "Foundly support"
       : null;
-  const actingMode = session.role === "platform_admin" ? "support" : "agency";
+  // An agency admin can also open the agency's OWN workspace (its listing);
+  // the banner then says so instead of "Managing X as X".
+  const actingMode =
+    session.role === "platform_admin"
+      ? "support"
+      : session.homeWorkspaceId === session.workspaceId
+        ? "self"
+        : "agency";
 
   return (
     <>

@@ -3,12 +3,24 @@ import type {
   Channel,
   DeliveryIncident,
   DurabilityRecord,
+  FraudTriage,
   PlanTier,
   PlatformCoverage,
+  PlatformHistoryRecord,
   PlatformSnapshot,
   PlatformTenant,
   Region,
 } from "@/lib/data/types";
+import {
+  FRAUD_SIGNALS_RUN,
+  detectFraud,
+  type FraudCustomerRow,
+  type FraudRequestRow,
+  type FraudReviewRow,
+  type FraudStaffRow,
+  type FraudUserRow,
+} from "./fraud";
+import { computeRetention } from "./retention";
 
 /**
  * Platform-wide roll-up for the internal ops console — the pure half.
@@ -60,12 +72,33 @@ export interface DurabilityRow {
   vanished: number;
 }
 
+/** Raw rows the fraud detectors read (lib/platform/fraud.ts). */
+export interface FraudAggregateInput {
+  requests: FraudRequestRow[];
+  reviews: FraudReviewRow[];
+  customers: FraudCustomerRow[];
+  staff: FraudStaffRow[];
+  users: FraudUserRow[];
+  triage: FraudTriage[];
+}
+
 export interface PlatformAggregateInput {
   workspaces: PlatformWorkspaceRow[];
   deliveryFailures: DeliveryFailureRow[];
   durability: DurabilityRow[];
   reviewsLast7d: number;
   now: Date;
+  /**
+   * Omitted → fraud is reported as not covered (the memory provider's demo
+   * fixture, and any caller that did not fetch the rows).
+   */
+  fraud?: FraudAggregateInput;
+  /**
+   * Stored daily snapshots. Omitted → retention is reported as not covered.
+   * With history present but too short, it is still not covered, and the
+   * snapshot says how many days exist so the console can say when it will be.
+   */
+  history?: PlatformHistoryRecord[];
 }
 
 const STATUS_RANK: Record<PlatformTenant["status"], number> = {
@@ -181,19 +214,31 @@ export function aggregatePlatform(input: PlatformAggregateInput): PlatformSnapsh
   const paying = tenants.filter((t) => t.status === "active" || t.status === "past_due").length;
   const trialing = tenants.filter((t) => t.status === "trialing").length;
 
+  // Fraud: only when the caller fetched the rows. Signals are scoped to the
+  // roster above, so demo, ops and test workspaces can never raise a flag.
+  const fraudFlags = input.fraud
+    ? detectFraud({ ...input.fraud, tenantNameByWorkspace: nameByWorkspace, now: input.now })
+    : [];
+
+  // Retention: needs stored history at least RETENTION_REQUIRED_DAYS old.
+  const retention = input.history
+    ? computeRetention({ current: tenants, history: input.history, now: input.now })
+    : null;
+
   const coverage: PlatformCoverage = {
     tenants: true,
     billing: true,
     delivery: true,
     durability: true,
-    fraud: false,
-    retention: false,
+    fraud: Boolean(input.fraud),
+    ...(input.fraud ? { fraudSignals: FRAUD_SIGNALS_RUN } : {}),
+    retention: retention?.measured ?? false,
   };
 
   return {
     tenants,
     deliveryIncidents,
-    fraudFlags: [],
+    fraudFlags,
     durability,
     kpis: {
       totalTenants: tenants.length,
@@ -202,12 +247,14 @@ export function aggregatePlatform(input: PlatformAggregateInput): PlatformSnapsh
       // Share of tenants that are paying, among those paying or still in
       // trial. Not a cohort conversion rate — the console captions it as such.
       trialConversion: paying + trialing > 0 ? paying / (paying + trialing) : 0,
-      logoChurn: 0,
-      nrr: 0,
+      logoChurn: retention?.logoChurn ?? 0,
+      nrr: retention?.nrr ?? 0,
       weeklyDetectedReviews: input.reviewsLast7d,
     },
     measuredAt: input.now.toISOString(),
     coverage,
     testAccountsExcluded,
+    ...(retention?.retention ? { retention: retention.retention } : {}),
+    ...(retention ? { history: retention.history } : {}),
   };
 }
