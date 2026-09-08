@@ -40,6 +40,7 @@ import type {
   Milestone,
   Notification,
   BusinessDetailsPatch,
+  WebsiteEvidenceSnapshot,
   FraudTriage,
   PlatformAuditEntry,
   PlatformHistoryRecord,
@@ -586,6 +587,11 @@ export interface DataProvider {
    * connected; these fill the gap for workspaces that are not.
    */
   updateBusinessDetails(workspaceId: string, patch: BusinessDetailsPatch): Promise<void>;
+  /**
+   * Store the latest crawl of the owner's website. Replaces the previous
+   * snapshot wholesale — a rescan is a new observation, not a merge.
+   */
+  saveWebsiteEvidence(workspaceId: string, snapshot: WebsiteEvidenceSnapshot): Promise<void>;
   /**
    * Add one suggestion to the inbox. Used by the owner-initiated content path,
    * which has no audit finding behind it — the audit builder still owns every

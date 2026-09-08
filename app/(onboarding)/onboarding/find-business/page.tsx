@@ -19,8 +19,8 @@ export default async function FindBusinessPage() {
           ? "Search your real Google listing — we'll wire review requests and QR codes straight to it."
           : "We'll use the details from your sign-up for now — Google lookup can be connected later."
       }
-      continueHref="/onboarding/business-type"
-      skipHref="/onboarding/business-type"
+      continueHref="/onboarding/website"
+      skipHref="/onboarding/website"
       stepDone={checklist.stepDone}
     >
       <BusinessSearch

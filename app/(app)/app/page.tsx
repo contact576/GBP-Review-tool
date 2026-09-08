@@ -4,6 +4,7 @@ import { getData } from "@/lib/data";
 import { buildDashboardModel } from "@/lib/data/dashboard";
 import { Icon, type IconName } from "@/components/icons";
 import { TaskCard } from "@/components/app/TaskCard";
+import { GettingStartedCard } from "@/components/app/GettingStartedCard";
 import { DashboardGrowthChart } from "@/components/app/DashboardGrowthChart";
 import { DashboardVisibilityMap } from "@/components/app/DashboardVisibilityMap";
 import type { DashboardSignal } from "@/lib/data/dashboard";
@@ -43,6 +44,10 @@ export default async function DashboardPage() {
         <h1 className="text-[24px] font-extrabold tracking-tight text-ink">Good morning, {data.owner.name.split(" ")[0]}</h1>
         <p className="mt-1 text-[13px] font-semibold text-sub">{data.location.name}</p>
       </div>
+
+      {/* Until setup is complete and a real invite has gone out, the first
+          thing on the dashboard is what to do next — same signals as onboarding. */}
+      {!data.workspace.isDemo ? <GettingStartedCard data={data} /> : null}
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.04fr)_minmax(0,.96fr)]">
         <section className="premium-card flex min-h-[314px] flex-col overflow-hidden" aria-labelledby="growth-title">

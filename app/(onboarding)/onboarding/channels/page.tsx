@@ -27,7 +27,7 @@ export default async function ChannelsPage() {
 
   return (
     <Step
-      current={4}
+      current={5}
       title="How should invites go out?"
       subtitle={
         email.live

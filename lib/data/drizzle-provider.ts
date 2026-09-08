@@ -94,6 +94,7 @@ import type {
   MonitoringRun,
   AiContentAsset,
   BusinessDetailsPatch,
+  WebsiteEvidenceSnapshot,
   AgencyClient,
   AgencyClientLive,
   FraudTriage,
@@ -301,6 +302,7 @@ function mapLocation(row: LocationRow): Location {
     suggestionInbox: row.suggestionInbox ?? undefined,
     website: row.website ?? undefined,
     ownerDescription: row.ownerDescription ?? undefined,
+    websiteEvidence: row.websiteEvidence ?? undefined,
     profile: {
       description: row.profileDescription,
       primaryCategory: row.profilePrimaryCategory,
@@ -690,6 +692,7 @@ function buildLocationRow(l: Location): typeof t.location.$inferInsert {
     suggestionInbox: l.suggestionInbox,
     website: l.website ?? null,
     ownerDescription: l.ownerDescription ?? null,
+    websiteEvidence: l.websiteEvidence ?? null,
   };
 }
 
@@ -4372,6 +4375,14 @@ export const drizzleProvider: DataProvider = {
     if (patch.ownerDescription !== undefined) set.ownerDescription = patch.ownerDescription || null;
     if (!Object.keys(set).length) return;
     await db.update(t.location).set(set).where(eq(t.location.workspaceId, workspaceId));
+  },
+
+  async saveWebsiteEvidence(workspaceId: string, snapshot: WebsiteEvidenceSnapshot) {
+    const db = getDb();
+    await db
+      .update(t.location)
+      .set({ websiteEvidence: snapshot })
+      .where(eq(t.location.workspaceId, workspaceId));
   },
 
   async appendProfileSuggestion(workspaceId: string, suggestion: ProfileSuggestion) {

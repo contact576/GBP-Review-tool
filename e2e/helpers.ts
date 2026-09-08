@@ -70,10 +70,35 @@ export async function captureCustomer(
   ).toBeVisible();
 }
 
-/** Scan a QR slug and land on the tokenized customer review page. */
+/**
+ * The product tour auto-starts on an account's first visit to the dashboard
+ * (per browser). Close it when it is up so the page underneath is clickable;
+ * pass `expectShown` to assert it really did appear.
+ */
+export async function dismissTour(page: Page, expectShown = false): Promise<void> {
+  const dialog = page.getByRole("dialog", { name: /Your dashboard|Tour/ });
+  if (expectShown) await expect(dialog).toBeVisible();
+  if (await dialog.isVisible().catch(() => false)) {
+    await page.getByRole("button", { name: "Close tour" }).click();
+    await expect(dialog).toBeHidden();
+  }
+}
+
+/**
+ * A fresh review link opens on a welcome screen that explains the three steps
+ * and how long they take. Step through it when it is there; a returning
+ * session (already rated) skips it, so its absence is not an error.
+ */
+export async function beginReview(page: Page): Promise<void> {
+  const start = page.getByRole("button", { name: "Start my review" });
+  if (await start.isVisible().catch(() => false)) await start.click();
+}
+
+/** Scan a QR slug, land on the tokenized customer review page, and pass the welcome. */
 export async function scanQr(page: Page, slug: string): Promise<void> {
   await page.goto(`/q/${slug}`);
   await page.waitForURL(/\/r\/[A-Za-z0-9_]+/);
+  await beginReview(page);
 }
 
 /**

@@ -9,7 +9,7 @@ import { buildSetupChecklist } from "../_components/setup-checklist";
  * Honest finish screen. Every row reads a real workspace signal (see
  * `buildSetupChecklist`), the count is the actual count, and the gold
  * celebration is withheld until setup is genuinely complete — someone who
- * skipped every step lands here on 0/7 with the highest-value next step named.
+ * skipped every step lands here on 0/8 with the highest-value next step named.
  */
 export default async function FinishPage() {
   const data = await getData();
@@ -21,7 +21,7 @@ export default async function FinishPage() {
   return (
     <div className="flex min-h-[calc(100dvh-57px)] flex-col">
       <div className="flex-1 space-y-6 pb-6 pt-6">
-        <StepTimeline current={7} stepDone={checklist.stepDone} />
+        <StepTimeline current={8} stepDone={checklist.stepDone} />
 
         {/* Header — the trophy is reserved for a genuinely finished setup. */}
         <div className="flex flex-col items-center pt-2 text-center">

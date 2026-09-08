@@ -16,6 +16,7 @@ import { Icon, type IconName } from "@/components/icons";
 
 export const ONBOARDING_STEPS: { label: string; icon: IconName }[] = [
   { label: "Find business", icon: "search" },
+  { label: "Website", icon: "external" },
   { label: "Business type", icon: "grid" },
   { label: "Connect Google", icon: "google" },
   { label: "Channels", icon: "send" },

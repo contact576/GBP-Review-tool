@@ -9,13 +9,13 @@ import { formatRelative } from "@/lib/utils/format";
 import { SettingsShell } from "../SettingsShell";
 import { Callout, SettingsSection, SpecList, SpecRow } from "../SettingsUI";
 import { SyncGoogleButton } from "@/components/app/SyncGoogleButton";
-import { getIndustry } from "@/lib/industries";
+import { gbpServiceLabels, getIndustry, resolveServiceOptions } from "@/lib/industries";
 import {
   AEO_QUESTION_LIMIT,
   REVIEW_PICKER_LIMIT,
 } from "@/components/app/business-services";
 import { BusinessDetailsForm } from "./BusinessDetailsForm";
-import { BusinessServicesForm } from "./BusinessServicesForm";
+import { DetectedServicesPanel, type DetectedService } from "./DetectedServicesPanel";
 
 export default async function BusinessSettingsPage() {
   const data = await getData();
@@ -25,14 +25,34 @@ export default async function BusinessSettingsPage() {
   const snapshot = loc.gbpSnapshot;
   const audit = loc.gbpAudit;
 
-  // The owner's own service list — the middle tier of `resolveServiceOptions`,
-  // read by the customer review picker and by the AI-Visibility question set.
-  const savedServices = data.workspace.industryConfig?.customServices ?? [];
+  // Services are read, never typed: the synced Google profile first, then the
+  // website crawl. Both feed the customer review picker and the AI-Visibility
+  // question set through `resolveServiceOptions`; the owner's only control is
+  // switching a detected service off.
   const industry = getIndustry(data.workspace.vertical || loc.vertical);
-  // Null means no Business Profile snapshot exists yet, which is not the same
-  // as a synced profile that lists zero services.
-  const googleServiceCount = snapshot ? (snapshot.location.serviceItems ?? []).length : null;
-  const googleSupplies = googleServiceCount !== null && googleServiceCount > 0;
+  const excludedServices = data.workspace.industryConfig?.excludedServices ?? [];
+  const websiteEvidence = loc.websiteEvidence;
+  const detectedServices: DetectedService[] = (() => {
+    const seen = new Set<string>();
+    const out: DetectedService[] = [];
+    const push = (label: string, source: DetectedService["source"]) => {
+      const key = label.trim().toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      out.push({ label: label.trim(), source });
+    };
+    for (const label of gbpServiceLabels(snapshot?.location.serviceItems)) push(label, "google_profile");
+    for (const label of websiteEvidence?.facts.services ?? []) push(label, "website");
+    return out;
+  })();
+  const resolvedServices = resolveServiceOptions({
+    gbpServiceItems: snapshot?.location.serviceItems,
+    websiteServices: websiteEvidence?.facts.services,
+    ownerServices: data.workspace.industryConfig?.customServices,
+    catalogServices: industry.services,
+    excluded: excludedServices,
+  });
+  const websiteOnFile = snapshot?.location.websiteUri || loc.website || null;
 
   const rows: { label: string; value: string }[] = [
     { label: "Business name", value: loc.name },
@@ -124,21 +144,23 @@ export default async function BusinessSettingsPage() {
         />
       </SettingsSection>
 
-      {/* Owner-entered service list — feeds the review picker and AI Visibility */}
+      {/* Detected services — read from Google and the website, never typed */}
       <SettingsSection
-        kicker="Entered by you"
-        title="Services you offer"
+        kicker="Read from your Google profile and website"
+        title="Services customers can pick"
         action={
-          <Badge tone={savedServices.length ? "primary" : "neutral"}>
-            {savedServices.length ? `${savedServices.length} saved` : "None saved"}
+          <Badge tone={detectedServices.length ? "primary" : "neutral"}>
+            {detectedServices.length
+              ? `${detectedServices.length} detected · ${resolvedServices.source === "catalog" ? 0 : resolvedServices.services.length} showing`
+              : "Using industry examples"}
           </Badge>
         }
       >
         <p className="text-[14px] leading-relaxed text-sub">
-          The services a customer would recognise, in the words they would use. Two
-          places read this list, and with nothing saved both fall back to generic
-          examples for {industry.label} taken from our industry catalog rather than
-          from your business.
+          When a customer opens their review link, the first question is what they came in
+          for. Those options are read from what you already publish — your Google Business
+          Profile first, then your website — so they are real, in your words, and never typed
+          in twice. Switch off anything that isn&apos;t a service.
         </p>
 
         <ul className="mt-4 space-y-2">
@@ -146,43 +168,37 @@ export default async function BusinessSettingsPage() {
             icon="chat"
             title="Review page service picker"
             detail={
-              googleSupplies
-                ? `Your synced Google profile already supplies ${googleServiceCount} of these options. Yours are offered after those, to a combined ${REVIEW_PICKER_LIMIT}.`
-                : `The service options a customer picks from, up to ${REVIEW_PICKER_LIMIT}.`
+              resolvedServices.source === "catalog"
+                ? `Showing ${industry.label} examples until a real list is detected. Up to ${REVIEW_PICKER_LIMIT} options.`
+                : `Showing ${Math.min(resolvedServices.services.length, REVIEW_PICKER_LIMIT)} real ${resolvedServices.services.length === 1 ? "option" : "options"} (${resolvedServices.fromGoogleProfile ? "Google profile" : "website"} first). The experience chips a customer sees are tuned to the one they pick.`
             }
           />
           <UsedInRow
             icon="sparkles"
             title="AI Visibility questions"
             detail={
-              googleSupplies
-                ? `Not read while your Google profile lists services — the run uses those ${googleServiceCount} instead.`
-                : `The first ${AEO_QUESTION_LIMIT} are what each question is built from.`
+              resolvedServices.source === "catalog"
+                ? `Built from ${industry.label} examples until a real list is detected — the first ${AEO_QUESTION_LIMIT}.`
+                : `Built from the first ${AEO_QUESTION_LIMIT} of the same list, same exclusions.`
             }
           />
         </ul>
 
-        {savedServices.length === 0 ? (
-          <Callout tone="warning" icon="alert" className="mt-4">
-            Nothing saved yet, so both of those are running on catalog examples for{" "}
-            {industry.label}. They are our guess at a typical business, not a record of
-            what you sell.
-          </Callout>
-        ) : null}
-
         <div className="mt-4 border-t border-hairline pt-4">
-          <BusinessServicesForm
-            savedServices={savedServices}
-            suggestions={[...industry.services]}
+          <DetectedServicesPanel
+            detected={detectedServices}
+            initialExcluded={excludedServices}
+            websiteUrl={websiteOnFile}
+            websiteScannedAt={websiteEvidence?.status === "synced" ? websiteEvidence.observedAt : null}
+            websiteError={websiteEvidence && websiteEvidence.status !== "synced" ? websiteEvidence.error ?? "Could not read the site." : null}
+            catalogExamples={[...industry.services]}
             industryLabel={industry.label}
-            googleSuppliesServices={googleSupplies}
           />
         </div>
 
         <Callout tone="info" icon="lock" className="mt-4">
-          Saved in Foundly only. Nothing here is written to your Google Business
-          Profile, and the Services row in the Google capability inventory below counts
-          only what Google itself returns for this location.
+          Read-only evidence. Nothing here is written to your Google Business Profile or your
+          website; hiding a service only changes what Foundly shows.
         </Callout>
       </SettingsSection>
 

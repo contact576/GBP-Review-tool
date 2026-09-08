@@ -1644,6 +1644,11 @@ export const memoryProvider: DataProvider = {
     if (patch.ownerDescription !== undefined) data.location.ownerDescription = patch.ownerDescription || undefined;
   },
 
+  async saveWebsiteEvidence(workspaceId, snapshot) {
+    const data = mustDb(workspaceId);
+    data.location.websiteEvidence = snapshot;
+  },
+
   async appendProfileSuggestion(workspaceId, suggestion) {
     if (suggestion.workspaceId !== workspaceId) throw new Error("Suggestion workspace mismatch.");
     const data = mustDb(workspaceId);

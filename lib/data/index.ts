@@ -277,10 +277,17 @@ export async function currentSessionVersion(userId: string): Promise<number | nu
 /** Public review-widget payload for an embeddable QR slug (no session). */
 export interface WidgetData {
   business: string;
+  city: string;
+  /** Google's own aggregate for the listing (from Places), never a local average. */
   rating: number;
   reviewCount: number;
   reviewUrl: string;
-  reviews: { author: string; rating: number; text: string }[];
+  /** The QR slug, so the widget's "leave a review" can start a guided session. */
+  slug: string;
+  /** True when the aggregate is backed by a linked Google listing. */
+  googleLinked: boolean;
+  /** Recent 4–5★ reviews that have text and have not vanished, newest first. */
+  reviews: { author: string; rating: number; text: string; publishedAt: string }[];
 }
 
 export async function getWidgetData(slug: string): Promise<WidgetData | null> {
@@ -289,15 +296,19 @@ export async function getWidgetData(slug: string): Promise<WidgetData | null> {
     if (!wsId) continue;
     const data = await loadWorkspaceData(provider, wsId);
     if (!data) continue;
-    const reviews = data.reviews
-      .filter((r) => r.text.trim().length > 0 && r.rating >= 4)
-      .slice(0, 6)
-      .map((r) => ({ author: r.author, rating: r.rating, text: r.text }));
+    const reviews = [...data.reviews]
+      .filter((r) => r.text.trim().length > 0 && r.rating >= 4 && r.durability !== "vanished")
+      .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
+      .slice(0, 8)
+      .map((r) => ({ author: r.author, rating: r.rating, text: r.text, publishedAt: r.publishedAt }));
     return {
       business: data.location.name,
+      city: data.location.city,
       rating: data.location.rating,
       reviewCount: data.location.reviewCount,
       reviewUrl: data.location.reviewUrl,
+      slug,
+      googleLinked: Boolean(data.location.googlePlaceId),
       reviews,
     };
   }

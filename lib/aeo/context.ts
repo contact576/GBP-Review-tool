@@ -49,14 +49,24 @@ function resolveServices(
   data: AeoContextSource,
   industryServices: readonly string[],
 ): { values: string[]; source: AeoServicesSource } {
-  const fromProfile = clean(
+  const excluded = new Set(
+    (data.workspace.industryConfig?.excludedServices ?? []).map((value) => value.trim().toLowerCase()),
+  );
+  const keep = (values: string[]) => values.filter((value) => !excluded.has(value.toLowerCase()));
+
+  const fromProfile = keep(clean(
     (data.location.gbpSnapshot?.location.serviceItems ?? []).map(
       (item) => item.name ?? item.categoryName ?? "",
     ),
-  );
+  ));
   if (fromProfile.length > 0) return { values: fromProfile, source: "google_profile" };
 
-  const fromSettings = clean(data.workspace.industryConfig?.customServices ?? []);
+  // The owner's own website, crawled when they connected it. Same exclusions
+  // apply, so a mis-detected heading they switched off never becomes a query.
+  const fromWebsite = keep(clean(data.location.websiteEvidence?.facts.services ?? []));
+  if (fromWebsite.length > 0) return { values: fromWebsite, source: "website" };
+
+  const fromSettings = keep(clean(data.workspace.industryConfig?.customServices ?? []));
   if (fromSettings.length > 0) return { values: fromSettings, source: "workspace_settings" };
 
   const fromCatalog = clean([...industryServices]);
@@ -96,6 +106,7 @@ function firstNonEmpty(values: (string | undefined)[]): string {
 /** Human label for where the service list came from — shown in the UI. */
 export const SERVICES_SOURCE_COPY: Record<AeoServicesSource, string> = {
   google_profile: "services listed on your Google profile",
+  website: "services read from your website",
   workspace_settings: "services saved in your workspace settings",
   industry_catalog: "typical services for the industry you selected",
   none: "no service list yet",

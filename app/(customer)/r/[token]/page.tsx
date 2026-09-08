@@ -11,18 +11,20 @@ export default async function ReviewPage({ params }: { params: Promise<{ token: 
 
   const { location, staffName, serviceHint, industryKey, industryConfig, request } = result;
   // Industry catalog is the single source of attribute chips, with the owner's
-  // own custom values layered in front of the catalog defaults.
-  // Positive chips come first, then the neutral/experience chips.
+  // own custom values layered in front of the catalog defaults. The customer
+  // page re-orders these per service (lib/industries/service-attributes.ts), so
+  // positive and neutral chips travel separately.
   const industry = resolveWorkspaceIndustry(industryKey ?? location.vertical, industryConfig);
-  const seeds = [...industry.attributes, ...industry.neutralAttributes];
-  // Services, though, prefer what the business actually publishes on Google
-  // over anything we guessed for them: real profile services first, then the
-  // owner's own list, then the static catalog. `gbpSnapshot` is absent until
-  // the profile is synced, in which case this is exactly the old behaviour.
+  // Services are never typed in: real Google profile services first, then the
+  // ones read off the business's own website, then (legacy) owner list, and
+  // the static catalog only when nothing real exists. Anything the owner
+  // switched off in Settings is dropped from every tier.
   const serviceOptions = resolveServiceOptions({
     gbpServiceItems: location.gbpSnapshot?.location.serviceItems,
+    websiteServices: location.websiteEvidence?.facts.services,
     ownerServices: industryConfig?.customServices,
     catalogServices: industry.services,
+    excluded: industryConfig?.excludedServices,
   });
 
   return (
@@ -38,6 +40,13 @@ export default async function ReviewPage({ params }: { params: Promise<{ token: 
             <span className="truncate">{location.city}</span>
           </div>
         </div>
+        {location.rating > 0 && location.reviewCount > 0 ? (
+          <div className="flex shrink-0 items-center gap-1 text-[12px] text-sub">
+            <Icon name="star-fill" size={13} className="text-star" />
+            <span className="tabular-nums font-semibold text-ink">{location.rating.toFixed(1)}</span>
+            <span className="tabular-nums text-faint">({location.reviewCount.toLocaleString()})</span>
+          </div>
+        ) : null}
       </header>
 
       <ReviewFlow
@@ -50,7 +59,8 @@ export default async function ReviewPage({ params }: { params: Promise<{ token: 
         staffName={staffName}
         serviceOptions={serviceOptions.services}
         serviceOptionsSource={serviceOptions.source}
-        attributeSeeds={seeds}
+        positiveSeeds={industry.attributes}
+        neutralSeeds={industry.neutralAttributes}
         initialStatus={request.status}
         initialRating={request.rating}
       />

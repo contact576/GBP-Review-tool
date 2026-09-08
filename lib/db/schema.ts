@@ -10,6 +10,7 @@ import {
 import type {
   WhiteLabelConfig,
   IndustryConfig,
+  WebsiteEvidenceSnapshot,
   WorkspaceSettings,
   Subscription,
   Campaign,
@@ -125,6 +126,8 @@ export const location = pgTable("location", {
   website: text("website"),
   /** Owner-entered description, used when Google has not supplied one. */
   ownerDescription: text("owner_description"),
+  /** Latest crawl of the owner's website (services, contact facts, socials). */
+  websiteEvidence: jsonb("website_evidence").$type<WebsiteEvidenceSnapshot>(),
 });
 
 export const appUser = pgTable("app_user", {

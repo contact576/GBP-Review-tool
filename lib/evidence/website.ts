@@ -10,6 +10,59 @@ const MAX_PAGES = 5;
 const MAX_BYTES = 1_500_000;
 const FETCH_TIMEOUT_MS = 10_000;
 
+/** Most services kept from a crawl — beyond this the review picker shows none of them anyway. */
+export const MAX_SERVICES = 12;
+
+/** Paths where a business lists what it sells. */
+const SERVICE_PATH = /service|treatment|procedure|menu|what-we-do|what_we_do|offer|solution|pricing|specialt|program|class/i;
+
+/**
+ * Link text and headings that name a section, not a service. A crawl that
+ * returned "Our Services" as a service is the exact failure this list exists
+ * to prevent.
+ */
+const GENERIC_LABELS = new Set([
+  "services", "our services", "all services", "service", "view services", "see all services", "more services",
+  "treatments", "our treatments", "menu", "our menu", "view menu", "full menu",
+  "what we do", "what we offer", "our work", "our expertise", "solutions", "specialties", "specialities",
+  "home", "about", "about us", "our story", "who we are", "team", "our team", "meet the team", "staff",
+  "contact", "contact us", "get in touch", "location", "locations", "hours", "directions", "find us",
+  "reviews", "testimonials", "gallery", "portfolio", "blog", "news", "faq", "faqs", "resources", "careers", "jobs",
+  "pricing", "prices", "rates", "packages", "plans", "book", "book now", "book online", "schedule", "appointments",
+  "request a quote", "get a quote", "free quote", "free estimate", "call now", "call us", "learn more", "read more",
+  "why choose us", "why us", "our process", "how it works", "privacy policy", "terms", "terms of service", "sitemap",
+  "login", "log in", "sign in", "sign up", "my account", "cart", "shop", "products", "skip to content",
+]);
+
+/** Marketing verbs and pronouns that mark a sentence rather than a label. */
+const SENTENCE_MARKERS = /\b(we|our|you|your|us|the best|welcome|call|today|now|click|learn|discover|get|book|free)\b|[.!?:]$|\?|!/i;
+
+/** True when a string reads like a service label rather than a heading or slogan. */
+export function looksLikeServiceLabel(raw: string): boolean {
+  const value = raw.trim().replace(/\s+/g, " ");
+  if (value.length < 3 || value.length > 60) return false;
+  const words = value.split(" ");
+  if (words.length > 6) return false;
+  if (GENERIC_LABELS.has(value.toLowerCase())) return false;
+  if (SENTENCE_MARKERS.test(value)) return false;
+  if (/^\d+$/.test(value)) return false;
+  if (!/[a-z]/i.test(value)) return false;
+  return true;
+}
+
+/** Title Case for shouting labels; leave mixed-case labels alone. */
+function tidyLabel(raw: string): string {
+  const value = raw.trim().replace(/\s+/g, " ").replace(/\s*[»›>]+\s*$/, "");
+  if (value === value.toUpperCase() && value.length > 3) {
+    return value
+      .toLowerCase()
+      .split(" ")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  }
+  return value;
+}
+
 export async function collectWebsiteEvidence(
   requestedUrl: string | undefined,
   observedAt: string,
@@ -34,16 +87,30 @@ export async function collectWebsiteEvidence(
       const candidate = queue.shift();
       if (!candidate || seen.has(candidate)) continue;
       seen.add(candidate);
-      const response = await fetchWebsiteHtml(candidate);
+      let response: { url: string; html: string };
+      try {
+        response = await fetchWebsiteHtml(candidate);
+      } catch (error) {
+        // The entry page must load; a broken inner link must not sink the
+        // whole crawl — skip it and keep the facts already gathered.
+        if (pages.length === 0) throw error;
+        continue;
+      }
       finalUrl ??= response.url;
       const parsed = parseWebsiteHtml(response.html, response.url);
       pages.push(parsed.page);
       mergeFacts(facts, parsed.facts);
-      for (const link of parsed.sameOriginLinks) {
+      // Service-ish pages first: they are where the service list actually
+      // lives, and the page budget is small.
+      const ranked = [...parsed.sameOriginLinks].sort(
+        (a, b) => Number(SERVICE_PATH.test(new URL(b).pathname)) - Number(SERVICE_PATH.test(new URL(a).pathname)),
+      );
+      for (const link of ranked) {
         if (queue.length + pages.length >= MAX_PAGES * 3) break;
         if (!seen.has(link)) queue.push(link);
       }
     }
+    facts.services = facts.services.slice(0, MAX_SERVICES);
     return { status: "synced", observedAt, requestedUrl, finalUrl, pages, facts };
   } catch (error) {
     return { ...empty, error: error instanceof Error ? error.message : "Website evidence fetch failed." };
@@ -78,18 +145,27 @@ export function parseWebsiteHtml(html: string, pageUrl: string): {
       return [];
     }
   }).slice(0, 50);
-  const links = [...html.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>/gi)]
+  // Anchors with their visible text — the text is what names a service in a
+  // nav or a service grid ("Deep Cleaning", "Root Canal"); the href tells us
+  // whether it points at a service page.
+  const anchors = [...html.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)]
     .flatMap((match) => {
-      try { return [new URL(match[1] ?? "", base)]; } catch { return []; }
+      try {
+        return [{ url: new URL(match[1] ?? "", base), text: cleanText(match[2] ?? "") }];
+      } catch {
+        return [];
+      }
     });
+  const links = anchors.map((anchor) => anchor.url);
   const socialProfiles = unique(links
     .filter((url) => /(^|\.)(instagram\.com|facebook\.com|linkedin\.com|youtube\.com|tiktok\.com)$/i.test(url.hostname))
     .map((url) => url.toString()));
   const sameOriginLinks = unique(links
     .filter((url) => url.origin === base.origin && /^https?:$/.test(url.protocol))
-    .filter((url) => /service|treatment|product|about|contact|location|team/i.test(url.pathname))
+    .filter((url) => SERVICE_PATH.test(url.pathname) || /product|about|contact|location|team/i.test(url.pathname))
     .map((url) => { url.hash = ""; return url.toString(); }));
   const jsonLd = parseJsonLd(html);
+  const onServicePage = SERVICE_PATH.test(base.pathname);
   const businessNames = unique([
     ...jsonLd.flatMap((value) => stringsAtKeys(value, new Set(["name", "legalName"]))),
     ...(title ? [title.split(/[|—–-]/)[0]?.trim() ?? title] : []),
@@ -100,10 +176,34 @@ export function parseWebsiteHtml(html: string, pageUrl: string): {
   ].map(normalizePhone).filter((value) => value.length >= 7));
   const emails = unique([...text.matchAll(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g)].map((match) => match[0].toLowerCase()));
   const addresses = unique(jsonLd.flatMap((value) => addressesFromJsonLd(value)));
-  const services = unique([
-    ...jsonLd.flatMap((value) => stringsAtKeys(value, new Set(["makesOffer", "serviceType", "itemOffered"]))),
-    ...headings.filter((heading) => /service|treatment|therapy|repair|consult|product|care|rehab/i.test(heading)),
-  ]).slice(0, 80);
+  /*
+   * Service candidates, most reliable source first:
+   *  1. structured data — offers, offer catalogs, Service entities;
+   *  2. links that point at a service page and read like a label
+   *     ("Deep Cleaning", not "Learn more");
+   *  3. h2/h3 headings ON a service page, which is where a services grid lists
+   *     one service per heading.
+   * A section title such as "Our Services" is filtered out at every step.
+   */
+  const structured = jsonLd.flatMap((value) => [
+    ...stringsAtKeys(value, new Set(["makesOffer", "serviceType", "itemOffered"])),
+    ...serviceNamesFromJsonLd(value),
+  ]);
+  const linkLabels = anchors
+    .filter((anchor) => anchor.url.origin === base.origin && SERVICE_PATH.test(anchor.url.pathname))
+    // A link to the services index itself ("/services") is a section, not a
+    // service; a deeper path ("/services/deep-cleaning") names one.
+    .filter((anchor) => anchor.url.pathname.replace(/\/+$/, "").split("/").filter(Boolean).length >= 2 || onServicePage)
+    .map((anchor) => anchor.text);
+  const servicePageHeadings = onServicePage
+    ? [...withoutNoise.matchAll(/<h[23]\b[^>]*>([\s\S]*?)<\/h[23]>/gi)]
+        .map((match) => cleanText(match[1] ?? ""))
+    : [];
+  const services = unique(
+    [...structured, ...linkLabels, ...servicePageHeadings]
+      .map(tidyLabel)
+      .filter(looksLikeServiceLabel),
+  ).slice(0, MAX_SERVICES * 2);
 
   return {
     page: { url: pageUrl, title, description, headings, textSample: text, images },
@@ -312,6 +412,27 @@ function stringsAtKeys(value: unknown, keys: Set<string>): string[] {
       }
     }
     results.push(...stringsAtKeys(entry, keys));
+  }
+  return results;
+}
+
+/**
+ * Names of `Service` entities and `hasOfferCatalog` items — the two schema.org
+ * shapes `stringsAtKeys` cannot reach because the name sits on the entity, not
+ * under an offer key.
+ */
+function serviceNamesFromJsonLd(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(serviceNamesFromJsonLd);
+  if (!value || typeof value !== "object") return [];
+  const record = value as Record<string, unknown>;
+  const results: string[] = [];
+  const type = record["@type"];
+  const types = Array.isArray(type) ? type : [type];
+  if (types.some((entry) => typeof entry === "string" && /^(Service|Product|MenuItem|Offer)$/i.test(entry))) {
+    if (typeof record.name === "string") results.push(record.name);
+  }
+  for (const entry of Object.values(record)) {
+    if (entry && typeof entry === "object") results.push(...serviceNamesFromJsonLd(entry));
   }
   return results;
 }

@@ -69,6 +69,13 @@ export interface IndustryConfig {
   customLabel?: string;
   customServices?: string[];
   customAttributes?: string[];
+  /**
+   * Detected services (from the Google profile or the website crawl) the
+   * owner has switched off. Services are never typed in by hand — they are
+   * read from real sources — so the owner's only control is exclusion.
+   * Matched case-insensitively.
+   */
+  excludedServices?: string[];
 }
 
 export interface Workspace {
@@ -631,6 +638,12 @@ export interface Location {
    */
   website?: string;
   ownerDescription?: string;
+  /**
+   * Latest crawl of the business's own website, taken when the owner connects
+   * it (onboarding → Website, or Settings → Business → Rescan). Independent of
+   * any Google sync so an unconnected workspace still gets real services.
+   */
+  websiteEvidence?: WebsiteEvidenceSnapshot;
 }
 
 /** Owner-editable business details that do not require a Google connection. */

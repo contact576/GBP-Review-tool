@@ -82,6 +82,9 @@ export const ADDITIVE_STATEMENTS: string[] = [
   "ALTER TABLE \"location\" ADD COLUMN IF NOT EXISTS \"suggestion_inbox\" jsonb;",
   "ALTER TABLE \"location\" ADD COLUMN IF NOT EXISTS \"website\" text;",
   "ALTER TABLE \"location\" ADD COLUMN IF NOT EXISTS \"owner_description\" text;",
+  // Website crawl snapshot (lib/evidence/website.ts) taken when the owner
+  // connects their site. Nullable and additive — "never scanned" reads as null.
+  "ALTER TABLE \"location\" ADD COLUMN IF NOT EXISTS \"website_evidence\" jsonb;",
   // Gmail OAuth sender (Settings → Channels → Connect Gmail). The refresh token
   // reuses encrypted_secret; these carry the mailbox, granted scopes, consent
   // time, and a "needs_reconnect" flag set when a refresh returns invalid_grant.

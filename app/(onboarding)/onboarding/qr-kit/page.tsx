@@ -17,7 +17,7 @@ export default async function QrKitPage() {
 
   return (
     <Step
-      current={5}
+      current={6}
       title={locationQr ? "Your QR kit is ready" : "Your QR kit isn't ready yet"}
       subtitle={
         locationQr

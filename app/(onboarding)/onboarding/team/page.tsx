@@ -10,7 +10,7 @@ export default async function TeamPage() {
 
   return (
     <Step
-      current={7}
+      current={8}
       title="Invite your team"
       subtitle="Each teammate gets their own QR code and lands on your staff leaderboard."
       continueHref="/onboarding/finish"

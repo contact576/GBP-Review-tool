@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
@@ -8,20 +8,29 @@ import { trialLockAllowsPath } from "@/lib/billing/trial";
 import { Icon } from "@/components/icons";
 import { Badge } from "@/components/ds/misc";
 import { ToastProvider } from "@/components/ds/Toast";
+import { ProductTour } from "./ProductTour";
 import { BOTTOM_TABS, MORE_ITEMS, type NavItem } from "./nav";
 import { signOutAction, switchWorkspaceAction } from "@/lib/actions";
 import type { OrganizationWorkspaceSummary } from "@/lib/data/provider";
 
-const DESKTOP_NAV: NavItem[] = [
-  { label: "Overview", href: "/app", icon: "home" },
-  { label: "This week", href: "/app/this-week", icon: "sparkles" },
-  { label: "Content Studio", href: "/app/studio", icon: "pencil" },
-  { label: "Reviews", href: "/app/reviews", icon: "star" },
-  { label: "Visibility", href: "/app/visibility", icon: "map-pin" },
-  { label: "Campaigns", href: "/app/campaigns", icon: "megaphone" },
-  { label: "Customers", href: "/app/customers", icon: "users" },
-  { label: "Analytics", href: "/app/analytics", icon: "chart" },
+const DESKTOP_NAV: (NavItem & { tour: string })[] = [
+  { label: "Overview", href: "/app", icon: "home", tour: "nav-overview" },
+  { label: "This week", href: "/app/this-week", icon: "sparkles", tour: "nav-this-week" },
+  { label: "Content Studio", href: "/app/studio", icon: "pencil", tour: "nav-studio" },
+  { label: "Reviews", href: "/app/reviews", icon: "star", tour: "nav-reviews" },
+  { label: "Visibility", href: "/app/visibility", icon: "map-pin", tour: "nav-visibility" },
+  { label: "Campaigns", href: "/app/campaigns", icon: "megaphone", tour: "nav-campaigns" },
+  { label: "Customers", href: "/app/customers", icon: "users", tour: "nav-customers" },
+  { label: "Analytics", href: "/app/analytics", icon: "chart", tour: "nav-analytics" },
 ];
+
+/** Bottom-tab `data-tour` ids, keyed by href, so the phone tour can spotlight them. */
+const TAB_TOUR: Record<string, string> = {
+  "/app": "tab-overview",
+  "/app/this-week": "tab-this-week",
+  "/app/reviews": "tab-reviews",
+  "/app/customers": "tab-customers",
+};
 
 function isActive(pathname: string, href: string): boolean {
   if (href === "/app") return pathname === "/app";
@@ -76,6 +85,10 @@ export function AppShell({
 
   return (
     <ToastProvider>
+      {/* useSearchParams needs a Suspense boundary; the tour renders nothing until it runs. */}
+      <Suspense fallback={null}>
+        <ProductTour workspaceId={currentWorkspaceId} isDemo={isDemo} />
+      </Suspense>
       <div className="min-h-dvh bg-paper">
         <aside
           className={cn(
@@ -94,6 +107,7 @@ export function AppShell({
                 <Link
                   key={item.href}
                   href={item.href}
+                  data-tour={item.tour}
                   className={cn(
                     "relative mb-1 flex min-h-11 items-center gap-3 rounded-[9px] px-4 text-[14px] font-semibold transition-colors",
                     active
@@ -138,6 +152,7 @@ export function AppShell({
             ) : null}
             <Link
               href="/app/settings/business"
+              data-tour="nav-settings"
               className={cn(
                 "flex items-center gap-2.5 rounded-btn px-3 py-2 text-[13px] font-medium",
                 pathname.startsWith("/app/settings")
@@ -241,6 +256,7 @@ export function AppShell({
             <Link
               key={tab.href}
               href={tab.href}
+              data-tour={TAB_TOUR[tab.href]}
               className={cn(
                 "flex min-h-[56px] flex-1 flex-col items-center justify-center gap-0.5 py-2.5 text-[11px] font-medium",
                 isActive(pathname, tab.href) ? "text-primary" : "text-faint",
@@ -442,6 +458,9 @@ function AccountMenu({
           </Link>
           <Link role="menuitem" href="/app/notifications" onClick={close} className={itemClass}>
             <Icon name="bell" size={16} /> Notifications
+          </Link>
+          <Link role="menuitem" href="/app?tour=1" onClick={close} className={itemClass}>
+            <Icon name="compass" size={16} /> Take the tour
           </Link>
           <div className="my-1 h-px bg-hairline" />
           <form action={signOutAction}>

@@ -131,12 +131,13 @@ export interface GbpServiceItemLike {
 }
 
 /** Where a customer-facing service option came from, most authoritative first. */
-export type ServiceOptionSource = "google_profile" | "owner" | "catalog";
+export type ServiceOptionSource = "google_profile" | "website" | "owner" | "catalog";
 
 export interface ResolvedServiceOptions {
   /**
    * Deduped options in priority order: real Google Business Profile services,
-   * then the owner's own list, then the static industry catalog.
+   * then services read off the business's own website, then any legacy
+   * owner-typed list, then the static industry catalog.
    */
   services: string[];
   /** The highest-priority source that actually contributed an option. */
@@ -145,6 +146,10 @@ export interface ResolvedServiceOptions {
   sources: ServiceOptionSource[];
   /** True when at least one option came from the connected Google profile. */
   fromGoogleProfile: boolean;
+  /** True when at least one option came from the website crawl. */
+  fromWebsite: boolean;
+  /** Detected options the owner switched off, in the order they were seen. */
+  excluded: string[];
 }
 
 /**
@@ -184,12 +189,19 @@ export function gbpServiceLabels(
 
 /**
  * The "what did you come in for?" options, preferring what the business
- * actually publishes on Google over anything we guessed for them.
+ * actually publishes over anything we guessed for them.
  *
- * Priority: real GBP service items → owner-entered services → static catalog.
- * `gbpServiceItems` is null for every workspace until the GBP API is approved,
- * in which case this degrades exactly to today's behaviour and lights up on
- * its own the moment a snapshot exists.
+ * Priority: real GBP service items → services read off the business's own
+ * website → legacy owner-typed list → static catalog. `gbpServiceItems` is
+ * null for every workspace until the GBP API is approved, and
+ * `websiteServices` is null until the owner connects their site; each tier
+ * lights up on its own the moment its source exists.
+ *
+ * Services are never typed in by hand. The owner's one control is `excluded`:
+ * a detected service they switch off is dropped from every tier (matched
+ * case-insensitively) and reported back so the UI can show it as "hidden".
+ * The catalog tier is only reached when nothing real survived, so it can
+ * never sit alongside genuine services.
  *
  * The customer review page and the review-draft API MUST both build their list
  * from this function — the API's allowlist is what stops a real GBP service
@@ -197,30 +209,52 @@ export function gbpServiceLabels(
  */
 export function resolveServiceOptions(input: {
   gbpServiceItems?: readonly GbpServiceItemLike[] | null;
+  websiteServices?: readonly string[] | null;
   ownerServices?: readonly string[] | null;
   catalogServices?: readonly string[] | null;
+  excluded?: readonly string[] | null;
 }): ResolvedServiceOptions {
-  const tiers: { source: ServiceOptionSource; values: string[] }[] = [
+  const excludedKeys = new Set(
+    (input.excluded ?? []).map((value) => (value ?? "").trim().toLowerCase()).filter(Boolean),
+  );
+  const realTiers: { source: ServiceOptionSource; values: string[] }[] = [
     { source: "google_profile", values: gbpServiceLabels(input.gbpServiceItems) },
+    { source: "website", values: [...(input.websiteServices ?? [])] },
     { source: "owner", values: [...(input.ownerServices ?? [])] },
-    { source: "catalog", values: [...(input.catalogServices ?? [])] },
   ];
 
   const seen = new Set<string>();
   const services: string[] = [];
   const sources: ServiceOptionSource[] = [];
-  for (const tier of tiers) {
+  const excluded: string[] = [];
+  const excludedSeen = new Set<string>();
+
+  const take = (tier: { source: ServiceOptionSource; values: string[] }) => {
     let contributed = false;
     for (const value of tier.values) {
       const trimmed = (value ?? "").trim();
       if (trimmed.length === 0) continue;
       const dedupeKey = trimmed.toLowerCase();
+      if (excludedKeys.has(dedupeKey)) {
+        if (!excludedSeen.has(dedupeKey)) {
+          excludedSeen.add(dedupeKey);
+          excluded.push(trimmed);
+        }
+        continue;
+      }
       if (seen.has(dedupeKey)) continue;
       seen.add(dedupeKey);
       services.push(trimmed);
       contributed = true;
     }
     if (contributed) sources.push(tier.source);
+  };
+
+  for (const tier of realTiers) take(tier);
+  // Catalog examples are a stand-in for an empty list, never a supplement to a
+  // real one — mixing guessed services into genuine ones would mislabel both.
+  if (services.length === 0) {
+    take({ source: "catalog", values: [...(input.catalogServices ?? [])] });
   }
 
   return {
@@ -228,6 +262,8 @@ export function resolveServiceOptions(input: {
     source: sources[0] ?? "catalog",
     sources,
     fromGoogleProfile: sources.includes("google_profile"),
+    fromWebsite: sources.includes("website"),
+    excluded,
   };
 }
 
@@ -260,6 +296,7 @@ export interface IndustryConfigLike {
   customLabel?: string;
   customServices?: string[];
   customAttributes?: string[];
+  excludedServices?: string[];
 }
 
 function normalizeCustom(

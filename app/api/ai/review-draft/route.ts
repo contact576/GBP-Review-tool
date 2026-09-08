@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { generateReviewDrafts, makeDraftNonce } from "@/lib/ai/generate";
 import { findRequestByToken, getPublicProviders } from "@/lib/data";
 import { resolveServiceOptions, resolveWorkspaceIndustry } from "@/lib/industries";
+import { allAllowedChips } from "@/lib/industries/service-attributes";
 import {
   boundedNumber,
   boundedString,
@@ -54,12 +55,19 @@ export async function POST(req: Request) {
     // is never silently filtered back out of the prompt.
     const serviceOptions = resolveServiceOptions({
       gbpServiceItems: location.gbpSnapshot?.location.serviceItems,
+      websiteServices: location.websiteEvidence?.facts.services,
       ownerServices: industryConfig?.customServices,
       catalogServices: industry.services,
+      excluded: industryConfig?.excludedServices,
     });
     const allowedServices = new Set(serviceOptions.services.map((s) => s.toLowerCase()));
+    // The page tunes its chips to the chosen service, so the allowlist is built
+    // by the same function over every service it can offer — a chip the
+    // customer could tap is never filtered back out here.
     const allowedChips = new Set(
-      [...industry.attributes, ...industry.neutralAttributes].map((a) => a.toLowerCase()),
+      allAllowedChips(serviceOptions.services, industry.attributes, industry.neutralAttributes).map((a) =>
+        a.toLowerCase(),
+      ),
     );
     const requestedService = boundedString(body.service, 80);
     const service = allowedServices.has(requestedService.toLowerCase())

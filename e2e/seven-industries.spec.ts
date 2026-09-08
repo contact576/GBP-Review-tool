@@ -4,6 +4,7 @@ import {
   uniqueEmail,
   captureCustomer,
   rateExperience,
+  beginReview,
 } from "./helpers";
 
 /**
@@ -108,6 +109,11 @@ for (const s of SCENARIOS) {
     //    panel opens on the service question naming that business.
     await page.goto(`/q/${slug}`);
     await page.waitForURL(/\/r\/[A-Za-z0-9_]+/);
+    // The welcome screen names the business and the public Google link is
+    // already present on it — nothing is gated behind "Start".
+    await expect(page.getByRole("heading", { name: new RegExp(escapeRegex(s.business)) })).toBeVisible();
+    await expect(page.locator('[data-compliance="public-google-link"]')).toBeVisible();
+    await beginReview(page);
     await expect(
       page.getByRole("heading", {
         name: new RegExp(`What did you come to ${escapeRegex(s.business)} for`),
@@ -128,7 +134,11 @@ for (const s of SCENARIOS) {
       );
       await page.getByRole("link", { name: "Copy my words & open Google" }).click();
       await page.waitForURL(/\/thanks/);
-      await expect(page.getByText(/Thank you/i)).toBeVisible();
+      // The thank-you page carries the hand-off: the customer's own words,
+      // a copy-again control, and the same public Google link.
+      await expect(page.getByRole("heading", { name: /finish on Google/i })).toBeVisible();
+      await expect(page.getByText("The team explained the work clearly and treated me with respect.")).toBeVisible();
+      await expect(page.locator('[data-compliance="public-google-link"]')).toBeVisible();
     }
   });
 }

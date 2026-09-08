@@ -82,7 +82,7 @@ export interface AeoRunRecord {
 }
 
 /** Where a service list came from — surfaced so the query set is explainable. */
-export type AeoServicesSource = "google_profile" | "workspace_settings" | "industry_catalog" | "none";
+export type AeoServicesSource = "google_profile" | "website" | "workspace_settings" | "industry_catalog" | "none";
 
 /** The real workspace facts a check is built from. No invented values. */
 export interface AeoBusinessContext {

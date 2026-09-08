@@ -82,6 +82,7 @@ import type {
   AiContentAsset,
   ProfileSuggestion,
   FraudTriageDecision,
+  WebsiteEvidenceSnapshot,
 } from "@/lib/data/types";
 import { prepareProfileMutation, stableStringify } from "@/lib/google/profile-mutation";
 import { executeProfileMutation } from "@/lib/google/mutation-runner";
@@ -113,10 +114,8 @@ import {
 import { executeContentPublication } from "@/lib/google/content-publish-runner";
 import { awardMilestones } from "@/lib/milestones/runner";
 import { createSignedContentAssetUrl } from "@/lib/security/content-asset-signature";
-import {
-  normalizeOwnerServices,
-  ownerServicesProblem,
-} from "@/components/app/business-services";
+import { collectWebsiteEvidence } from "@/lib/evidence/website";
+import { getIndustry, resolveServiceOptions } from "@/lib/industries";
 
 // ── Helpers ─────────────────────────────────────────────────
 async function requireSession(): Promise<Session> {
@@ -1100,83 +1099,217 @@ export async function updateIndustryAction(industryKey: string, config?: Industr
   revalidatePath("/", "layout");
 }
 
-export type BusinessServicesActionResult =
-  | { ok: true; message: string; services: string[] }
+export type WebsiteConnectResult =
+  | {
+      ok: true;
+      message: string;
+      /** What the crawl actually found — the owner sees this before anything is used. */
+      snapshot: WebsiteEvidenceSnapshot;
+      /** Services that will now appear on the review page, exclusions applied. */
+      services: string[];
+    }
   | { ok: false; message: string };
 
 /**
- * The owner's own service list (Settings → Business).
- *
- * This is the middle tier of `resolveServiceOptions`: it sits behind whatever
- * the connected Google profile publishes and in front of the static industry
- * catalog, so saving here replaces guessed catalog defaults on the customer
- * review page and in the AI-Visibility question set.
- *
- * It writes nothing to Google. `provider.updateIndustry` is the only writer of
- * `industryConfig`, so the workspace's existing industry key, custom label and
- * custom attributes are read back and re-sent unchanged — only the service list
- * moves. No business-name field is touched anywhere in this path.
+ * Normalise what an owner types into a website field. Accepts a bare domain,
+ * rejects anything that is not a public http(s) origin. Shared by the
+ * onboarding step and Settings so both agree on what "a website" is.
  */
-export async function updateBusinessServicesAction(
-  services: unknown,
-): Promise<BusinessServicesActionResult> {
-  const { provider, ws, session } = await scoped("owner", "manager");
-  if (!Array.isArray(services)) {
-    return { ok: false, message: "That service list could not be read." };
+function parseOwnerWebsite(raw: string): { ok: true; url: string } | { ok: false; message: string } {
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: false, message: "Enter your website address." };
+  const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return { ok: false, message: "That website address is not a valid URL." };
   }
-  const normalized = normalizeOwnerServices(
-    services.map((entry) => (typeof entry === "string" ? entry : "")),
-  );
-  const problem = ownerServicesProblem(normalized);
-  if (problem) return { ok: false, message: problem };
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return { ok: false, message: "The website must be an http or https address." };
+  }
+  if (!parsed.hostname.includes(".") || parsed.hostname === "localhost") {
+    return { ok: false, message: "Enter a full domain, for example example.com." };
+  }
+  return { ok: true, url: parsed.toString() };
+}
+
+/**
+ * Run the website crawl for a workspace and store the result.
+ *
+ * The crawl is the only place services enter Foundly from a website: it reads
+ * structured data, service-page links and headings (lib/evidence/website.ts),
+ * and the snapshot it returns is stored verbatim — a failed crawl is stored as
+ * a failure with its reason, never as an empty success. The list the owner
+ * sees is the same list `resolveServiceOptions` will give their customers.
+ */
+async function crawlAndStoreWebsite(
+  provider: DataProvider,
+  ws: string,
+  actor: string,
+  url: string,
+): Promise<WebsiteConnectResult> {
+  const snapshot = await collectWebsiteEvidence(url, new Date().toISOString());
+  await provider.saveWebsiteEvidence(ws, snapshot);
+  await provider.appendAuditLog(ws, {
+    id: `audit_${randomBytes(12).toString("hex")}`,
+    workspaceId: ws,
+    actor,
+    action: "business.website_scanned",
+    targetType: "location",
+    targetId: ws,
+    at: new Date().toISOString(),
+    meta: {
+      status: snapshot.status,
+      pages: snapshot.pages.length,
+      services: snapshot.facts.services.length,
+      ...(snapshot.error ? { error: snapshot.error } : {}),
+    },
+  });
+  revalidatePath("/app/settings/business");
+  revalidatePath("/onboarding/website");
+  revalidatePath("/app/visibility");
+  revalidatePath("/", "layout");
+
+  if (snapshot.status !== "synced") {
+    return {
+      ok: false,
+      message: snapshot.error
+        ? `We couldn't read that site: ${snapshot.error}`
+        : "We couldn't read that site.",
+    };
+  }
+
+  const data = await provider.getData(ws);
+  const resolved = resolveServiceOptions({
+    gbpServiceItems: data?.location.gbpSnapshot?.location.serviceItems,
+    websiteServices: snapshot.facts.services,
+    excluded: data?.workspace.industryConfig?.excludedServices,
+  });
+  const found = snapshot.facts.services.length;
+  const pages = snapshot.pages.length;
+  return {
+    ok: true,
+    snapshot,
+    services: resolved.services,
+    message:
+      found > 0
+        ? `Read ${pages} ${pages === 1 ? "page" : "pages"} and found ${found} ${found === 1 ? "service" : "services"}.`
+        : `Read ${pages} ${pages === 1 ? "page" : "pages"} but couldn't find a service list. Review prompts will use your Google profile or industry examples instead.`,
+  };
+}
+
+/**
+ * Connect the business's website: save the address, then crawl it right away
+ * so the owner sees what was found before leaving the step. Google stays
+ * authoritative for the website URL when a Business Profile sync has one.
+ */
+export async function connectWebsiteAction(rawUrl: string): Promise<WebsiteConnectResult> {
+  const { provider, ws, session } = await scoped("owner", "manager");
+  const parsed = parseOwnerWebsite(typeof rawUrl === "string" ? rawUrl : "");
+  if (!parsed.ok) return parsed;
+
+  await provider.updateBusinessDetails(ws, { website: parsed.url });
+  await provider.appendAuditLog(ws, {
+    id: `audit_${randomBytes(12).toString("hex")}`,
+    workspaceId: ws,
+    actor: session.name,
+    action: "business.details_updated",
+    targetType: "location",
+    targetId: ws,
+    at: new Date().toISOString(),
+    meta: { websiteSet: true },
+  });
+  return crawlAndStoreWebsite(provider, ws, session.name, parsed.url);
+}
+
+/**
+ * Re-crawl the website already on file (Google's if synced, else the owner's).
+ * Used from Settings → Business after the site changes.
+ */
+export async function rescanWebsiteAction(): Promise<WebsiteConnectResult> {
+  const { provider, ws, session } = await scoped("owner", "manager");
+  const data = await provider.getData(ws);
+  if (!data) return { ok: false, message: "This workspace could not be loaded." };
+  const url = data.location.gbpSnapshot?.location.websiteUri || data.location.website;
+  if (!url) {
+    return { ok: false, message: "No website is on file yet. Add one first." };
+  }
+  return crawlAndStoreWebsite(provider, ws, session.name, url);
+}
+
+export type ExcludedServicesActionResult =
+  | { ok: true; message: string; excluded: string[]; services: string[] }
+  | { ok: false; message: string };
+
+/**
+ * The owner's only control over the service list: switching a detected
+ * service off. Services are read from the Google profile and the website, never
+ * typed in, so nothing here can add one. `updateIndustry` is the sole writer of
+ * `industryConfig`, so the current key and the other config fields are read
+ * back and re-sent unchanged — only the exclusion list moves.
+ */
+export async function setExcludedServicesAction(
+  excluded: unknown,
+): Promise<ExcludedServicesActionResult> {
+  const { provider, ws, session } = await scoped("owner", "manager");
+  if (!Array.isArray(excluded)) return { ok: false, message: "That list could not be read." };
+  const seen = new Set<string>();
+  const clean: string[] = [];
+  for (const entry of excluded) {
+    if (typeof entry !== "string") continue;
+    const value = entry.replace(/\s+/g, " ").trim().slice(0, 80);
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    clean.push(value);
+    if (clean.length >= 100) break;
+  }
 
   const data = await provider.getData(ws);
   if (!data) return { ok: false, message: "This workspace could not be loaded." };
-
-  // `updateIndustry` also stamps the industry key onto the workspace and its
-  // location, so the current key has to be re-sent verbatim or saving a service
-  // list would silently clear the industry the owner picked.
   const industryKey = (data.workspace.vertical || data.location.vertical || "").trim();
-  if (!industryKey) {
-    return {
-      ok: false,
-      message: "Choose a business type before saving services.",
-    };
-  }
+  if (!industryKey) return { ok: false, message: "Choose a business type first." };
 
   const existing = data.workspace.industryConfig;
   const config: IndustryConfig = {
     ...(existing?.customLabel ? { customLabel: existing.customLabel } : {}),
-    ...(existing?.customAttributes?.length
-      ? { customAttributes: existing.customAttributes }
-      : {}),
-    ...(normalized.services.length ? { customServices: normalized.services } : {}),
+    ...(existing?.customAttributes?.length ? { customAttributes: existing.customAttributes } : {}),
+    ...(existing?.customServices?.length ? { customServices: existing.customServices } : {}),
+    ...(clean.length ? { excludedServices: clean } : {}),
   };
-
   await provider.updateIndustry(ws, industryKey, config);
   await provider.appendAuditLog(ws, {
     id: `audit_${randomBytes(12).toString("hex")}`,
     workspaceId: ws,
     actor: session.name,
-    action: "business.services_updated",
+    action: "business.services_excluded",
     targetType: "workspace",
     targetId: ws,
     at: new Date().toISOString(),
-    meta: { serviceCount: normalized.services.length },
+    meta: { excludedCount: clean.length },
   });
-
   revalidatePath("/app/settings/business");
   revalidatePath("/", "layout");
 
-  const duplicateNote =
-    normalized.duplicatesRemoved > 0
-      ? ` ${normalized.duplicatesRemoved} repeated ${normalized.duplicatesRemoved === 1 ? "entry was" : "entries were"} removed.`
-      : "";
-  const message =
-    normalized.services.length === 0
-      ? "Service list cleared. Nothing of your own is saved now."
-      : `${normalized.services.length} ${normalized.services.length === 1 ? "service" : "services"} saved.${duplicateNote}`;
-  return { ok: true, message, services: normalized.services };
+  const industry = getIndustry(industryKey);
+  const resolved = resolveServiceOptions({
+    gbpServiceItems: data.location.gbpSnapshot?.location.serviceItems,
+    websiteServices: data.location.websiteEvidence?.facts.services,
+    ownerServices: existing?.customServices,
+    catalogServices: industry.services,
+    excluded: clean,
+  });
+  return {
+    ok: true,
+    excluded: clean,
+    services: resolved.services,
+    message:
+      clean.length === 0
+        ? "Every detected service is showing again."
+        : `${clean.length} ${clean.length === 1 ? "service" : "services"} hidden from your review page.`,
+  };
 }
 
 export async function updateWorkspaceSettingsAction(patch: Partial<WorkspaceSettings>) {

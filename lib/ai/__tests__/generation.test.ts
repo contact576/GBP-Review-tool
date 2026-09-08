@@ -248,15 +248,28 @@ describe("template engine — fallbackReviewDrafts", () => {
 describe("service options — real GBP services first", () => {
   const CATALOG = ["Haircut", "Colour", "Blow dry"];
 
-  it("falls back to owner services then catalog when no profile is synced", () => {
+  it("falls back to owner services when no profile is synced — and never pads them with catalog guesses", () => {
     const resolved = resolveServiceOptions({
       gbpServiceItems: undefined,
       ownerServices: ["Bridal styling"],
       catalogServices: ["Bridal styling", ...CATALOG],
     });
-    expect(resolved.services).toEqual(["Bridal styling", ...CATALOG]);
+    expect(resolved.services).toEqual(["Bridal styling"]);
     expect(resolved.source).toBe("owner");
+    expect(resolved.sources).toEqual(["owner"]);
     expect(resolved.fromGoogleProfile).toBe(false);
+  });
+
+  it("uses the catalog only when no real source contributed anything", () => {
+    const resolved = resolveServiceOptions({
+      gbpServiceItems: [{ name: "   ", source: "unknown" }],
+      websiteServices: [],
+      ownerServices: [],
+      catalogServices: CATALOG,
+    });
+    expect(resolved.services).toEqual(CATALOG);
+    expect(resolved.source).toBe("catalog");
+    expect(resolved.sources).toEqual(["catalog"]);
   });
 
   it("is safe when everything is null (today's pre-approval state)", () => {
@@ -276,25 +289,21 @@ describe("service options — real GBP services first", () => {
       ownerServices: ["Bridal styling"],
       catalogServices: ["Bridal styling", ...CATALOG],
     });
-    expect(resolved.services).toEqual([
-      "Balayage",
-      "Deep cleaning",
-      "Bridal styling",
-      ...CATALOG,
-    ]);
+    expect(resolved.services).toEqual(["Balayage", "Deep cleaning", "Bridal styling"]);
     expect(resolved.source).toBe("google_profile");
-    expect(resolved.sources).toEqual(["google_profile", "owner", "catalog"]);
+    expect(resolved.sources).toEqual(["google_profile", "owner"]);
     expect(resolved.fromGoogleProfile).toBe(true);
   });
 
   it("dedupes case-insensitively without losing the higher-priority spelling", () => {
     const resolved = resolveServiceOptions({
       gbpServiceItems: [{ name: "HAIRCUT", source: "free_form" }],
+      websiteServices: ["Haircut", "Colour"],
       ownerServices: ["haircut"],
       catalogServices: CATALOG,
     });
-    expect(resolved.services).toEqual(["HAIRCUT", "Colour", "Blow dry"]);
-    expect(resolved.sources).toEqual(["google_profile", "catalog"]);
+    expect(resolved.services).toEqual(["HAIRCUT", "Colour"]);
+    expect(resolved.sources).toEqual(["google_profile", "website"]);
   });
 
   it("humanizes gcids but leaves real display labels alone", () => {
