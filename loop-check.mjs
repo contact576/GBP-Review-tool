@@ -174,7 +174,7 @@ try {
       else await serviceOption.click();
       await gp.waitForTimeout(2500);
       // If a real service was chosen the flow may still need a confirm/continue.
-      const cont = gp.getByRole("button", { name: /^continue$|^next$/i }).first();
+      const cont = gp.getByRole("button", { name: /^continue$|^next$|^see my review$/i }).first();
       if (await cont.count()) { await cont.click().catch(() => {}); await gp.waitForTimeout(2000); }
       // Still on the service step? Take the explicit skip.
       if (await gp.getByRole("button", { name: /^skip this$/i }).first().count()) {
@@ -199,7 +199,7 @@ try {
     // Picking a rating reveals the "what stood out?" chips on the SAME step,
     // gated behind Continue. The drafts and the private-feedback option live on
     // the step after, so without this the run never sees either.
-    const continueBtn = gp.getByRole("button", { name: /^continue$/i }).first();
+    const continueBtn = gp.getByRole("button", { name: /^continue$|^see my review$/i }).first();
     if (await continueBtn.count()) {
       await continueBtn.click().catch(() => {});
       await gp.waitForTimeout(4000);
@@ -220,11 +220,15 @@ try {
       const openPrivate = gp
         .getByRole("button", { name: /private|feedback|tell (us|them)|what went wrong/i })
         .first();
-      if ((await openPrivate.count()) && !(await gp.locator("textarea").count())) {
+      // The writing screen has its own textarea (the review box), so the
+      // presence of a textarea no longer means the private note is open —
+      // open it explicitly, then prefer the labelled private-feedback box.
+      if (await openPrivate.count()) {
         await openPrivate.click().catch(() => {});
         await gp.waitForTimeout(2500);
       }
-      const box = gp.locator("textarea").first();
+      const labelled = gp.getByLabel("Your private feedback");
+      const box = (await labelled.count()) ? labelled.first() : gp.locator("textarea").first();
       if (await box.count()) {
         await box.fill("Verification: the technician was late and did not call ahead.");
         const submit = gp.getByRole("button", { name: /send|submit|share/i }).last();
