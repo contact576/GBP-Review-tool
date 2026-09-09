@@ -444,3 +444,34 @@ describe("fallbackReplyDrafts", () => {
     expect(variants[0]!.text).not.toBe(low[0]!.text);
   });
 });
+
+describe("template engine — several services in one review", () => {
+  it("mentions every picked service, joined naturally", () => {
+    const variants = fallbackReviewDrafts({
+      business: "Northstar Marketing",
+      category: "marketing agency",
+      industryKey: "professional_services",
+      rating: 5,
+      attributes: ["Thorough keyword research", "Scroll-stopping creatives"],
+      services: ["Google Ads", "Meta Ads"],
+      nonce: "tok_multi.1.1",
+    });
+    expect(variants).toHaveLength(3);
+    for (const variant of variants) {
+      expect(variant.text.toLowerCase()).toContain("google ads and meta ads");
+    }
+  });
+
+  it("falls back to the single service when no list is given", () => {
+    const [variant] = fallbackReviewDrafts({
+      business: "Northstar Marketing",
+      category: "marketing agency",
+      industryKey: "professional_services",
+      rating: 4,
+      attributes: [],
+      service: "SEO",
+      nonce: "tok_single.1.1",
+    });
+    expect(variant!.text.toLowerCase()).toContain("for seo");
+  });
+});

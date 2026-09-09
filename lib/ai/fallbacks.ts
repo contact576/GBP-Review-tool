@@ -72,7 +72,10 @@ export interface ReviewDraftInput {
   rating: number;
   attributes: string[];
   staffName?: string;
+  /** Single service — kept for callers that only know one; `services` wins. */
   service?: string;
+  /** Every service the customer said the visit covered, in the order picked. */
+  services?: string[];
   /** Catalog industry key (preferred over category). */
   industryKey?: string;
   /**
@@ -81,6 +84,21 @@ export interface ReviewDraftInput {
    * template text — the repetition bug this field exists to kill.
    */
   nonce?: string;
+}
+
+/** The services a draft may mention: the list when given, else the single one. */
+export function draftServices(input: Pick<ReviewDraftInput, "service" | "services">): string[] {
+  const list = (input.services ?? []).map((item) => item.trim()).filter(Boolean);
+  if (list.length > 0) return list;
+  const single = input.service?.trim();
+  return single ? [single] : [];
+}
+
+/** "google ads", "google ads and seo", "google ads, seo and web design". */
+export function joinServices(services: readonly string[]): string {
+  const items = services.map(lc);
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
 interface Slots {
@@ -153,7 +171,8 @@ function article(noun: string): string {
 
 /** ≤3★ never gets promotional copy — one neutral, factual sentence. */
 function composeNeutral(input: ReviewDraftInput, industry: Industry): DraftVariant[] {
-  const svcTail = input.service ? ` for ${lc(input.service)}` : "";
+  const services = draftServices(input);
+  const svcTail = services.length > 0 ? ` for ${joinServices(services)}` : "";
   const visit = industry.terminology.visit;
   const text = `I had ${article(visit)} ${visit} at ${input.business}${svcTail}.`;
   return [
@@ -175,6 +194,7 @@ export function fallbackReviewDrafts(input: ReviewDraftInput): DraftVariant[] {
   // The nonce is what makes two customers with identical picks read differently.
   // Each phrase slot hashes its own key as well, so the experience clause and
   // the closer rotate independently instead of moving in lockstep.
+  const services = draftServices(input);
   const seedBase = `${input.business}|${input.attributes.join(",")}|${rating}|${input.nonce ?? ""}`;
   const slotSeed = (slot: string, variantIndex: number): number =>
     hashSeed(`${seedBase}|${slot}|${variantIndex}`);
@@ -185,7 +205,7 @@ export function fallbackReviewDrafts(input: ReviewDraftInput): DraftVariant[] {
     role: industry.terminology.staff,
     attr1: input.attributes[0] ? lc(input.attributes[0]) : undefined,
     attr2: input.attributes[1] ? lc(input.attributes[1]) : undefined,
-    svc: input.service ? lc(input.service) : undefined,
+    svc: services.length > 0 ? joinServices(services) : undefined,
     staff: input.staffName?.trim().split(/\s+/)[0],
   };
 
@@ -208,7 +228,7 @@ export function fallbackReviewDrafts(input: ReviewDraftInput): DraftVariant[] {
         kind: "review",
         businessName: input.business,
         rating,
-        allowedFacts: [...input.attributes, input.service ?? "", input.staffName ?? ""],
+        allowedFacts: [...input.attributes, ...services, input.staffName ?? ""],
       });
       if (res.ok) break;
       // Last resort: a minimal draft that cannot trip any lint.

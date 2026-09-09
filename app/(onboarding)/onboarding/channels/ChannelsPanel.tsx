@@ -1,5 +1,6 @@
 import { Badge, Card } from "@/components/ds";
 import { Icon } from "@/components/icons";
+import { BrandLogo } from "@/components/icons/brands";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
 
 /**
@@ -71,8 +72,8 @@ export function ChannelsPanel({ email, sms }: { email: ChannelState; sms: Channe
 
       {/* WhatsApp — manual click-to-chat, so it needs no approval to be "on" */}
       <Card className="flex items-center gap-3">
-        <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-primary-wash text-primary">
-          <Icon name="chat" size={20} />
+        <div className="grid size-10 shrink-0 place-items-center rounded-btn border border-hairline bg-card">
+          <BrandLogo name="whatsapp" size={22} title="" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">

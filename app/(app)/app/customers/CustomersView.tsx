@@ -12,6 +12,7 @@ import { Table, type Column, type SortDirection } from "@/components/ds/Table";
 import { Drawer } from "@/components/ds/Drawer";
 import { useToast } from "@/components/ds/Toast";
 import { Icon, type IconName } from "@/components/icons";
+import { BrandLogo, ChannelLogo } from "@/components/icons/brands";
 import { marketingConsented } from "@/lib/data/selectors";
 import {
   canSendService,
@@ -37,7 +38,6 @@ import type { Customer, ReviewRequest, LifecycleStage, Region, Channel } from "@
 interface ChannelOption {
   channel: Channel;
   label: string;
-  icon: IconName;
   enabled: boolean;
   /** Shown under a disabled chip — the honest reason, never a greyed mystery. */
   reason?: string;
@@ -59,21 +59,18 @@ function channelOptions(input: {
     {
       channel: "email",
       label: "Email",
-      icon: "mail",
       enabled: Boolean(email) && input.emailReady && input.serviceConsent,
       reason: consentReason ?? (!email ? "No email address." : !input.emailReady ? "Email sending isn't connected yet (Settings → Channels)." : undefined),
     },
     {
       channel: "sms",
       label: "SMS",
-      icon: "message",
       enabled: Boolean(phone) && input.smsReady && input.serviceConsent,
       reason: consentReason ?? (!phone ? "No phone number." : !input.smsReady ? "SMS isn't connected yet (Settings → Channels)." : undefined),
     },
     {
       channel: "whatsapp",
       label: "WhatsApp",
-      icon: "chat",
       enabled: Boolean(waNumber) && input.serviceConsent,
       reason: consentReason ?? (!phone ? "No phone number." : !waNumber ? "That number isn't dialable on WhatsApp." : "Opens in your own WhatsApp — you press send."),
     },
@@ -119,7 +116,7 @@ function ChannelPicker({
                 !option.enabled && "cursor-not-allowed opacity-50 hover:border-hairline hover:text-sub",
               )}
             >
-              <Icon name={active ? "check" : option.icon} size={14} />
+              {active ? <Icon name="check" size={14} /> : <ChannelLogo channel={option.channel} size={14} />}
               {option.label}
             </button>
           );
@@ -187,7 +184,7 @@ function WhatsAppHandoff({
     <div className="space-y-3 rounded-card border border-primary/30 bg-primary-wash/60 p-4">
       <div className="flex items-start gap-3">
         <div className="grid size-9 shrink-0 place-items-center rounded-btn bg-primary text-white">
-          <Icon name="chat" size={17} />
+          <BrandLogo name="whatsapp" size={20} title="" />
         </div>
         <div className="min-w-0">
           <div className="text-[14px] font-bold text-ink">Send it from your WhatsApp</div>

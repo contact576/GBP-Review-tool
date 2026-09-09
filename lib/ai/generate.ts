@@ -11,6 +11,7 @@ import {
   fallbackFeedbackSummary,
   fallbackScoreSample,
   resolveReviewIndustry,
+  draftServices,
   normalizeStanding,
   starsForStanding,
   type ReviewDraftInput,
@@ -90,13 +91,14 @@ export async function generateReviewDrafts(
 ): Promise<{ variants: DraftVariant[]; source: AiSource }> {
   const industry = resolveReviewIndustry(input.industryKey, input.category);
   const template = fallbackReviewDrafts(input);
+  const services = draftServices(input);
   // Full lint context INCLUDING the rating — a variant whose sentiment
   // doesn't match the stars is replaced by its template twin, never shown raw.
   const ctx: LintContext = {
     kind: "review",
     businessName: input.business,
     rating: input.rating,
-    allowedFacts: [...input.attributes, input.service ?? "", input.staffName ?? ""],
+    allowedFacts: [...input.attributes, ...services, input.staffName ?? ""],
   };
   if (!hasAiKey()) return { variants: template, source: "template" };
 
@@ -104,7 +106,7 @@ export async function generateReviewDrafts(
 Industry: ${industry.label} — ${industry.promptContext}
 Rating the customer chose: ${input.rating}/5 — match this register exactly.
 Things the customer liked: ${input.attributes.join(", ") || "(none specified)"}.
-${input.service ? `Service they came in for: ${input.service}.\n` : ""}${input.staffName ? `Staff member who helped them (${industry.terminology.staff}): ${input.staffName}.\n` : ""}Variation key (do not mention it, just let it push you to different wording than you would otherwise reach for): ${input.nonce ?? "none"}.
+${services.length === 1 ? `Service they came in for: ${services[0]}.\n` : services.length > 1 ? `Services they came in for (mention each naturally, in one review): ${services.join(", ")}.\n` : ""}${input.staffName ? `Staff member who helped them (${industry.terminology.staff}): ${input.staffName}.\n` : ""}Variation key (do not mention it, just let it push you to different wording than you would otherwise reach for): ${input.nonce ?? "none"}.
 Do NOT begin any variant with these formulaic openings: ${AVOID_OPENINGS.join("; ")}. Start each of the three variants a different way.
 Write 3 distinct review options in this order: short & natural, detailed & specific, warm & conversational. Separate each with a line of only "---".`;
 

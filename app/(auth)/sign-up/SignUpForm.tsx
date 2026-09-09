@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Icon } from "@/components/icons";
+import { BrandLogo } from "@/components/icons/brands";
 import { Button } from "@/components/ds/Button";
 import { Card } from "@/components/ds/Card";
 import { Field, Input, Select, Checkbox } from "@/components/ds/form";
@@ -146,13 +147,13 @@ export function SignUpForm({
           href={referralCode ? `/api/auth/google?ref=${encodeURIComponent(referralCode)}` : "/api/auth/google"}
           className={`${googleLinkClass} mt-5`}
         >
-          <Icon name="google" size={18} />
+          <BrandLogo name="google" size={18} title="" />
           Sign up with Google
         </a>
       ) : (
         <div className="mt-5">
           <span aria-disabled="true" className={`${googleLinkClass} pointer-events-none opacity-50`}>
-            <Icon name="google" size={18} />
+            <BrandLogo name="google" size={18} title="" />
             Sign up with Google
           </span>
           <p className="mt-1.5 text-center text-[12px] text-faint">

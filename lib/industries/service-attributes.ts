@@ -27,6 +27,22 @@ interface ServiceChipRule {
  * chips, and stops.
  */
 const SERVICE_CHIP_RULES: readonly ServiceChipRule[] = [
+  // ── Marketing, advertising and web work ──────────────────────────────
+  // Each ad platform gets its own vocabulary: a Google Ads client talks about
+  // keywords and landing pages, a Meta Ads client about creatives and
+  // targeting. Every chip is still an experience ("looked great", "handled
+  // carefully"), never a result the customer cannot vouch for.
+  { match: /google ads|search ads|ppc|pay.?per.?click|adwords|paid search|sem|shopping ads|performance max|pmax|youtube ads|display ads/, chips: ["Thorough keyword research", "Landing page looked great", "Budget handled carefully", "Clear monthly reporting", "Ad copy sounded like us"] },
+  { match: /meta ads|facebook ads|instagram ads|fb ads|paid social|social ads|tiktok ads|linkedin ads|pinterest ads|snapchat ads|retarget|remarket/, chips: ["Scroll-stopping creatives", "Targeting made sense", "Fresh ad ideas every month", "Clear reporting", "Quick to test new angles"] },
+  { match: /seo|search engine optim|local seo|link.?build|technical seo|business profile|gbp|map pack|local listing|citation/, chips: ["Explained the strategy plainly", "Content sounded like us", "Regular progress updates", "Fixed the technical stuff", "Patient with our questions"] },
+  { match: /web ?design|website|web ?dev|landing page|wordpress|shopify|e-?commerce|app dev|ui|ux|redesign/, chips: ["Looks great on mobile", "Easy for us to update", "Delivered on time", "Listened to what we wanted", "Fast, clean build"] },
+  { match: /social media|content creation|content calendar|reels|community management|influencer/, chips: ["Consistent posting", "On-brand content", "Creative ideas", "Quick replies to comments"] },
+  { match: /email marketing|newsletter|sms marketing|marketing automation|crm|hubspot|klaviyo|mailchimp|zoho|workflow/, chips: ["Set up without fuss", "Emails sounded like us", "Clear about what was automated", "Explained the workflow"] },
+  { match: /analytics|tracking|tag manager|conversion|reporting|dashboard|attribution/, chips: ["Set up tracking properly", "Reports were easy to read", "Explained the numbers", "Found what was broken"] },
+  { match: /brand|logo|graphic|creative design|print design|packaging|identity/, chips: ["Nailed our brand look", "Open to feedback", "Fast turnaround", "Attention to detail"] },
+  { match: /video|animation|ad creative|production|editing|voice.?over/, chips: ["Great creative direction", "Quick turnaround", "Made us feel comfortable on camera", "Edited exactly how we wanted"] },
+  { match: /marketing|digital|advertis|campaign|growth|lead gen|strategy|media buying|copywriting/, chips: ["Explained the plan plainly", "Proactive with ideas", "Clear reporting", "Responsive to every message", "Honest about what would work"] },
+  // ── Everything else ──────────────────────────────────────────────────
   { match: /emergenc|same.?day|urgent|after.?hours|24\s*\/?\s*7/, chips: ["Came out fast", "Available when I needed them", "Calm under pressure"] },
   { match: /clean|maid|janitor|housekeep|wash|detail/, chips: ["Spotless result", "Thorough and careful", "Showed up on time", "Respectful of my space"] },
   { match: /repair|fix|install|replac|maintenance|tune.?up|service call|diagnos/, chips: ["Fixed right the first time", "Explained the problem clearly", "Fair, upfront pricing", "Left everything tidy"] },
@@ -121,6 +137,90 @@ export function positiveChipsForService(
 
 /** Lists at least this long stand on their own without universal fillers. */
 const MIN_BEFORE_FILLERS = 8;
+
+/** One row of "what stood out?" chips: a service's own, or the general set. */
+export interface ChipGroup {
+  /**
+   * The service(s) these chips describe — "Google Ads", or "Injury rehab &
+   * Manual therapy" when two picks share a vocabulary — or null for the
+   * general/industry row.
+   */
+  service: string | null;
+  chips: string[];
+}
+
+/** "A", "A & B", "A, B & C". */
+export function joinLabels(labels: readonly string[]): string {
+  if (labels.length <= 1) return labels[0] ?? "";
+  return `${labels.slice(0, -1).join(", ")} & ${labels[labels.length - 1]}`;
+}
+
+/** Chips shown under each picked service. */
+export const SERVICE_GROUP_CHIP_LIMIT = 5;
+/** Chips in the general row when at least one service row is showing. */
+const GENERAL_WITH_SERVICES_LIMIT = 6;
+/** Of those, how many are reserved for the neutral chips ("First visit"). */
+const GENERAL_NEUTRAL_SLOTS = 2;
+
+/**
+ * The chip rows for a visit that covered one or MORE services. A customer who
+ * bought Google Ads and Meta Ads sees a row about keywords and landing pages,
+ * then a row about creatives and targeting, then the industry's general chips
+ * — instead of one blended list where the second service's vocabulary never
+ * appears. A chip is never repeated across rows (first row wins), and with no
+ * services picked the single general row is exactly `positiveChipsForService`
+ * plus the neutral chips, as before.
+ */
+export function chipGroupsForServices(
+  services: readonly string[],
+  industryAttributes: readonly string[],
+  neutralAttributes: readonly string[],
+): ChipGroup[] {
+  const seen = new Set<string>();
+  const take = (list: readonly string[], limit: number): string[] => {
+    const out: string[] = [];
+    for (const raw of list) {
+      const value = raw.trim();
+      const key = value.toLowerCase();
+      if (value.length === 0 || seen.has(key)) continue;
+      seen.add(key);
+      out.push(value);
+      if (out.length >= limit) break;
+    }
+    return out;
+  };
+
+  // Services that share a vocabulary ("Injury rehab" and "Manual therapy"
+  // both read as physio work) merge into ONE labelled row rather than the
+  // second silently losing every chip to the first.
+  const rows: { key: string; services: string[]; chips: string[] }[] = [];
+  for (const service of services) {
+    const specific = serviceSpecificChips(service);
+    if (specific.length === 0) continue;
+    const key = specific.join("|").toLowerCase();
+    const existing = rows.find((row) => row.key === key);
+    if (existing) existing.services.push(service);
+    else rows.push({ key, services: [service], chips: specific });
+  }
+  const groups: ChipGroup[] = [];
+  for (const row of rows) {
+    const chips = take(row.chips, SERVICE_GROUP_CHIP_LIMIT);
+    if (chips.length > 0) groups.push({ service: joinLabels(row.services), chips });
+  }
+  // With service rows showing, the general row is short — but it always keeps
+  // room for the neutral chips ("First visit"), which no service row offers.
+  const general = groups.length > 0
+    ? [
+        ...take(positiveChipsForService(undefined, industryAttributes), GENERAL_WITH_SERVICES_LIMIT - GENERAL_NEUTRAL_SLOTS),
+        ...take(neutralAttributes, GENERAL_NEUTRAL_SLOTS),
+      ]
+    : [
+        ...take(positiveChipsForService(undefined, industryAttributes), ATTRIBUTE_CHIP_LIMIT),
+        ...take(neutralAttributes, neutralAttributes.length),
+      ];
+  if (general.length > 0) groups.push({ service: null, chips: general });
+  return groups;
+}
 
 /**
  * Every chip a customer at this business could legitimately tap, across every

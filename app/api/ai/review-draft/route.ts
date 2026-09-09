@@ -69,10 +69,18 @@ export async function POST(req: Request) {
         a.toLowerCase(),
       ),
     );
+    // The customer may have picked several services (a marketing client who
+    // bought Google Ads AND Meta Ads, say). Each is checked against the same
+    // allowlist; `service` alone is still accepted from older pages.
+    const requestedServices = boundedStrings(body.services, 6, 80);
     const requestedService = boundedString(body.service, 80);
-    const service = allowedServices.has(requestedService.toLowerCase())
-      ? requestedService
-      : undefined;
+    const services = Array.from(
+      new Set(
+        [...requestedServices, requestedService]
+          .filter((item) => item && allowedServices.has(item.toLowerCase()))
+          .map((item) => item.toLowerCase()),
+      ),
+    ).map((key) => serviceOptions.services.find((item) => item.toLowerCase() === key) ?? key);
     const attributes = boundedStrings(body.attributes, 6, 60).filter((chip) =>
       allowedChips.has(chip.toLowerCase()),
     );
@@ -84,7 +92,7 @@ export async function POST(req: Request) {
       attributes,
       industryKey: industry.key,
       nonce: makeDraftNonce(token),
-      ...(service ? { service } : {}),
+      ...(services.length > 0 ? { services } : {}),
       ...(staffName ? { staffName } : {}),
     });
 

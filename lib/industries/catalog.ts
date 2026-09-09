@@ -1,5 +1,5 @@
 /**
- * The Foundly industry catalog: 36 industries, each with services, review
+ * The Foundly industry catalog: 37 industries, each with services, review
  * chips, terminology, AI prompt steering, and template phrase banks.
  *
  * Ordering matters for `industryForGoogleCategory`: earlier entries win on
@@ -1926,6 +1926,67 @@ const retailStore: Industry = {
  * Generic professional-services entry. Also the base for `getIndustry`'s
  * unknown-key fallback, so keep its content broadly applicable.
  */
+const marketingAgency: Industry = {
+  key: "marketing_agency",
+  label: "Marketing Agency",
+  group: "professional",
+  googleCategories: [
+    "marketing agency",
+    "advertising agency",
+    "digital marketing",
+    "internet marketing",
+    "seo agency",
+    "web design",
+    "website designer",
+    "social media",
+    "branding agency",
+    "media agency",
+  ],
+  services: [
+    "Google Ads",
+    "Meta Ads",
+    "SEO",
+    "Web design",
+    "Social media management",
+    "Email marketing",
+    "Branding",
+    "Analytics & tracking",
+  ],
+  attributes: [
+    "Clear reporting",
+    "Responsive to every message",
+    "Explained the plan plainly",
+    "Proactive with ideas",
+    "Honest about what would work",
+    "Delivered on time",
+    "Easy to work with",
+  ],
+  neutralAttributes: ["First campaign", "Ongoing client", "Referred by a colleague"],
+  terminology: { customer: "client", visit: "engagement", staff: "account manager" },
+  promptContext:
+    "Client voice on process and communication; never invent numbers.",
+  phrases: {
+    experience5: [
+      "they explained every decision plainly and kept us in the loop",
+      "reporting was clear enough that we always knew where the budget went",
+      "they came to every call with ideas we had not thought of",
+      "it felt like an extension of our own team",
+      "they were honest about what would and would not work for us",
+    ],
+    experience4: [
+      "responsive, organised and clear about what they were doing",
+      "solid work with reporting we could actually follow",
+      "good ideas, delivered close to the timeline they set",
+    ],
+    closer5: [
+      "already expanding what we do with them",
+      "our first call for anything marketing",
+      "recommending them to other business owners",
+    ],
+    closer4: ["would work with them again", "a dependable partner for our marketing"],
+  },
+};
+
 export const PROFESSIONAL_SERVICES_INDUSTRY: Industry = {
   key: "professional_services",
   label: "Professional Services",
@@ -2017,5 +2078,6 @@ export const INDUSTRY_CATALOG: readonly Industry[] = [
   eventVenue,
   photography,
   retailStore,
+  marketingAgency,
   PROFESSIONAL_SERVICES_INDUSTRY,
 ];

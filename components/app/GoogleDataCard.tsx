@@ -1,6 +1,7 @@
 import type { FoundlyData } from "@/lib/data/types";
 import type { DashboardSignal } from "@/lib/data/dashboard";
 import { Icon } from "@/components/icons";
+import { BrandLogo } from "@/components/icons/brands";
 import { LinkButton } from "@/components/ds/Button";
 import { Badge } from "@/components/ds/misc";
 import { SyncGoogleButton } from "./SyncGoogleButton";
@@ -28,8 +29,8 @@ export function GoogleDataCard({
       <section className="flex h-full min-h-[430px] flex-col rounded-card border border-hairline bg-card p-5 shadow-sm sm:p-6">
         <Header badge={<Badge tone="sub" icon="lock">Not matched</Badge>} />
         <div className="flex flex-1 flex-col items-center justify-center py-8 text-center">
-          <span className="grid size-14 place-items-center rounded-card bg-primary-wash text-primary">
-            <Icon name="google" size={25} />
+          <span className="grid size-14 place-items-center rounded-card border border-hairline bg-card shadow-sm">
+            <BrandLogo name="google" size={28} title="" />
           </span>
           <h3 className="mt-4 text-[17px] font-bold text-ink">Find your Google listing</h3>
           <p className="mt-2 max-w-xs text-[13px] leading-relaxed text-sub">
@@ -133,8 +134,8 @@ function Header({ badge }: { badge: React.ReactNode }) {
   return (
     <div className="flex items-start justify-between gap-3">
       <div className="flex items-center gap-2.5">
-        <span className="grid size-9 place-items-center rounded-btn bg-primary-wash">
-          <Icon name="google" size={18} />
+        <span className="grid size-9 place-items-center rounded-btn border border-hairline bg-card">
+          <BrandLogo name="google" size={20} title="" />
         </span>
         <div>
           <div className="kicker">Connected source</div>

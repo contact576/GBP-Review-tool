@@ -1,5 +1,6 @@
 import { getData } from "@/lib/data";
 import { PageHeader } from "@/components/app/PageHeader";
+import { BrandLogo } from "@/components/icons/brands";
 import { toWhatsAppNumber } from "@/lib/whatsapp/link";
 import { canSendService } from "@/lib/compliance/consent";
 import { WhatsAppSender, type WhatsAppCandidate } from "./WhatsAppSender";
@@ -40,7 +41,12 @@ export default async function WhatsAppPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Ask on WhatsApp"
+        title={
+          <span className="inline-flex items-center gap-2.5">
+            <BrandLogo name="whatsapp" size={28} title="" />
+            Ask on WhatsApp
+          </span>
+        }
         sub="Pick your customers, write one message, and send it from your own WhatsApp — one chat at a time, no API or Business account needed."
       />
 

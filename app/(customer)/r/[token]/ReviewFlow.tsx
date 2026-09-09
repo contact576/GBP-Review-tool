@@ -8,17 +8,15 @@ import { Chip } from "@/components/ds/misc";
 import { Textarea, Toggle } from "@/components/ds/form";
 import { Button } from "@/components/ds/Button";
 import { StarSelector } from "@/components/review/StarSelector";
-import { DraftCard } from "@/components/review/DraftCard";
 import { PublicGoogleReviewLink } from "@/components/review/PublicGoogleReviewLink";
 import { PostingSteps } from "@/components/review/PostingSteps";
-import { HowToPostSheet } from "@/components/review/HowToPostSheet";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
-import { positiveChipsForService } from "@/lib/industries/service-attributes";
+import { chipGroupsForServices } from "@/lib/industries/service-attributes";
 import { advanceRequestAction, submitPrivateFeedbackAction } from "@/lib/actions";
 import type { RequestStatus } from "@/lib/data/types";
 import type { ServiceOptionSource } from "@/lib/industries";
 
-type Step = "welcome" | "service" | "rate" | "write" | "feedback";
+type Step = "tell" | "write" | "feedback";
 type Rating = 1 | 2 | 3 | 4 | 5;
 
 interface Draft {
@@ -31,17 +29,10 @@ export function reviewHandoffKey(token: string): string {
   return `foundly.review.${token}`;
 }
 
-/**
- * States in which the customer has already acted: they rated (which is what
- * writes `clicked`), posted, or sent private feedback. Delivery states —
- * including `opened`, which a QR scan sets the moment the code is resolved —
- * say nothing about whether a person has seen the flow yet.
- */
-const ACTED_STATUSES: ReadonlySet<RequestStatus> = new Set<RequestStatus>([
-  "clicked",
-  "posted_google",
-  "private_feedback",
-]);
+/** The most "what stood out" chips one review can carry. */
+const MAX_ATTRIBUTES = 6;
+/** Services shown; a Google profile can list dozens. */
+const MAX_SERVICES = 12;
 
 function Notice({ tone, icon, children }: {
   tone: "warning" | "danger";
@@ -63,52 +54,25 @@ function Notice({ tone, icon, children }: {
   );
 }
 
-/**
- * Labelled progress: dots the customer can count, plus "Step 2 of 3 · How it
- * went" so the step is named, not just numbered.
- */
-function StepProgress({
-  current,
-  labels,
-  onBack,
+/** A numbered question heading: "1  What did you come in for?" */
+function Question({
+  number,
+  children,
+  aside,
 }: {
-  /** 0-based index of the current step. */
-  current: number;
-  labels: readonly string[];
-  onBack?: () => void;
+  number: number;
+  children: React.ReactNode;
+  aside?: React.ReactNode;
 }) {
-  const total = labels.length;
   return (
-    <div className="mb-5">
-      <div className="flex items-center justify-between">
-        {onBack ? (
-          <button
-            type="button"
-            onClick={onBack}
-            className="-mx-1 inline-flex min-h-[44px] items-center gap-1 px-1 text-[13px] font-semibold text-sub transition-all hover:text-ink active:scale-[0.98]"
-          >
-            <Icon name="chevron-left" size={16} /> Back
-          </button>
-        ) : (
-          <span />
-        )}
-        <div className="flex items-center gap-1.5" aria-hidden>
-          {labels.map((label, index) => (
-            <span
-              key={label}
-              className={cn(
-                "h-1.5 rounded-full transition-all duration-250",
-                index < current ? "w-6 bg-primary" : index === current ? "w-6 bg-primary/50" : "w-3 bg-hairline",
-              )}
-            />
-          ))}
-        </div>
-      </div>
-      <div className="mt-2 data-chip text-faint" aria-live="polite">
-        Step <span className="tabular-nums">{current + 1}</span> of <span className="tabular-nums">{total}</span>
-        {" · "}
-        <span className="text-sub">{labels[current]}</span>
-      </div>
+    <div className="flex items-center justify-between gap-3">
+      <h2 className="flex items-center gap-2.5 text-[16px] font-extrabold leading-tight text-ink">
+        <span className="grid size-6 shrink-0 place-items-center rounded-full bg-primary text-[12px] font-bold tabular-nums text-white">
+          {number}
+        </span>
+        <span>{children}</span>
+      </h2>
+      {aside ? <div className="shrink-0 text-[12px] font-medium text-faint">{aside}</div> : null}
     </div>
   );
 }
@@ -146,18 +110,21 @@ interface ReviewFlowProps {
 /**
  * Policy-critical customer experience.
  *
- * The customer answers three questions — which service, how it went, and what
- * stood out — and those answers are the ONLY source of the suggested wording.
- * Every draft is editable, the customer posts it themselves, and:
+ * Two screens. On the first the customer answers three questions in one
+ * scroll — what they came in for (as many services as apply), how it went,
+ * and what stood out (chips grouped under each service they picked). On the
+ * second they see ONE editable review box with their wording in it, a Copy
+ * button, and the Google button. Those answers are the ONLY source of the
+ * suggested wording, and:
  * - every rating follows the same public-review path (no gating);
  * - AI never adds a service, person, claim or keyword the customer didn't pick;
- * - writing from scratch stays one tap away;
+ * - writing from scratch is one tap away;
  * - private feedback is optional and never hides the Google link.
  *
- * The welcome screen exists because a QR scan used to drop people straight
- * onto a question with no idea how long this takes or what happens at the
- * end. It sets expectations and hands off to the same steps as before; the
- * public Google link is on it too, so it is not a gate.
+ * It used to be a five-screen wizard (welcome, service, rating, three draft
+ * cards with pencil toggles, a how-to sheet). Customers scanning a QR code at
+ * a counter did not get through it. Everything they need is now in front of
+ * them at once, and the explanation lives in the hero card instead of a gate.
  */
 export function ReviewFlow({
   token,
@@ -174,25 +141,15 @@ export function ReviewFlow({
 }: ReviewFlowProps) {
   const router = useRouter();
 
-  const services = useMemo(() => serviceOptions.slice(0, 10), [serviceOptions]);
-  // A workspace with no service list skips straight to the rating question
-  // rather than showing an empty step.
-  const hasServiceStep = services.length > 0;
-  const stepLabels = useMemo(
-    () => (hasServiceStep ? ["What you came for", "How it went", "Your words"] : ["How it went", "Your words"]),
-    [hasServiceStep],
-  );
-  const firstStep: Step = hasServiceStep ? "service" : "rate";
-  // A customer who has not yet rated gets the welcome; a returning customer
-  // (they rated, then came back) lands on the first real step.
-  const fresh = !initialRating && !(initialStatus && ACTED_STATUSES.has(initialStatus));
+  const services = useMemo(() => serviceOptions.slice(0, MAX_SERVICES), [serviceOptions]);
+  const hasServices = services.length > 0;
 
-  const [step, setStep] = useState<Step>(fresh ? "welcome" : firstStep);
-  const [selectedService, setSelectedService] = useState<string | undefined>(
-    service && services.some((s) => s.toLowerCase() === service.toLowerCase())
-      ? services.find((s) => s.toLowerCase() === service.toLowerCase())
-      : undefined,
-  );
+  const [step, setStep] = useState<Step>("tell");
+  const [selectedServices, setSelectedServices] = useState<string[]>(() => {
+    const hint = service?.toLowerCase();
+    const match = hint ? services.find((item) => item.toLowerCase() === hint) : undefined;
+    return match ? [match] : [];
+  });
   const [rating, setRating] = useState<number>(initialRating ?? 0);
   const [attributes, setAttributes] = useState<string[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -202,6 +159,8 @@ export function ReviewFlow({
   const [drafting, setDrafting] = useState(false);
   const [reviewText, setReviewText] = useState("");
   const [ownWords, setOwnWords] = useState(false);
+  /** The customer's from-scratch text, kept while they look at a suggestion. */
+  const [ownText, setOwnText] = useState("");
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [canContact, setCanContact] = useState(false);
@@ -210,8 +169,6 @@ export function ReviewFlow({
   const [editMessage, setEditMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
-  const [howToOpen, setHowToOpen] = useState(false);
-  const [coachDismissed, setCoachDismissed] = useState(false);
   /**
    * Set when the customer chooses their own words while drafts are still
    * loading, so the drafts arriving later never overwrite that choice.
@@ -219,39 +176,20 @@ export function ReviewFlow({
   const ownWordsRef = useRef(false);
 
   /**
-   * Experience chips tuned to the service the customer picked: chips that
-   * describe that kind of work first, then the industry's own, then neutral.
-   * Recomputed whenever the service changes, so going back and picking a
-   * different service changes what stands out. Picked chips that no longer
-   * appear are dropped so nothing invisible can reach the draft.
+   * "What stood out" rows: one per picked service with chips about that kind
+   * of work, then the industry's general chips. Recomputed whenever the
+   * services change; picked chips that disappear are dropped so nothing
+   * invisible can reach the draft.
    */
-  const chips = useMemo(() => {
-    const positive = positiveChipsForService(selectedService, positiveSeeds);
-    const seen = new Set(positive.map((chip) => chip.toLowerCase()));
-    const neutral = neutralSeeds.filter((chip) => !seen.has(chip.toLowerCase()));
-    return [...positive, ...neutral].slice(0, 12);
-  }, [selectedService, positiveSeeds, neutralSeeds]);
+  const chipGroups = useMemo(
+    () => chipGroupsForServices(selectedServices, positiveSeeds, neutralSeeds),
+    [selectedServices, positiveSeeds, neutralSeeds],
+  );
+  const visibleChips = useMemo(() => new Set(chipGroups.flatMap((group) => group.chips)), [chipGroups]);
 
   useEffect(() => {
-    setAttributes((current) => current.filter((chip) => chips.includes(chip)));
-  }, [chips]);
-
-  /**
-   * The customer's own answers, echoed back before they read a draft. Seeing
-   * exactly what the wording is grounded in is what makes "we only used what
-   * you told us" checkable rather than a promise.
-   */
-  const picked = useMemo(() => {
-    const rows: { label: string; value: string }[] = [];
-    if (selectedService) rows.push({ label: "You came in for", value: selectedService });
-    if (rating >= 1 && rating <= 5) {
-      rows.push({ label: "You rated it", value: `${rating} out of 5` });
-    }
-    if (attributes.length > 0) {
-      rows.push({ label: "You picked out", value: attributes.join(", ") });
-    }
-    return rows;
-  }, [selectedService, rating, attributes]);
+    setAttributes((current) => current.filter((chip) => visibleChips.has(chip)));
+  }, [visibleChips]);
 
   const terminal =
     initialStatus === "posted_google"
@@ -271,28 +209,17 @@ export function ReviewFlow({
     };
   }, []);
 
-  useEffect(() => {
-    try {
-      setCoachDismissed(window.sessionStorage.getItem("foundly.coach.write") === "1");
-    } catch {
-      // Storage unavailable — the coach simply shows.
-    }
-  }, []);
-
-  function dismissCoach() {
-    setCoachDismissed(true);
-    try {
-      window.sessionStorage.setItem("foundly.coach.write", "1");
-    } catch {
-      // Best-effort only.
-    }
+  function toggleService(item: string) {
+    setSelectedServices((current) =>
+      current.includes(item) ? current.filter((value) => value !== item) : [...current, item],
+    );
   }
 
   function toggleAttribute(chip: string) {
     setAttributes((current) =>
       current.includes(chip)
         ? current.filter((item) => item !== chip)
-        : current.length >= 4
+        : current.length >= MAX_ATTRIBUTES
           ? current
           : [...current, chip],
     );
@@ -303,7 +230,7 @@ export function ReviewFlow({
    * customer just gave. A failure is never fatal — the customer lands on the
    * same editor with an empty box and writes it themselves.
    */
-  async function buildDrafts(value: Rating, chosenAttributes: string[]) {
+  async function buildDrafts(value: Rating, chosenAttributes: string[], chosenServices: string[]) {
     setDrafting(true);
     setError(null);
     ownWordsRef.current = false;
@@ -315,7 +242,7 @@ export function ReviewFlow({
           token,
           rating: value,
           attributes: chosenAttributes,
-          ...(selectedService ? { service: selectedService } : {}),
+          ...(chosenServices.length > 0 ? { services: chosenServices, service: chosenServices[0] } : {}),
         }),
       });
       if (!response.ok) throw new Error("bad_response");
@@ -353,19 +280,22 @@ export function ReviewFlow({
 
   async function continueToWriting() {
     if (rating < 1 || rating > 5) {
-      setError("Choose a rating first.");
+      setError("Tap a star first.");
       return;
     }
     setError(null);
+    setCopied(false);
     setStep("write");
+    window.scrollTo({ top: 0 });
     if (typeof navigator !== "undefined" && !navigator.onLine) {
       setOwnWords(true);
       return;
     }
-    await buildDrafts(rating as Rating, attributes);
+    await buildDrafts(rating as Rating, attributes, selectedServices);
   }
 
   function chooseDraft(index: number) {
+    if (ownWords) setOwnText(reviewText);
     ownWordsRef.current = false;
     setSelectedDraft(index);
     setReviewText(drafts[index]?.text ?? "");
@@ -377,13 +307,21 @@ export function ReviewFlow({
   function writeMyOwn() {
     ownWordsRef.current = true;
     setOwnWords(true);
-    setReviewText("");
+    setReviewText(ownText);
     setEditMessage(null);
   }
 
-  function editDraft(index: number, text: string) {
-    setDrafts((current) => current.map((item, i) => (i === index ? { ...item, text } : item)));
-    if (index === selectedDraft) setReviewText(text);
+  /** Every keystroke lands in the box AND in the suggestion it came from, so switching tabs never loses an edit. */
+  function editText(value: string) {
+    const next = value.slice(0, 2_000);
+    setReviewText(next);
+    setEditMessage(null);
+    setCopied(false);
+    if (ownWords) {
+      setOwnText(next);
+    } else {
+      setDrafts((current) => current.map((item, i) => (i === selectedDraft ? { ...item, text: next } : item)));
+    }
   }
 
   async function improveClarity() {
@@ -407,7 +345,7 @@ export function ReviewFlow({
       if (!response.ok) throw new Error("bad_response");
       const data = await response.json() as { suggestion?: string; changed?: boolean };
       if (!data.suggestion) throw new Error("missing_suggestion");
-      setReviewText(data.suggestion);
+      editText(data.suggestion);
       setEditMessage(
         data.changed
           ? "Clarity improved without adding new content. Please read it before posting."
@@ -417,6 +355,18 @@ export function ReviewFlow({
       setError("We couldn't check the wording just now. Your original text is unchanged.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function copyText() {
+    const text = reviewText.trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+      setError("Copying isn't available here — select the text and copy it by hand.");
     }
   }
 
@@ -454,7 +404,7 @@ export function ReviewFlow({
       return;
     }
     if (rating < 1 || rating > 5) {
-      setError("Choose a rating first.");
+      setError("Tap a star first.");
       return;
     }
     setLoading(true);
@@ -477,7 +427,7 @@ export function ReviewFlow({
     </p>
   );
 
-  if (terminal === "posted" && (step === firstStep || step === "welcome")) {
+  if (terminal === "posted" && step === "tell") {
     return (
       <div className="flex flex-1 flex-col items-center justify-center py-16 text-center animate-fade-in">
         <div className="grid size-16 place-items-center rounded-card bg-gold-tint text-gold-deep">
@@ -486,13 +436,13 @@ export function ReviewFlow({
         <h1 className="mt-5 text-[22px] font-extrabold text-ink">You&apos;ve already shared a review</h1>
         <p className="mt-2 max-w-xs text-[14px] text-sub">Thanks for supporting {business}.</p>
         <div className="mt-6 w-full">
-          <PublicGoogleReviewLink reviewUrl={reviewUrl} prominent />
+          <PublicGoogleReviewLink reviewUrl={reviewUrl} />
         </div>
       </div>
     );
   }
 
-  if (terminal === "private" && (step === firstStep || step === "welcome") && !submitted) {
+  if (terminal === "private" && step === "tell" && !submitted) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center py-14 text-center animate-fade-in">
         <div className="grid size-16 place-items-center rounded-card bg-primary-tint text-primary">
@@ -501,33 +451,29 @@ export function ReviewFlow({
         <h1 className="mt-5 text-[22px] font-extrabold text-ink">Your private feedback is already in</h1>
         <p className="mt-2 max-w-xs text-[14px] text-sub">The owner has your note. The public option remains available.</p>
         <div className="mt-6 w-full">
-          <PublicGoogleReviewLink reviewUrl={reviewUrl} prominent />
+          <PublicGoogleReviewLink reviewUrl={reviewUrl} />
         </div>
       </div>
     );
   }
 
-  // ── Step 0: welcome — what this is, how long it takes, what happens ──
-  if (step === "welcome") {
-    const preview: { icon: IconName; title: string; body: string }[] = [
-      ...(hasServiceStep
-        ? [{ icon: "grid" as IconName, title: "Tell us what you came in for", body: "One tap. It only shapes the wording we suggest." }]
-        : []),
-      { icon: "star", title: "Rate it and tap what stood out", body: "Any rating is welcome — good, bad or in between." },
-      { icon: "google", title: "Post it on Google", body: "We suggest wording from your answers. You edit it and press Post yourself." },
-    ];
+  // ── Screen 1: three questions, one scroll ───────────────────
+  if (step === "tell") {
+    const ratingNumber = hasServices ? 2 : 1;
+    const chipsNumber = ratingNumber + 1;
+    const showChips = rating > 0 && chipGroups.length > 0;
     return (
-      <div className="flex flex-1 flex-col py-6 animate-fade-in">
-        <div className="rounded-card bg-hero p-5 text-white shadow-lg on-hero">
+      <div className="flex flex-1 flex-col py-5 animate-fade-in">
+        <div className="rounded-card bg-hero p-4 text-white shadow-lg on-hero">
           <div className="flex items-center gap-2 text-gold">
-            <Icon name="clock" size={15} />
+            <Icon name="clock" size={14} />
             <span className="data-chip text-gold">About a minute</span>
           </div>
-          <h1 className="mt-3 text-[24px] font-extrabold leading-tight tracking-tight">
+          <h1 className="mt-2 text-[22px] font-extrabold leading-tight tracking-tight">
             Thanks for choosing {business}
           </h1>
-          <p className="mt-2 text-[14px] leading-relaxed text-white/80">
-            Tell them how it went. Your words help the next person decide, and the owner reads every one.
+          <p className="mt-1.5 text-[13px] leading-relaxed text-white/80">
+            Answer {hasServices ? "three" : "two"} quick questions. We turn them into a review you copy and post on Google yourself.
           </p>
           {staffName ? (
             <div className="mt-3 inline-flex items-center gap-1.5 rounded-chip bg-white/10 px-2.5 py-1 text-[12px] font-semibold text-white">
@@ -536,142 +482,94 @@ export function ReviewFlow({
           ) : null}
         </div>
 
-        <ol className="mt-5 space-y-2.5" aria-label="How this works">
-          {preview.map((item, index) => (
-            <li key={item.title} className="flex items-start gap-3 rounded-card border border-hairline bg-card px-3.5 py-3">
-              <span className="relative mt-0.5 grid size-9 shrink-0 place-items-center rounded-btn bg-primary-wash text-primary">
-                <Icon name={item.icon} size={17} />
-                <span className="absolute -left-1.5 -top-1.5 grid size-4 place-items-center rounded-full bg-primary text-[10px] font-bold tabular-nums text-white">
-                  {index + 1}
-                </span>
-              </span>
-              <div className="min-w-0">
-                <div className="text-[14px] font-bold leading-snug text-ink">{item.title}</div>
-                <p className="mt-0.5 text-[12px] leading-relaxed text-sub">{item.body}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-
-        <Hint icon="shield" className="mt-4">{MICROCOPY.nothingPostedWithoutYou}</Hint>
-
-        <div className="mt-auto space-y-3 pt-6">
-          <Button fullWidth size="lg" iconRight="arrow-right" onClick={() => setStep(firstStep)}>
-            Start my review
-          </Button>
-          <PublicGoogleReviewLink reviewUrl={reviewUrl} label="Skip straight to Google" />
-          {trustLine}
-        </div>
-      </div>
-    );
-  }
-
-  // ── Step 1: which service ─────────────────────────────────
-  if (step === "service") {
-    return (
-      <div className="flex flex-1 flex-col py-6 animate-fade-in">
-        <StepProgress current={0} labels={stepLabels} onBack={fresh ? () => setStep("welcome") : undefined} />
-        <h1 className="text-[22px] font-extrabold leading-tight text-ink">
-          What did you come to {business} for?
-        </h1>
-        <p className="mt-2 text-[13px] leading-relaxed text-sub">{MICROCOPY.serviceStepHelp}</p>
-        {serviceOptionsSource === "google_profile" ? (
-          <p className="mt-1.5 text-[12px] leading-relaxed text-faint">{MICROCOPY.serviceSourceGoogle}</p>
-        ) : serviceOptionsSource === "website" ? (
-          <p className="mt-1.5 text-[12px] leading-relaxed text-faint">{MICROCOPY.serviceSourceWebsite}</p>
+        {offline ? (
+          <div className="mt-4">
+            <Notice tone="warning" icon="clock">You&apos;re offline. You can still rate; sharing needs a connection.</Notice>
+          </div>
         ) : null}
 
-        <div className="mt-5 flex flex-wrap gap-2" role="group" aria-label="Services">
-          {services.map((item) => (
-            <Chip
-              key={item}
-              selected={selectedService === item}
-              onClick={() => setSelectedService(selectedService === item ? undefined : item)}
-            >
-              {item}
-            </Chip>
-          ))}
-        </div>
-
-        <Hint icon="alert" className="mt-4">
-          Tap one to select it, tap again to clear. Nothing here is required.
-        </Hint>
-
-        <div className="mt-auto space-y-3 pt-8">
-          <Button fullWidth size="lg" iconRight="arrow-right" onClick={() => setStep("rate")}>
-            {selectedService ? "Continue" : "Skip this"}
-          </Button>
-          {trustLine}
-        </div>
-      </div>
-    );
-  }
-
-  // ── Step 2: how was it + what stood out ───────────────────
-  if (step === "rate") {
-    return (
-      <div className="flex flex-1 flex-col py-6 animate-fade-in">
-        <StepProgress
-          current={hasServiceStep ? 1 : 0}
-          labels={stepLabels}
-          onBack={hasServiceStep ? () => setStep("service") : fresh ? () => setStep("welcome") : undefined}
-        />
-        {offline ? <Notice tone="warning" icon="clock">You&apos;re offline. You can still rate; sharing needs a connection.</Notice> : null}
-
-        <h1 className="text-center text-[24px] font-extrabold leading-tight text-ink">
-          How was your experience with {business}?
-        </h1>
-        {selectedService ? (
-          <p className="mt-1 text-center text-[13px] font-semibold text-primary-dark">
-            {selectedService}
-          </p>
-        ) : null}
-        <p className="mt-2 text-center text-[14px] text-sub">
-          Your honest feedback is welcome at every rating.
-        </p>
-
-        <div className="mt-8">
-          <StarSelector value={rating} onChange={onRate} showLabel size={48} />
-        </div>
-
-        {rating > 0 && chips.length > 0 ? (
-          <div className="mt-8 animate-slide-up">
-            <div className="flex items-baseline justify-between gap-3">
-              <h2 className="text-[15px] font-bold text-ink">
-                What stood out? <span className="font-medium text-faint">(up to 4)</span>
-              </h2>
-              <span className="data-chip tabular-nums text-faint" aria-live="polite">
-                {attributes.length}/4
-              </span>
-            </div>
-            <p className="mt-1 text-[12px] leading-relaxed text-faint">
-              {selectedService
-                ? `Chips tuned to ${selectedService.toLowerCase()}. ${MICROCOPY.attributeStepHelp}`
-                : MICROCOPY.attributeStepHelp}
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="What stood out">
-              {chips.map((chip) => (
-                <Chip
-                  key={chip}
-                  selected={attributes.includes(chip)}
-                  disabled={!attributes.includes(chip) && attributes.length >= 4}
-                  onClick={() => toggleAttribute(chip)}
-                >
-                  {chip}
+        {hasServices ? (
+          <section className="mt-6" aria-labelledby="q-services">
+            <Question number={1} aside="Pick all that apply">
+              <span id="q-services">What did you come in for?</span>
+            </Question>
+            <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="Services">
+              {services.map((item) => (
+                <Chip key={item} selected={selectedServices.includes(item)} onClick={() => toggleService(item)}>
+                  {item}
                 </Chip>
               ))}
             </div>
-            <Hint icon="sparkles" className="mt-3">
-              Skipping this is fine. Anything you tap becomes part of the wording we suggest next.
-            </Hint>
+            <p className="mt-2 text-[11px] leading-relaxed text-faint">
+              {serviceOptionsSource === "google_profile"
+                ? MICROCOPY.serviceSourceGoogle
+                : serviceOptionsSource === "website"
+                  ? MICROCOPY.serviceSourceWebsite
+                  : MICROCOPY.serviceStepHelp}
+            </p>
+          </section>
+        ) : null}
+
+        <section className="mt-6" aria-labelledby="q-rating">
+          <Question number={ratingNumber}>
+            <span id="q-rating">How did it go?</span>
+          </Question>
+          <div className="mt-3 rounded-card border border-hairline bg-card py-4">
+            <StarSelector value={rating} onChange={onRate} showLabel size={42} />
           </div>
-        ) : rating === 0 ? (
-          <Hint icon="star" className="mt-6 justify-center">Tap a star to rate. You can change it any time.</Hint>
+          {rating === 0 ? (
+            <Hint icon="star" className="mt-2 justify-center">Any rating is welcome — good, bad or in between.</Hint>
+          ) : null}
+        </section>
+
+        {showChips ? (
+          <section className="mt-6 animate-slide-up" aria-labelledby="q-chips">
+            <Question
+              number={chipsNumber}
+              aside={attributes.length > 0 ? <span className="tabular-nums" aria-live="polite">{attributes.length} picked</span> : "Optional"}
+            >
+              <span id="q-chips">What stood out?</span>
+            </Question>
+            <div className="mt-1 pl-[34px] text-[12px] leading-relaxed text-faint">{MICROCOPY.attributeStepHelp}</div>
+            <div className="mt-3 space-y-3.5" role="group" aria-label="What stood out">
+              {chipGroups.map((group) => (
+                <div key={group.service ?? "general"}>
+                  {group.service ? (
+                    <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-bold text-primary-dark">
+                      <Icon name="check-circle" size={13} />
+                      About {group.service}
+                    </div>
+                  ) : chipGroups.length > 1 ? (
+                    <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-bold text-sub">
+                      <Icon name="sparkles" size={13} />
+                      Overall
+                    </div>
+                  ) : null}
+                  <div
+                    className="flex flex-wrap gap-2"
+                    role="group"
+                    aria-label={group.service ? `What stood out about ${group.service}` : "What stood out overall"}
+                  >
+                    {group.chips.map((chip) => (
+                      <Chip
+                        key={chip}
+                        selected={attributes.includes(chip)}
+                        disabled={!attributes.includes(chip) && attributes.length >= MAX_ATTRIBUTES}
+                        onClick={() => toggleAttribute(chip)}
+                      >
+                        {chip}
+                      </Chip>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
         ) : null}
 
         {error ? <div className="mt-4"><Notice tone="danger" icon="alert">{error}</Notice></div> : null}
 
-        <div className="mt-auto space-y-3 pt-8">
+        <div className="sticky bottom-0 z-10 mt-auto bg-gradient-to-t from-paper via-paper to-transparent pb-2 pt-6">
           <Button
             fullWidth
             size="lg"
@@ -680,169 +578,164 @@ export function ReviewFlow({
             loading={drafting}
             onClick={continueToWriting}
           >
-            Continue
+            {rating < 1 ? "Tap a star to continue" : "See my review"}
           </Button>
+        </div>
+        <div className="space-y-3 pt-3">
+          <Hint icon="shield">{MICROCOPY.nothingPostedWithoutYou}</Hint>
+          <PublicGoogleReviewLink reviewUrl={reviewUrl} label="Skip straight to Google" />
           {trustLine}
         </div>
       </div>
     );
   }
 
-  // ── Step 3: the suggested wording, fully editable ─────────
+  // ── Screen 2: one box, one Copy button, one Google button ───
   if (step === "write") {
-    const showDrafts = drafts.length > 0 && !ownWords;
     const hasText = reviewText.trim().length > 0;
     // Loading state only while the customer is actually waiting for drafts;
     // choosing "write my own" ends the wait for them even if the request is
     // still in flight.
     const waitingForDrafts = drafting && !ownWords;
+    const hasDrafts = drafts.length > 0;
     return (
-      <div className="flex flex-1 flex-col py-6">
-        <StepProgress current={hasServiceStep ? 2 : 1} labels={stepLabels} onBack={() => setStep("rate")} />
+      <div className="flex flex-1 flex-col py-5">
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => setStep("tell")}
+            className="-mx-1 inline-flex min-h-[44px] items-center gap-1 px-1 text-[13px] font-semibold text-sub transition-all hover:text-ink active:scale-[0.98]"
+          >
+            <Icon name="chevron-left" size={16} /> Change my answers
+          </button>
+          <span className="inline-flex items-center gap-0.5" aria-label={`${rating} out of 5 stars`}>
+            {[1, 2, 3, 4, 5].map((n) => (
+              <Icon key={n} name="star-fill" size={14} className={n <= rating ? "text-star" : "text-hairline"} />
+            ))}
+          </span>
+        </div>
 
-        <h1 className="text-[22px] font-extrabold text-ink">
-          {waitingForDrafts
-            ? "Putting your answers into words"
-            : showDrafts
-              ? "Here's a starting point"
-              : "Share your experience in your own words"}
+        <h1 className="mt-3 text-[22px] font-extrabold leading-tight tracking-tight text-ink">
+          {waitingForDrafts ? "Writing it up for you" : hasDrafts && !ownWords ? "Your review is ready" : "Your review, in your own words"}
         </h1>
-        <p className="mt-1 text-[14px] leading-relaxed text-sub">
+        <p className="mt-1.5 text-[14px] leading-relaxed text-sub">
           {waitingForDrafts
-            ? "A few seconds. You'll get three options to pick from and edit, or you can start writing now."
-            : showDrafts
-              ? MICROCOPY.draftFromYourAnswers
+            ? "A few seconds. Built only from what you just told us — or start typing now."
+            : hasDrafts && !ownWords
+              ? "Read it, change anything you like, then copy it to Google. Only what you told us went into it."
               : MICROCOPY.customerWordsOnly}
         </p>
 
-        {picked.length > 0 ? (
-          <div className="mt-4 rounded-card border border-hairline bg-card px-3.5 py-3">
-            <div className="text-[11px] font-bold uppercase tracking-wide text-faint">
-              What you told us
-            </div>
-            <dl className="mt-2 space-y-1.5">
-              {picked.map((row) => (
-                <div key={row.label} className="flex flex-wrap items-baseline gap-x-2">
-                  <dt className="text-[12px] text-faint">{row.label}</dt>
-                  <dd className="text-[13px] font-semibold text-ink">{row.value}</dd>
-                </div>
-              ))}
-            </dl>
+        {(selectedServices.length > 0 || attributes.length > 0) ? (
+          <div className="mt-3 flex flex-wrap gap-1.5" aria-label="What you told us">
+            {selectedServices.map((item) => (
+              <span key={`s-${item}`} className="rounded-chip bg-primary-tint px-2.5 py-1 text-[12px] font-semibold text-primary-dark">
+                {item}
+              </span>
+            ))}
+            {attributes.map((item) => (
+              <span key={`a-${item}`} className="rounded-chip border border-hairline bg-card px-2.5 py-1 text-[12px] font-medium text-sub">
+                {item}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        {hasDrafts ? (
+          <div className="mt-4 flex gap-1.5 overflow-x-auto pb-1" role="radiogroup" aria-label="Choose a starting point">
+            {drafts.map((draft, index) => {
+              const active = !ownWords && selectedDraft === index;
+              return (
+                <button
+                  key={draft.tone}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => chooseDraft(index)}
+                  className={cn(
+                    "shrink-0 rounded-chip border px-3 py-1.5 text-[12px] font-semibold transition-colors min-h-[36px]",
+                    active ? "border-primary bg-primary text-white" : "border-hairline bg-card text-sub hover:border-primary/40 hover:text-ink",
+                  )}
+                >
+                  {draft.tone}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              role="radio"
+              aria-checked={ownWords}
+              onClick={writeMyOwn}
+              className={cn(
+                "shrink-0 rounded-chip border px-3 py-1.5 text-[12px] font-semibold transition-colors min-h-[36px]",
+                ownWords ? "border-primary bg-primary text-white" : "border-hairline bg-card text-sub hover:border-primary/40 hover:text-ink",
+              )}
+            >
+              Write my own
+            </button>
           </div>
         ) : null}
 
         {waitingForDrafts ? (
-          <div className="mt-6 space-y-3" aria-live="polite">
-            <p className="text-[13px] text-sub">Putting your answers into words…</p>
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="shimmer h-24 rounded-card" />
-            ))}
+          <div className="mt-4" aria-live="polite">
+            <div className="shimmer h-40 rounded-card" />
             <button
               type="button"
               onClick={writeMyOwn}
-              className="min-h-[44px] self-start text-[13px] font-semibold text-primary underline underline-offset-2"
+              className="mt-3 min-h-[44px] text-[13px] font-semibold text-primary underline underline-offset-2"
             >
-              {MICROCOPY.draftWriteMyOwn} Write my own
+              Write my own instead
             </button>
           </div>
-        ) : showDrafts ? (
-          <>
-            {!coachDismissed ? (
-              <div className="mt-4 rounded-card border border-primary/25 bg-primary-wash/70 p-3.5 animate-fade-in" role="note">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="text-[13px] font-bold text-ink">Three options, all yours to change</div>
-                  <button
-                    type="button"
-                    onClick={dismissCoach}
-                    aria-label="Dismiss tips"
-                    className="-mr-1 -mt-1 grid size-8 shrink-0 place-items-center rounded-btn text-sub hover:bg-card hover:text-ink"
-                  >
-                    <Icon name="x" size={15} />
-                  </button>
-                </div>
-                <ul className="mt-2 space-y-1.5">
-                  <li className="flex items-start gap-2 text-[12px] leading-relaxed text-sub">
-                    <Icon name="check-circle" size={14} className="mt-0.5 shrink-0 text-primary" /> Tap a card to choose it.
-                  </li>
-                  <li className="flex items-start gap-2 text-[12px] leading-relaxed text-sub">
-                    <Icon name="pencil" size={14} className="mt-0.5 shrink-0 text-primary" /> Tap the pencil to change any line.
-                  </li>
-                  <li className="flex items-start gap-2 text-[12px] leading-relaxed text-sub">
-                    <Icon name="file" size={14} className="mt-0.5 shrink-0 text-primary" /> Or write your own from a blank page below.
-                  </li>
-                </ul>
-              </div>
-            ) : null}
-            <div className="mt-4 space-y-3" role="radiogroup" aria-label="Choose a starting point">
-              {drafts.map((draft, index) => (
-                <DraftCard
-                  key={draft.tone}
-                  text={draft.text}
-                  tone={draft.tone}
-                  selected={selectedDraft === index}
-                  onSelect={() => chooseDraft(index)}
-                  onEdit={(value) => editDraft(index, value)}
-                />
-              ))}
-            </div>
-            <p className="mt-3 text-[12px] leading-relaxed text-faint">
-              {draftSource === "ai" ? MICROCOPY.aiDraftDisclaimer : MICROCOPY.draftTemplateDisclaimer}{" "}
-              {MICROCOPY.draftEditBeforePosting}
-            </p>
-            <button
-              type="button"
-              onClick={writeMyOwn}
-              className="mt-3 min-h-[44px] self-start text-[13px] font-semibold text-primary underline underline-offset-2"
-            >
-              {MICROCOPY.draftWriteMyOwn} Write my own
-            </button>
-          </>
         ) : (
-          <>
-            <div className="mt-5">
-              <Textarea
-                value={reviewText}
-                onChange={(event) => {
-                  setReviewText(event.target.value.slice(0, 2_000));
-                  setEditMessage(null);
-                }}
-                placeholder="What happened during your experience, and what would be useful for another customer to know?"
-                rows={7}
-                aria-label="Your Google review in your own words"
-              />
-              <div className="mt-2 flex items-start justify-between gap-4">
-                <p className="text-[11px] leading-relaxed text-faint">{MICROCOPY.aiReviewEditDisclaimer}</p>
-                <span className="shrink-0 text-[11px] tabular-nums text-faint">{reviewText.length}/2000</span>
+          <div
+            className={cn(
+              "mt-3 overflow-hidden rounded-card border-2 bg-card shadow-sm transition-colors focus-within:border-primary",
+              copied ? "border-primary" : "border-primary/30",
+            )}
+          >
+            <textarea
+              value={reviewText}
+              onChange={(event) => editText(event.target.value)}
+              placeholder="What happened, and what would be useful for the next person to know?"
+              rows={7}
+              aria-label="Your Google review in your own words"
+              className="block w-full resize-y bg-transparent px-4 py-3.5 text-[15px] leading-relaxed text-ink placeholder:text-faint focus-visible:outline-none"
+            />
+            <div className="flex items-center justify-between gap-2 border-t border-hairline bg-paper/60 px-3 py-2">
+              <span className="text-[11px] tabular-nums text-faint">{reviewText.length}/2000</span>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon="sparkles"
+                  onClick={improveClarity}
+                  loading={loading}
+                  disabled={reviewText.trim().length < 10}
+                >
+                  Improve clarity only
+                </Button>
+                <Button
+                  variant={copied ? "primary" : "secondary"}
+                  size="sm"
+                  icon={copied ? "check" : "copy"}
+                  onClick={copyText}
+                  disabled={!hasText}
+                >
+                  {copied ? "Copied" : "Copy"}
+                </Button>
               </div>
             </div>
-
-            <Button
-              className="mt-4 self-start"
-              variant="secondary"
-              size="sm"
-              icon="sparkles"
-              onClick={improveClarity}
-              loading={loading}
-              disabled={reviewText.trim().length < 10}
-            >
-              Improve clarity only
-            </Button>
-
-            {drafts.length > 0 ? (
-              <button
-                type="button"
-                onClick={() => chooseDraft(selectedDraft)}
-                className="mt-3 min-h-[44px] self-start text-[13px] font-semibold text-primary underline underline-offset-2"
-              >
-                Show the suggested wording again
-              </button>
-            ) : drafting ? (
-              <p className="mt-3 text-[12px] text-faint" aria-live="polite">
-                Suggested wording is still on its way — it will appear as an option, and your text stays put.
-              </p>
-            ) : null}
-          </>
+          </div>
         )}
+
+        <p className="mt-2 text-[11px] leading-relaxed text-faint">
+          {hasDrafts && !ownWords
+            ? draftSource === "ai"
+              ? MICROCOPY.aiDraftDisclaimer
+              : MICROCOPY.draftTemplateDisclaimer
+            : MICROCOPY.aiReviewEditDisclaimer}
+        </p>
 
         {editMessage ? (
           <p role="status" className="mt-3 flex items-start gap-2 text-[12px] leading-relaxed text-primary-dark">
@@ -851,40 +744,22 @@ export function ReviewFlow({
         ) : null}
         {error ? <div className="mt-4"><Notice tone="danger" icon="alert">{error}</Notice></div> : null}
         {copied ? (
-          <p role="status" className="mt-4 flex items-center justify-center gap-1.5 text-[13px] font-semibold text-primary">
-            <Icon name="check-circle" size={16} /> Your words were copied before Google opened.
+          <p role="status" className="mt-3 flex items-center justify-center gap-1.5 text-[13px] font-semibold text-primary">
+            <Icon name="check-circle" size={16} /> Copied. Paste it into the Google review box.
           </p>
         ) : null}
 
-        {/* What happens after the tap — inline, so the button below is never a surprise. */}
-        {!waitingForDrafts ? (
-          <div className="mt-6">
-            <div className="flex items-center justify-between gap-3">
-              <div className="kicker">What happens next</div>
-              <button
-                type="button"
-                onClick={() => setHowToOpen(true)}
-                className="inline-flex min-h-[36px] items-center gap-1 text-[12px] font-semibold text-primary underline-offset-2 hover:underline"
-              >
-                <Icon name="alert" size={13} /> How does posting work?
-              </button>
-            </div>
-            <PostingSteps copied={hasText} compact className="mt-2" />
-          </div>
-        ) : null}
-
         <div className="mt-auto space-y-3 pt-6">
+          {!waitingForDrafts ? <PostingSteps copied={hasText} compact className="justify-center" /> : null}
           <PublicGoogleReviewLink
             reviewUrl={reviewUrl}
             prominent
-            label={hasText ? "Copy my words & open Google" : "Open Google to write my review"}
+            label={hasText ? (copied ? "Open Google & paste" : "Copy & open Google") : "Open Google to write my review"}
             onBeforeOpen={onPublicReviewOpen}
           />
           <Button variant="ghost" fullWidth onClick={() => setStep("feedback")}>Send private feedback instead</Button>
           {trustLine}
         </div>
-
-        <HowToPostSheet open={howToOpen} onClose={() => setHowToOpen(false)} copied={hasText} business={business} />
       </div>
     );
   }
@@ -900,7 +775,7 @@ export function ReviewFlow({
           <h1 className="mt-4 text-[22px] font-extrabold text-ink">Thank you - the owner will see this</h1>
           <p className="mt-1 text-[14px] text-sub">Your private note does not prevent you from reviewing publicly.</p>
           <div className="mt-6 w-full">
-            <PublicGoogleReviewLink reviewUrl={reviewUrl} prominent />
+            <PublicGoogleReviewLink reviewUrl={reviewUrl} />
           </div>
         </div>
       ) : (

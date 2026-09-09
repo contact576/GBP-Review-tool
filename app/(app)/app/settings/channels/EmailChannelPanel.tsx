@@ -7,6 +7,7 @@ import { Badge, Chip } from "@/components/ds/misc";
 import { Field, Input, Select, Toggle } from "@/components/ds/form";
 import { useToast } from "@/components/ds/Toast";
 import { Icon } from "@/components/icons";
+import { BrandLogo } from "@/components/icons/brands";
 import { Callout } from "../SettingsUI";
 import {
   saveEmailSettingsAction,
@@ -254,7 +255,7 @@ export function EmailChannelPanel({
             {isGmail ? (
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-hairline bg-paper p-3">
                 <div className="flex items-center gap-2 text-[14px] text-ink">
-                  <Icon name="google" size={18} />
+                  <BrandLogo name="gmail" size={20} title="" />
                   <span className="font-semibold">{settings.googleAccount || settings.fromEmail}</span>
                   {settings.connectedAt ? (
                     <span className="text-[12px] text-faint">

@@ -11,7 +11,8 @@ import { Tabs, type TabItem } from "@/components/ds/Tabs";
 import { Table, type Column, type SortDirection } from "@/components/ds/Table";
 import { Drawer } from "@/components/ds/Drawer";
 import { useToast } from "@/components/ds/Toast";
-import { Icon, type IconName } from "@/components/icons";
+import { Icon } from "@/components/icons";
+import { BrandLogo, ChannelLogo } from "@/components/icons/brands";
 import { Funnel } from "@/components/charts";
 import { funnelCounts } from "@/lib/data/selectors";
 import { canSendService } from "@/lib/compliance/consent";
@@ -44,12 +45,6 @@ const STATUS_META: Record<RequestStatus, { label: string; tone: "neutral" | "pri
   private_feedback: { label: "Private feedback", tone: "sub" },
   suppressed: { label: "Suppressed", tone: "danger" },
   failed: { label: "Failed", tone: "danger" },
-};
-
-const CHANNEL_ICON: Record<Channel, IconName> = {
-  email: "mail",
-  sms: "message",
-  whatsapp: "message",
 };
 
 /** Dense-row rating stars render in INK, never the gold star hue. */
@@ -87,7 +82,7 @@ function CopyLinkPill({ url }: { url: string }) {
       aria-label="Copy review link"
       className="flex w-full items-center gap-2 rounded-chip border border-primary/20 bg-primary-wash px-3 py-2 text-left transition-colors hover:border-primary/40"
     >
-      <Icon name="google" size={15} className="shrink-0 text-primary-dark" />
+      <BrandLogo name="google" size={15} title="" />
       <span className="data-chip min-w-0 flex-1 truncate text-primary-dark">{url}</span>
       <span className="inline-flex shrink-0 items-center gap-1 text-[12px] font-semibold text-primary-dark">
         <Icon name={copied ? "check" : "copy"} size={14} />
@@ -249,7 +244,7 @@ export function RequestsView({
       width: "120px",
       render: (r) => (
         <span className="inline-flex items-center gap-1.5 capitalize text-sub">
-          <Icon name={CHANNEL_ICON[r.channel]} size={15} />
+          <ChannelLogo channel={r.channel} size={15} />
           {r.channel}
         </span>
       ),
@@ -373,7 +368,7 @@ export function RequestsView({
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex min-w-0 items-center gap-3">
                           <div className="grid size-9 shrink-0 place-items-center rounded-chip bg-primary-tint text-primary-dark">
-                            <Icon name={CHANNEL_ICON[r.channel]} size={16} />
+                            <ChannelLogo channel={r.channel} size={16} />
                           </div>
                           <div className="min-w-0">
                             <div className="truncate text-[15px] font-semibold text-ink">{r.customerName}</div>

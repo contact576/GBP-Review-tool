@@ -3,6 +3,7 @@ import { getIndustry } from "@/lib/industries";
 import {
   ATTRIBUTE_CHIP_LIMIT,
   allAllowedChips,
+  chipGroupsForServices,
   positiveChipsForService,
   serviceSpecificChips,
 } from "@/lib/industries/service-attributes";
@@ -67,6 +68,71 @@ describe("service-aware experience chips", () => {
   it("never offers an outcome claim as a chip", () => {
     const banned = /cured|healed|guarantee|fixed forever|best in town|highly recommend/i;
     for (const service of ["root canal", "physio", "furnace repair", "tax return", "wedding"]) {
+      for (const chip of serviceSpecificChips(service)) expect(chip).not.toMatch(banned);
+    }
+  });
+});
+
+describe("chipGroupsForServices", () => {
+  const industry = ["Professional team", "Clear communication", "Delivered on time"];
+  const neutral = ["First engagement", "Repeat client"];
+
+  it("gives each picked service its own row with that service's vocabulary", () => {
+    const groups = chipGroupsForServices(["Google Ads", "Meta Ads"], industry, neutral);
+    expect(groups.map((group) => group.service)).toEqual(["Google Ads", "Meta Ads", null]);
+    expect(groups[0]!.chips).toContain("Thorough keyword research");
+    expect(groups[0]!.chips).toContain("Landing page looked great");
+    expect(groups[1]!.chips).toContain("Scroll-stopping creatives");
+    expect(groups[1]!.chips).toContain("Targeting made sense");
+    // The general row carries the industry chips and the neutral ones.
+    expect(groups[2]!.chips).toContain("Professional team");
+    expect(groups[2]!.chips).toContain("First engagement");
+  });
+
+  it("never repeats a chip across rows", () => {
+    const groups = chipGroupsForServices(["Google Ads", "Meta Ads", "SEO"], industry, neutral);
+    const all = groups.flatMap((group) => group.chips.map((chip) => chip.toLowerCase()));
+    expect(new Set(all).size).toBe(all.length);
+    // "Clear reporting" is offered by Meta Ads; the shared "Clear monthly
+    // reporting" from Google Ads is a different chip, so both may appear, but
+    // the SEO row must not re-offer anything already shown.
+    for (const chip of groups[2]!.chips) {
+      expect(groups[0]!.chips).not.toContain(chip);
+      expect(groups[1]!.chips).not.toContain(chip);
+    }
+  });
+
+  it("collapses to one general row when no service was picked, matching the single-service list", () => {
+    const groups = chipGroupsForServices([], industry, neutral);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.service).toBeNull();
+    const expected = [...positiveChipsForService(undefined, industry), ...neutral];
+    expect(groups[0]!.chips).toEqual(expected);
+  });
+
+  it("merges services that share a vocabulary into one labelled row", () => {
+    const groups = chipGroupsForServices(["Injury rehab", "Manual therapy", "Exercise programs"], industry, neutral);
+    expect(groups.map((group) => group.service)).toEqual(["Injury rehab & Manual therapy", "Exercise programs", null]);
+    expect(groups[0]!.chips).toContain("Hands-on and attentive");
+    expect(groups[1]!.chips).toContain("Patient and encouraging");
+  });
+
+  it("skips a service row when nothing describes that service", () => {
+    const groups = chipGroupsForServices(["Zorbulation"], industry, neutral);
+    expect(groups.map((group) => group.service)).toEqual([null]);
+  });
+
+  it("keeps every group chip inside the allowlist the draft API enforces", () => {
+    const services = ["Google Ads", "Meta Ads", "SEO", "Web design"];
+    const allowed = new Set(allAllowedChips(services, industry, neutral).map((chip) => chip.toLowerCase()));
+    for (const group of chipGroupsForServices(services, industry, neutral)) {
+      for (const chip of group.chips) expect(allowed.has(chip.toLowerCase())).toBe(true);
+    }
+  });
+
+  it("offers experience chips, never outcome claims, for marketing services", () => {
+    const banned = /doubled|roi|ranked #1|guarantee|leads went up|sales|revenue|results/i;
+    for (const service of ["Google Ads", "Meta Ads", "SEO", "Web design", "Email marketing"]) {
       for (const chip of serviceSpecificChips(service)) expect(chip).not.toMatch(banned);
     }
   });

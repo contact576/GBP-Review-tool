@@ -10,6 +10,7 @@ import { Table, type Column, type SortDirection } from "@/components/ds/Table";
 import { Drawer } from "@/components/ds/Drawer";
 import { useToast } from "@/components/ds/Toast";
 import { Icon } from "@/components/icons";
+import { BrandLogo } from "@/components/icons/brands";
 import { StatTile } from "@/components/charts";
 import { ReviewCard, Stars } from "@/components/review/ReviewCard";
 import { PublicGoogleReviewLink } from "@/components/review/PublicGoogleReviewLink";
@@ -532,7 +533,7 @@ export function ReviewsInbox({
               </div>
             ) : (
               <div className="flex items-start gap-2 rounded-btn border border-primary/25 bg-primary-wash px-3 py-2">
-                <Icon name="google" size={16} className="mt-0.5 shrink-0 text-primary-dark" />
+                <BrandLogo name="google" size={16} className="mt-0.5" title="" />
                 <p className="text-[13px] text-sub">
                   This posts publicly on your Google Business Profile. Foundly reads it back to
                   confirm it landed.

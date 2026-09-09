@@ -1,6 +1,7 @@
 "use client";
 
 import { Icon } from "@/components/icons";
+import { BrandLogo } from "@/components/icons/brands";
 import { Badge } from "@/components/ds/misc";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
 
@@ -94,7 +95,7 @@ export function ReviewFlowPreview() {
               onClick={(e) => e.preventDefault()}
               className="mt-4 inline-flex h-11 w-full select-none items-center justify-center gap-2 rounded-btn bg-primary px-4 text-[14px] font-semibold text-white shadow-[0_1px_2px_rgba(23,32,29,0.12),inset_0_1px_0_rgba(255,255,255,0.16)]"
             >
-              <Icon name="google" size={16} />
+              <BrandLogo name="google" size={20} tile title="" />
               Copy my words &amp; open Google
             </a>
             <p className="mt-2 text-center text-[10px] leading-snug text-faint">

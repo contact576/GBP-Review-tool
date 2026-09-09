@@ -84,46 +84,28 @@ export async function dismissTour(page: Page, expectShown = false): Promise<void
   }
 }
 
-/**
- * A fresh review link opens on a welcome screen that explains the three steps
- * and how long they take. Step through it when it is there; a returning
- * session (already rated) skips it, so its absence is not an error.
- */
-export async function beginReview(page: Page): Promise<void> {
-  const start = page.getByRole("button", { name: "Start my review" });
-  if (await start.isVisible().catch(() => false)) await start.click();
-}
-
-/** Scan a QR slug, land on the tokenized customer review page, and pass the welcome. */
+/** Scan a QR slug and land on the tokenized customer review page. */
 export async function scanQr(page: Page, slug: string): Promise<void> {
   await page.goto(`/q/${slug}`);
   await page.waitForURL(/\/r\/[A-Za-z0-9_]+/);
-  await beginReview(page);
 }
 
 /**
- * Walk the customer panel from the service question through to the writing
- * surface: skip/choose a service, pick a star rating, then Continue.
- * Leaves the page on the draft/own-words step.
+ * Answer the first screen — optionally pick one or more services, choose a
+ * star rating — and continue to the review box. Leaves the page on the
+ * writing screen (suggested wording in the box, or a blank box).
  */
 export async function rateExperience(
   page: Page,
   stars: 1 | 2 | 3 | 4 | 5,
-  service?: string,
+  services?: string | string[],
 ): Promise<void> {
-  // Step 1 is only rendered when the workspace has a service list.
-  const skip = page.getByRole("button", { name: /^(Skip this|Continue)$/ });
-  if (await page.getByRole("heading", { name: /What did you come to/ }).isVisible().catch(() => false)) {
-    if (service) await page.getByRole("button", { name: service, exact: true }).click();
-    await skip.first().click();
+  const picks = typeof services === "string" ? [services] : services ?? [];
+  for (const service of picks) {
+    await page.getByRole("group", { name: "Services" }).getByRole("button", { name: service, exact: true }).click();
   }
   await page.getByRole("radio", { name: `${stars} star${stars === 1 ? "" : "s"}` }).click();
-  await page.getByRole("button", { name: "Continue" }).click();
-}
-
-/** One AI draft card, located by its tone badge. */
-export function draftCard(page: Page, tone: string) {
-  return page.locator("div.rounded-card").filter({ hasText: tone });
+  await page.getByRole("button", { name: "See my review" }).click();
 }
 
 export const DRAFT_TONES = [
@@ -132,13 +114,23 @@ export const DRAFT_TONES = [
   "Warm & conversational",
 ] as const;
 
-/** Collect the three visible draft texts (asserts all three cards render). */
+/** The review box on the writing screen. */
+export function reviewBox(page: Page) {
+  return page.getByLabel("Your Google review in your own words");
+}
+
+/**
+ * Read the three suggested wordings by selecting each tone in turn (asserts
+ * all three are offered). Leaves the first tone selected.
+ */
 export async function collectDraftTexts(page: Page): Promise<string[]> {
   const texts: string[] = [];
   for (const tone of DRAFT_TONES) {
-    const card = draftCard(page, tone);
-    await expect(card).toBeVisible();
-    texts.push((await card.locator("p").innerText()).trim());
+    const tab = page.getByRole("radio", { name: tone });
+    await expect(tab).toBeVisible();
+    await tab.click();
+    texts.push((await reviewBox(page).inputValue()).trim());
   }
+  await page.getByRole("radio", { name: DRAFT_TONES[0] }).click();
   return texts;
 }

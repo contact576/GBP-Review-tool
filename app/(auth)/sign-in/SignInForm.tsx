@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Icon } from "@/components/icons";
+import { BrandLogo } from "@/components/icons/brands";
 import { Button } from "@/components/ds/Button";
 import { Card } from "@/components/ds/Card";
 import { Field, Input } from "@/components/ds/form";
@@ -151,13 +152,13 @@ export function SignInForm({
 
       {googleEnabled ? (
         <a href="/api/auth/google" className={googleLinkClass}>
-          <Icon name="google" size={18} />
+          <BrandLogo name="google" size={18} title="" />
           Continue with Google
         </a>
       ) : (
         <div>
           <span aria-disabled="true" className={`${googleLinkClass} pointer-events-none opacity-50`}>
-            <Icon name="google" size={18} />
+            <BrandLogo name="google" size={18} title="" />
             Continue with Google
           </span>
           <p className="mt-1.5 text-center text-[12px] text-faint">

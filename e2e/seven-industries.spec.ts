@@ -4,7 +4,6 @@ import {
   uniqueEmail,
   captureCustomer,
   rateExperience,
-  beginReview,
 } from "./helpers";
 
 /**
@@ -109,30 +108,26 @@ for (const s of SCENARIOS) {
     //    panel opens on the service question naming that business.
     await page.goto(`/q/${slug}`);
     await page.waitForURL(/\/r\/[A-Za-z0-9_]+/);
-    // The welcome screen names the business and the public Google link is
-    // already present on it — nothing is gated behind "Start".
+    // The one-screen questionnaire names the business, offers this
+    // industry's own service list, and the public Google link is already on
+    // it — nothing is gated.
     await expect(page.getByRole("heading", { name: new RegExp(escapeRegex(s.business)) })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Services" })).toBeVisible();
     await expect(page.locator('[data-compliance="public-google-link"]')).toBeVisible();
-    await beginReview(page);
-    await expect(
-      page.getByRole("heading", {
-        name: new RegExp(`What did you come to ${escapeRegex(s.business)} for`),
-      }),
-    ).toBeVisible();
 
-    // 6. Every industry offers its own service list, then the same rating step.
+    // 6. Every industry reaches the same rating step and the same review box.
     await rateExperience(page, 5);
     await expect(page.locator('[data-compliance="public-google-link"]')).toBeVisible();
 
     // 7. For auto_repair, run the full 5★ journey to the thank-you page using
     //    the customer's own words rather than any suggested wording.
     if (s.fullFlow) {
-      const ownWords = page.getByRole("button", { name: /Write my own/ });
+      const ownWords = page.getByRole("radio", { name: "Write my own" });
       if (await ownWords.isVisible().catch(() => false)) await ownWords.click();
       await page.getByLabel("Your Google review in your own words").fill(
         "The team explained the work clearly and treated me with respect.",
       );
-      await page.getByRole("link", { name: "Copy my words & open Google" }).click();
+      await page.getByRole("link", { name: "Copy & open Google" }).click();
       await page.waitForURL(/\/thanks/);
       // The thank-you page carries the hand-off: the customer's own words,
       // a copy-again control, and the same public Google link.

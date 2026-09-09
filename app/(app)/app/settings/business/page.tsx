@@ -5,6 +5,7 @@ import { Badge } from "@/components/ds/misc";
 import { LinkButton } from "@/components/ds/Button";
 import { ProgressMeter } from "@/components/charts";
 import { Icon } from "@/components/icons";
+import { BrandLogo } from "@/components/icons/brands";
 import { formatRelative } from "@/lib/utils/format";
 import { SettingsShell } from "../SettingsShell";
 import { Callout, SettingsSection, SpecList, SpecRow } from "../SettingsUI";
@@ -80,8 +81,8 @@ export default async function BusinessSettingsPage() {
       <SettingsSection title="Google Business Profile">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
-            <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-primary-tint text-primary-dark">
-              <Icon name="google" size={20} />
+            <div className="grid size-10 shrink-0 place-items-center rounded-btn border border-hairline bg-card">
+              <BrandLogo name="google" size={22} title="" />
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-2">

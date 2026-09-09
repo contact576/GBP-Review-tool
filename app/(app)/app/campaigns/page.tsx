@@ -5,19 +5,14 @@ import { LinkButton } from "@/components/ds/Button";
 import { Badge, EmptyState } from "@/components/ds/misc";
 import { PageHeader } from "@/components/app/PageHeader";
 import { Icon, type IconName } from "@/components/icons";
+import { ChannelLogo } from "@/components/icons/brands";
 import { Funnel } from "@/components/charts";
 import { formatNumber, formatDate } from "@/lib/utils/format";
 import { emailEnabled } from "@/lib/email";
 import { smsEnabled } from "@/lib/sms/twilio";
 import { upgradeFor } from "@/lib/billing/plans";
 import { subscriptionHasFeature } from "@/lib/billing/trial";
-import type { Campaign, CampaignDeliveryState, Channel } from "@/lib/data/types";
-
-const CHANNEL_ICON: Record<Channel, IconName> = {
-  email: "mail",
-  sms: "message",
-  whatsapp: "message",
-};
+import type { Campaign, CampaignDeliveryState } from "@/lib/data/types";
 
 const STATE_LABEL: Record<CampaignDeliveryState, string> = {
   not_configured: "Not sent — delivery offline",
@@ -211,7 +206,7 @@ function CampaignCard({ c }: { c: Campaign }) {
             <Badge tone="neutral" icon="file">Draft</Badge>
           )}
           <div className="flex items-center gap-1 text-[12px] text-faint">
-            <Icon name={CHANNEL_ICON[c.channel]} size={14} />
+            <ChannelLogo channel={c.channel} size={14} />
             <span className="capitalize">{c.channel}</span>
           </div>
         </div>

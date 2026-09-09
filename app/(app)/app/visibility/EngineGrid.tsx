@@ -1,4 +1,5 @@
 import { Icon } from "@/components/icons";
+import { EngineLogo } from "@/components/icons/brands";
 import type { AeoCellState, AeoMatrixRow, AeoEngineOutcome } from "@/lib/aeo/multi";
 
 /**
@@ -37,7 +38,8 @@ export function EngineGrid({
                 scope="col"
                 className="px-1.5 py-2 text-center text-[11px] font-semibold uppercase tracking-wide text-faint"
               >
-                <span className="inline-flex flex-col items-center gap-0.5">
+                <span className="inline-flex flex-col items-center gap-1">
+                  <EngineLogo engineId={engine.engineId} size={20} />
                   <span className="whitespace-nowrap">{engine.productName}</span>
                   {engine.state === "not_connected" ? (
                     <span className="text-[10px] font-medium normal-case tracking-normal text-faint">not connected</span>

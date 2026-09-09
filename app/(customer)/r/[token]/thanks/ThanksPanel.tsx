@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Icon } from "@/components/icons";
+import { BrandLogo } from "@/components/icons/brands";
 import { Button } from "@/components/ds/Button";
 import { PostingSteps } from "@/components/review/PostingSteps";
 import { reviewHandoffKey } from "../ReviewFlow";
@@ -109,7 +110,7 @@ export function ThanksPanel({ token, business, reviewUrl }: { token: string; bus
           data-compliance="public-google-link"
           className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-btn bg-primary px-5 py-3 text-[15px] font-bold text-white shadow-sm transition-all hover:bg-primary-dark active:scale-[0.98]"
         >
-          <Icon name="google" size={18} /> {hasText ? "Open Google again" : "Open Google"}
+          <BrandLogo name="google" size={24} tile title="" /> {hasText ? "Open Google again" : "Open Google"}
           <Icon name="external" size={16} className="text-white/70" />
         </a>
         <p className="text-center text-[12px] leading-relaxed text-faint">

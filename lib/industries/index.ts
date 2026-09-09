@@ -9,7 +9,7 @@ import { INDUSTRY_CATALOG, PROFESSIONAL_SERVICES_INDUSTRY } from "./catalog";
 
 export type { Industry, IndustryGroup } from "./types";
 
-/** All 36 catalog industries, in display/match order. */
+/** All 37 catalog industries, in display/match order. */
 export const INDUSTRIES: readonly Industry[] = INDUSTRY_CATALOG;
 
 /** Group headers for pickers, in display order. */

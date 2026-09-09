@@ -1,5 +1,6 @@
 import { getWidgetData } from "@/lib/data";
 import { Icon } from "@/components/icons";
+import { BrandLogo } from "@/components/icons/brands";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
 import { cn } from "@/lib/utils/cn";
 import { formatRelative } from "@/lib/utils/format";
@@ -80,8 +81,8 @@ export default async function WidgetPage({
           className="inline-flex max-w-full items-center gap-3 rounded-card border border-hairline bg-card px-3.5 py-2.5 shadow-sm transition-colors hover:border-primary/40"
           aria-label={hasAggregate ? `${data.business}: rated ${data.rating.toFixed(1)} from ${data.reviewCount} Google reviews. Leave a review.` : `Leave a review for ${data.business}`}
         >
-          <span className="grid size-9 shrink-0 place-items-center rounded-btn bg-hero text-white">
-            <Icon name="google" size={18} />
+          <span className="grid size-9 shrink-0 place-items-center rounded-btn border border-hairline bg-card">
+            <BrandLogo name="google" size={20} title="" />
           </span>
           <span className="min-w-0">
             {hasAggregate ? (
@@ -188,7 +189,7 @@ export default async function WidgetPage({
               rel="noopener noreferrer"
               className="inline-flex min-h-[36px] items-center gap-1.5 text-[12px] font-semibold text-primary-dark underline-offset-2 hover:underline"
             >
-              <Icon name="google" size={14} /> Read all on Google <Icon name="external" size={12} className="text-faint" />
+              <BrandLogo name="google" size={14} title="" /> Read all on Google <Icon name="external" size={12} className="text-faint" />
             </a>
           ) : (
             <span />

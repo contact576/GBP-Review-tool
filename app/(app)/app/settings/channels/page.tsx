@@ -3,6 +3,7 @@ import { getSessionAndData } from "@/lib/data";
 import { readEmailSettings } from "@/lib/email/config";
 import { Badge } from "@/components/ds/misc";
 import { Icon, type IconName } from "@/components/icons";
+import { BrandLogo } from "@/components/icons/brands";
 import { SettingsShell } from "../SettingsShell";
 import { Callout, SettingsSection } from "../SettingsUI";
 import { googleSignInEnabled } from "@/lib/google/config";
@@ -90,7 +91,7 @@ export default async function ChannelsSettingsPage({
           />
 
           <ChannelRow
-            icon="chat"
+            icon={<BrandLogo name="whatsapp" size={22} title="" />}
             title="WhatsApp"
             detail="Ready — sends from your own WhatsApp, no API needed"
             badge={<Badge tone="primary" icon="check-circle">Ready</Badge>}
@@ -123,7 +124,7 @@ function ChannelRow({
   muted,
   children,
 }: {
-  icon: IconName;
+  icon: IconName | React.ReactElement;
   title: string;
   detail: string;
   badge: React.ReactNode;
@@ -134,8 +135,8 @@ function ChannelRow({
     <div className={muted ? "py-4 opacity-80" : "py-4"}>
       <div className="mb-2 flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="grid size-10 place-items-center rounded-btn bg-primary-wash text-primary">
-            <Icon name={icon} size={20} />
+          <div className="grid size-10 place-items-center rounded-btn border border-hairline bg-card text-primary">
+            {typeof icon === "string" ? <Icon name={icon} size={20} /> : icon}
           </div>
           <div>
             <div className="text-[15px] font-bold text-ink">{title}</div>

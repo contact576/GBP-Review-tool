@@ -32,7 +32,7 @@ export type PlanTier =
   | "agency";
 export type Channel = "email" | "sms" | "whatsapp";
 /**
- * Industry key — resolves against lib/industries catalog (36 industries +
+ * Industry key — resolves against lib/industries catalog (37 industries +
  * custom). Widened from the legacy 7-value union; legacy values remain valid
  * catalog keys.
  */

@@ -6,6 +6,7 @@ import { LinkButton } from "@/components/ds/Button";
 import { PageHeader } from "@/components/app/PageHeader";
 import { SyncGoogleButton } from "@/components/app/SyncGoogleButton";
 import { Icon, type IconName } from "@/components/icons";
+import { BrandLogo } from "@/components/icons/brands";
 import { ScoreDial } from "@/components/charts/ScoreDial";
 import { StatTile } from "@/components/charts/StatTile";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
@@ -125,7 +126,7 @@ export default async function ProfileAuditPage() {
                 Last read {formatRelative(view.observedAt)} · {formatDate(view.observedAt)}
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <Icon name="google" size={14} className="text-faint" />
+                <BrandLogo name="google" size={14} title="" />
                 {connectedCount} of {coverageEntries.length} data sources connected
               </span>
             </div>
