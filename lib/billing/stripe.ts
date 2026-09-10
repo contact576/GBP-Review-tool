@@ -73,13 +73,27 @@ export async function createCheckoutSession(input: {
     "subscription_data[metadata][tier]": input.tier,
     "subscription_data[metadata][interval]": input.interval,
     allow_promotion_codes: "true",
-    automatic_tax: "enabled",
+    "automatic_tax[enabled]": "true",
   };
   if (input.customerId) body.customer = input.customerId;
   else body.customer_email = input.customerEmail;
-  const res = await stripePost<{ url?: string }>("/checkout/sessions", body);
+  let res = await stripePost<{ url?: string }>("/checkout/sessions", body);
+  // Stripe Tax needs a head-office address on the account before automatic
+  // tax can be enabled (in test mode it refuses outright). An unconfigured
+  // tax setting must not block a real customer from paying, so retry once
+  // without it — the session is still fully valid, just untaxed — and the
+  // owner can turn tax on in the Stripe Dashboard whenever they are ready.
+  if (!res.ok && isAutomaticTaxRefusal(res.error)) {
+    const { "automatic_tax[enabled]": _tax, ...untaxed } = body;
+    res = await stripePost<{ url?: string }>("/checkout/sessions", untaxed);
+  }
   if (!res.ok) return res;
   return res.data.url ? { ok: true, url: res.data.url } : { ok: false, error: "no url" };
+}
+
+/** Exported for tests: the Stripe messages that mean "tax is not set up", not "the request is wrong". */
+export function isAutomaticTaxRefusal(message: string): boolean {
+  return /automatic tax/i.test(message) && /(head office|tax settings|origin address|not (been )?enabled|must (have|configure|set))/i.test(message);
 }
 
 /** Apply an immutable credit to the referrer's next Stripe invoice. */

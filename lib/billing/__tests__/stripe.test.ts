@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { verifyWebhook } from "@/lib/billing/stripe";
+import { isAutomaticTaxRefusal, verifyWebhook } from "@/lib/billing/stripe";
 
 const originalSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
@@ -62,5 +62,22 @@ describe("Stripe webhook verification", () => {
       ok: false,
       error: "signature mismatch",
     });
+  });
+});
+
+describe("automatic tax fallback", () => {
+  it("recognises Stripe's 'tax not set up' refusals so checkout retries untaxed", () => {
+    expect(
+      isAutomaticTaxRefusal(
+        "You must have a valid head office address to enable automatic tax calculation in test mode.  Visit https://dashboard.stripe.com/test/settings/tax to update it.",
+      ),
+    ).toBe(true);
+    expect(isAutomaticTaxRefusal("Automatic tax has not been enabled for this account. Configure it in your tax settings.")).toBe(true);
+  });
+
+  it("leaves every other Stripe error alone", () => {
+    expect(isAutomaticTaxRefusal("No such price: 'price_missing'")).toBe(false);
+    expect(isAutomaticTaxRefusal("Invalid API Key provided")).toBe(false);
+    expect(isAutomaticTaxRefusal("automatic tax is not supported for this line item")).toBe(false);
   });
 });
