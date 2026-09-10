@@ -270,10 +270,10 @@ export default async function BusinessSettingsPage() {
       {snapshot?.externalEvidence ? (
         <SettingsSection
           kicker="Cross-source evidence"
-          title="Website, search, and social facts"
+          title="Website and search facts"
           action={<Badge tone="neutral">Read-only evidence</Badge>}
         >
-          <div className="grid gap-3 lg:grid-cols-3">
+          <div className="grid gap-3 lg:grid-cols-2">
             <EvidenceSourceCard
               icon="external"
               title="Business website"
@@ -289,14 +289,6 @@ export default async function BusinessSettingsPage() {
               metric={`${snapshot.externalEvidence.searchConsole.rows.length} query rows`}
               detail={snapshot.externalEvidence.searchConsole.error ?? `Verified property ${snapshot.externalEvidence.searchConsole.siteUrl ?? "connected"}.`}
               items={snapshot.externalEvidence.searchConsole.rows.slice(0, 3).map((row) => `${row.query} · ${row.impressions} impressions`)}
-            />
-            <EvidenceSourceCard
-              icon="camera"
-              title="Instagram"
-              status={snapshot.externalEvidence.instagram.status}
-              metric={`${snapshot.externalEvidence.instagram.media.length} posts read`}
-              detail={snapshot.externalEvidence.instagram.error ?? (snapshot.externalEvidence.instagram.username ? `Authorized @${snapshot.externalEvidence.instagram.username}.` : "Authorized professional account.")}
-              items={snapshot.externalEvidence.instagram.media.slice(0, 3).flatMap((post) => post.caption ? [post.caption.slice(0, 90)] : [])}
             />
           </div>
           <Callout tone="info" icon="shield" className="mt-4">

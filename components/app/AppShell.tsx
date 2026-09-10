@@ -109,10 +109,10 @@ export function AppShell({
                   href={item.href}
                   data-tour={item.tour}
                   className={cn(
-                    "relative mb-1 flex min-h-11 items-center gap-3 rounded-[9px] px-4 text-[14px] font-semibold transition-colors",
+                    "relative mb-0.5 flex min-h-10 items-center gap-3 rounded-md px-3 text-[14px] font-medium transition-[background-color,color] duration-150",
                     active
-                      ? "bg-white/[.085] text-white"
-                      : "text-white/65 hover:bg-white/[.055] hover:text-white",
+                      ? "bg-white/[.10] text-white"
+                      : "text-white/65 hover:bg-white/[.06] hover:text-white",
                   )}
                 >
                   {active ? <span className="absolute -left-4 h-7 w-0.5 rounded-r-full bg-gold" /> : null}
@@ -175,8 +175,8 @@ export function AppShell({
             className={cn(
               "z-20 flex items-center justify-between px-4 py-3",
               dashboardHome
-                ? "sticky top-0 bg-paper/94 backdrop-blur lg:relative lg:bg-paper lg:px-8 lg:pb-3 lg:pt-6"
-                : "sticky top-0 border-b border-hairline bg-paper/90 backdrop-blur lg:px-8",
+                ? "sticky top-0 border-b border-hairline bg-card lg:px-8 lg:py-3"
+                : "sticky top-0 border-b border-hairline bg-card lg:px-8",
             )}
           >
             <div className="flex items-center gap-2 lg:hidden">
@@ -185,7 +185,7 @@ export function AppShell({
 
             {dashboardHome ? (
               <div className="hidden min-w-0 lg:block">
-                <h1 className="text-[26px] font-extrabold leading-tight tracking-[-0.025em] text-ink">
+                <h1 className="text-[22px] font-bold leading-tight tracking-tight text-ink">
                   Good morning, {ownerName.split(" ")[0]}
                 </h1>
                 <DashboardBusinessSwitcher
@@ -223,7 +223,7 @@ export function AppShell({
               <Link
                 href="/app/notifications"
                 aria-label="Notifications"
-                className="relative grid size-10 place-items-center rounded-full text-sub hover:bg-card hover:text-ink hover:shadow-sm"
+                className="relative grid size-10 place-items-center rounded-full text-sub transition-colors hover:bg-card hover:text-ink hover:shadow-sm"
               >
                 <Icon name="bell" size={20} />
                 {unread ? (
@@ -244,7 +244,7 @@ export function AppShell({
             id="main"
             className={cn(
               "px-4 pb-24 pt-5 lg:pb-12",
-              dashboardHome ? "lg:px-7 lg:pt-2 xl:px-8" : "lg:px-8 lg:pt-7 xl:px-10",
+              dashboardHome ? "lg:px-6 lg:pt-5 xl:px-8" : "lg:px-8 lg:pt-7 xl:px-10",
             )}
           >
             <div className={cn("mx-auto", dashboardHome ? "max-w-[1500px]" : "max-w-[1400px]")}>{children}</div>
@@ -365,7 +365,7 @@ function DashboardBusinessSwitcher({
           name="workspaceId"
           defaultValue={currentWorkspaceId}
           onChange={(event) => event.currentTarget.form?.requestSubmit()}
-          className="max-w-[360px] cursor-pointer bg-transparent pr-2 text-[13px] font-semibold text-sub focus-visible:outline-none"
+          className="max-w-[360px] cursor-pointer bg-transparent pr-2 text-[13px] text-sub focus-visible:outline-none"
         >
           {locations.map((location) => (
             <option key={location.workspaceId} value={location.workspaceId}>
@@ -380,7 +380,7 @@ function DashboardBusinessSwitcher({
   return (
     <Link
       href="/app/settings/locations"
-      className="mt-1.5 inline-flex items-center gap-1 text-[13px] font-semibold text-sub hover:text-primary-dark"
+      className="mt-0.5 inline-flex items-center gap-1 text-[13px] text-sub transition-colors hover:text-primary-dark"
     >
       {business} <Icon name="chevron-down" size={14} />
     </Link>
@@ -395,7 +395,7 @@ function DashboardDateRange() {
   const range = `${monthDay.format(start)} – ${monthDay.format(end)}, ${end.getFullYear()}`;
 
   return (
-    <div className="mr-1 hidden items-center gap-2 rounded-[9px] border border-hairline bg-card px-3 py-2 text-[12px] font-semibold text-sub shadow-sm sm:flex">
+    <div className="mr-1 hidden h-9 items-center gap-2 rounded-md border border-hairline bg-card px-3 text-[13px] font-medium tabular-nums text-ink sm:flex">
       <Icon name="clock" size={15} className="text-faint" />
       {range}
       <Icon name="chevron-down" size={13} className="text-faint" />

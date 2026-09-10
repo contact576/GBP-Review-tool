@@ -3,25 +3,64 @@ import Link from "next/link";
 import { getData } from "@/lib/data";
 import { buildDashboardModel } from "@/lib/data/dashboard";
 import { Icon, type IconName } from "@/components/icons";
+import { BrandLogo, CHANNEL_LABEL, ChannelLogo } from "@/components/icons/brands";
+import { Donut } from "@/components/charts/Donut";
 import { TaskCard } from "@/components/app/TaskCard";
 import { GettingStartedCard } from "@/components/app/GettingStartedCard";
 import { DashboardGrowthChart } from "@/components/app/DashboardGrowthChart";
 import { DashboardVisibilityMap } from "@/components/app/DashboardVisibilityMap";
 import type { DashboardSignal } from "@/lib/data/dashboard";
-import type { ProfileSuggestion, Review } from "@/lib/data/types";
+import type { ProfileSuggestion, RequestStatus, Review, ReviewRequest } from "@/lib/data/types";
 import { suggestionStatusLabel } from "@/lib/suggestions/inbox";
+
+type DeltaTone = "up" | "down" | "neutral";
+
+const WINDOW_DAYS = 30;
+
+const REQUEST_STATUS: Record<RequestStatus, { label: string; cls: string }> = {
+  queued: { label: "Not asked", cls: "bg-hairline/60 text-sub" },
+  sent: { label: "Sent", cls: "bg-primary-wash text-sub" },
+  delivered: { label: "Delivered", cls: "bg-primary-wash text-sub" },
+  opened: { label: "Opened", cls: "bg-primary-tint text-primary-dark" },
+  clicked: { label: "Clicked", cls: "bg-primary-tint text-primary-dark" },
+  posted_google: { label: "Reviewed", cls: "bg-gold-tint text-gold-deep" },
+  private_feedback: { label: "Private feedback", cls: "bg-hairline/60 text-sub" },
+  suppressed: { label: "Suppressed", cls: "bg-danger-tint text-danger" },
+  failed: { label: "Failed", cls: "bg-danger-tint text-danger" },
+};
 
 export default async function DashboardPage() {
   const data = await getData();
   const dashboard = buildDashboardModel(data);
-  const tasks = data.tasks.filter((task) => task.status !== "snoozed").slice(0, 3);
+  const now = Date.now();
+  const windowStart = now - WINDOW_DAYS * 86_400_000;
+  const priorStart = windowStart - WINDOW_DAYS * 86_400_000;
+
+  const tasks = data.tasks.filter((task) => task.status !== "snoozed").slice(0, 4);
   const suggestions = (data.location.suggestionInbox ?? [])
     .filter((suggestion) => suggestion.status !== "dismissed" && suggestion.status !== "applied")
-    .slice(0, 3);
-  const recentReviews = [...data.reviews]
-    .filter((review) => review.durability !== "vanished")
-    .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
-    .slice(0, 3);
+    .slice(0, 4);
+  const liveReviews = data.reviews.filter((review) => review.durability !== "vanished");
+  const recentReviews = [...liveReviews].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt)).slice(0, 5);
+  const needsReply = liveReviews.filter((review) => review.needsReply).length;
+
+  // Requests: real rows only (test sends never count towards a metric).
+  const realRequests = data.requests.filter((request) => !request.isTest);
+  const latestRequests = [...realRequests].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 5);
+  const sentInWindow = realRequests.filter((request) => request.sentAt && Date.parse(request.sentAt) >= windowStart).length;
+  const sentPrior = realRequests.filter((request) => {
+    const at = request.sentAt ? Date.parse(request.sentAt) : NaN;
+    return at >= priorStart && at < windowStart;
+  }).length;
+  const reviewedInWindow = realRequests.filter(
+    (request) => request.status === "posted_google" && Date.parse(request.createdAt) >= windowStart,
+  ).length;
+
+  // Sentiment: a genuine part-of-whole of the reviews we hold.
+  const positive = liveReviews.filter((review) => review.rating >= 4).length;
+  const neutral = liveReviews.filter((review) => review.rating === 3).length;
+  const negative = liveReviews.filter((review) => review.rating <= 2).length;
+
   const latestScan = [...data.rankScans].sort((a, b) => b.ranAt.localeCompare(a.ranAt))[0];
   const growthSeries = [...data.metrics]
     .sort((a, b) => a.date.localeCompare(b.date))
@@ -29,6 +68,9 @@ export default async function DashboardPage() {
     .map((metric) => ({ date: metric.date, value: metric.growthScore }));
   const rankedPoints = latestScan?.points.filter((point) => point.rank !== null) ?? [];
   const localPackPoints = rankedPoints.filter((point) => (point.rank ?? 99) <= 3).length;
+  const reviewTrend = monthlyCounts(liveReviews.map((review) => review.publishedAt), 6);
+  const inviteTrend = monthlyCounts(realRequests.flatMap((request) => (request.sentAt ? [request.sentAt] : [])), 6);
+
   const googleMedia = data.location.gbpSnapshot?.media ?? [];
   const googleProfileMedia =
     googleMedia.find((media) => media.category === "COVER" && media.googleUrl) ??
@@ -37,125 +79,231 @@ export default async function DashboardPage() {
     googleMedia.find((media) => media.googleUrl);
   const syncedPhone = data.location.gbpSnapshot?.location.phoneNumbers?.primaryPhone;
   const syncedWebsite = data.location.gbpSnapshot?.location.websiteUri;
+  const scoreValue = dashboard.score.value;
+  const firstName = data.owner.name.split(" ")[0];
 
   return (
-    <div className="space-y-5 pb-2">
+    <div className="space-y-4 pb-4">
       <div className="lg:hidden">
-        <h1 className="text-[24px] font-extrabold tracking-tight text-ink">Good morning, {data.owner.name.split(" ")[0]}</h1>
-        <p className="mt-1 text-[13px] font-semibold text-sub">{data.location.name}</p>
+        <h1 className="text-[22px] font-bold tracking-tight text-ink">Good morning, {firstName}</h1>
+        <p className="mt-0.5 text-[13px] text-sub">{data.location.name}</p>
       </div>
 
-      {/* Until setup is complete and a real invite has gone out, the first
-          thing on the dashboard is what to do next — same signals as onboarding. */}
+      {/* Section tabs — the same places GoHighLevel puts Overview / Requests / Reviews / Widgets. */}
+      <nav className="tab-strip" aria-label="Reputation sections">
+        <Link href="/app" aria-current="page">Overview</Link>
+        <Link href="/app/requests">Requests</Link>
+        <Link href="/app/reviews">Reviews</Link>
+        <Link href="/app/customers">Customers</Link>
+        <Link href="/app/studio">Widgets</Link>
+        <Link href="/app/analytics">Analytics</Link>
+      </nav>
+
       {!data.workspace.isDemo ? <GettingStartedCard data={data} /> : null}
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.04fr)_minmax(0,.96fr)]">
-        <section className="premium-card flex min-h-[314px] flex-col overflow-hidden" aria-labelledby="growth-title">
-          <div className="px-5 pb-1 pt-5 sm:px-6">
+      {/* ── Stat row ─────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <StatCard
+          label="Invites sent"
+          value={formatCompact(sentInWindow)}
+          note={sentPrior === 0 && sentInWindow === 0 ? "Nothing sent in the last 30 days" : deltaCount(sentInWindow, sentPrior)}
+          tone={sentPrior === 0 ? "neutral" : sentInWindow >= sentPrior ? "up" : "down"}
+          href="/app/requests"
+        />
+        <StatCard
+          label="Reviews"
+          value={formatCompact(data.location.reviewCount)}
+          note={dashboard.newReviews.value !== null ? `+${dashboard.newReviews.value} new in the last 30 days` : "Connect Google to track change"}
+          tone={dashboard.newReviews.value !== null && dashboard.newReviews.value > 0 ? "up" : "neutral"}
+          href="/app/reviews"
+        />
+        <StatCard
+          label="Average rating"
+          value={data.location.rating.toFixed(1)}
+          note={data.workspace.isDemo ? "+0.2 this quarter" : "Current Google rating"}
+          tone={data.workspace.isDemo ? "up" : "neutral"}
+          href="/app/reviews"
+          stars={data.location.rating}
+        />
+        <StatCard
+          label="Needs reply"
+          value={formatCompact(needsReply)}
+          note={needsReply ? "Waiting for your reply" : "Every review has a reply"}
+          tone={needsReply ? "down" : "neutral"}
+          href="/app/reviews"
+        />
+        <StatCard
+          label="Profile views"
+          value={formatCompact(dashboard.foundYou.value)}
+          note={deltaCopy(dashboard.foundYou)}
+          tone={deltaTone(dashboard.foundYou)}
+          href="/app/analytics"
+        />
+        <StatCard
+          label="Customer actions"
+          value={formatCompact(dashboard.contactedYou.value)}
+          note={deltaCopy(dashboard.contactedYou)}
+          tone={deltaTone(dashboard.contactedYou)}
+          href="/app/analytics"
+        />
+      </div>
+
+      {/* ── Charts ───────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,.8fr)]">
+        <section className="premium-card flex flex-col" aria-labelledby="growth-title">
+          <div className="panel-head">
             <div className="flex items-center gap-2">
-              <h2 id="growth-title" className="text-[17px] font-extrabold tracking-[-0.015em] text-ink">Your local growth this month</h2>
+              <h2 id="growth-title" className="panel-title">Your local growth this month</h2>
               <Icon name="alert" size={14} className="text-faint" title="A blended score of reviews, profile quality, and customer activity" />
             </div>
-            <p className="mt-1 text-[12px] leading-relaxed text-sub">Your reputation and visibility are moving in the right direction.</p>
+            <Link href="/app/analytics" className="premium-card-link">Details</Link>
           </div>
-
-          <div className="grid flex-1 grid-cols-1 items-center gap-4 px-5 pb-3 pt-2 sm:grid-cols-[190px_minmax(0,1fr)] sm:px-6">
+          <div className="grid flex-1 grid-cols-1 gap-4 p-4 sm:grid-cols-[150px_minmax(0,1fr)]">
             <div>
-              <div className="text-[11px] font-semibold text-sub">Local Growth Score</div>
-              <div className="tnum mt-1 font-serif text-[66px] font-semibold leading-none tracking-[-0.06em] text-ink">
-                {dashboard.score.value ?? "—"}
-              </div>
-              <div className="mt-2 text-[13px] font-extrabold text-primary-dark">{scoreLabel(dashboard.score.value)}</div>
-              <DeltaLine value={dashboard.score.delta} suffix="pts vs prior 30 days" />
+              <div className="stat-label">Local Growth Score</div>
+              <div className="display-num mt-1 text-[40px]">{scoreValue ?? "—"}</div>
+              <div className="mt-1 text-[13px] font-semibold text-ink">{scoreLabel(scoreValue)}</div>
+              <DeltaText value={dashboard.score.delta} suffix="pts vs prior 30 days" />
+              <p className="mt-3 text-[12px] leading-relaxed text-sub">
+                {dashboard.score.source}
+                {dashboard.score.lastSyncAt ? ` · ${formatFreshness(dashboard.score.lastSyncAt)}` : ""}
+              </p>
             </div>
             <DashboardGrowthChart data={growthSeries} />
           </div>
-
-          <CardFooter
-            href="/app/analytics"
-            label="View growth insights"
-            meta={`${dashboard.score.source}${dashboard.score.lastSyncAt ? ` · ${formatFreshness(dashboard.score.lastSyncAt)}` : ""}`}
-          />
         </section>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <KpiCard
-            icon="star"
-            value={data.location.rating.toFixed(1)}
-            label="Rating"
-            delta={data.workspace.isDemo ? "+0.2 this quarter" : "Current Google rating"}
-            href="/app/reviews"
-            linkLabel="View rating details"
-          />
-          <KpiCard
-            icon="chat"
-            value={formatCompact(data.location.reviewCount)}
-            label="Reviews"
-            delta={dashboard.newReviews.value !== null ? `+${dashboard.newReviews.value} in the rolling window` : "Connect Google to track change"}
-            href="/app/reviews"
-            linkLabel="Read recent reviews"
-          />
-          <KpiCard
-            icon="eye"
-            value={formatCompact(dashboard.foundYou.value)}
-            label="Profile views"
-            delta={deltaCopy(dashboard.foundYou)}
-            href="/app/analytics"
-            linkLabel="Explore visibility"
-          />
-          <KpiCard
-            icon="phone"
-            value={formatCompact(dashboard.contactedYou.value)}
-            label="Customer actions"
-            delta={deltaCopy(dashboard.contactedYou)}
-            href="/app/analytics"
-            linkLabel="See action details"
-          />
-        </div>
+        <section className="premium-card flex flex-col" aria-labelledby="trends-title">
+          <div className="panel-head">
+            <h2 id="trends-title" className="panel-title">Review trends</h2>
+            <span className="text-[12px] text-faint">Last 6 months</span>
+          </div>
+          <div className="flex-1 p-4">
+            <TrendBars series={[{ label: "Reviews received", values: reviewTrend, color: "bg-primary" }, { label: "Invites sent", values: inviteTrend, color: "bg-primary/30" }]} />
+          </div>
+        </section>
+
+        <section className="premium-card flex flex-col" aria-labelledby="sentiment-title">
+          <div className="panel-head">
+            <h2 id="sentiment-title" className="panel-title">Sentiment</h2>
+            <span className="text-[12px] text-faint">{liveReviews.length} reviews held</span>
+          </div>
+          <div className="flex flex-1 items-center justify-center p-4">
+            {liveReviews.length ? (
+              <Donut
+                size={150}
+                title="Review sentiment"
+                centerValue={`${Math.round((positive / liveReviews.length) * 100)}%`}
+                centerLabel="positive"
+                segments={[
+                  { label: "Positive (4–5★)", value: positive },
+                  { label: "Neutral (3★)", value: neutral, color: "#E8A33D" },
+                  { label: "Negative (1–2★)", value: negative, color: "#C4452F" },
+                ]}
+              />
+            ) : (
+              <p className="text-[13px] text-sub">No reviews imported yet.</p>
+            )}
+          </div>
+        </section>
       </div>
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.12fr)_minmax(0,.88fr)]">
-        <section className="premium-card overflow-hidden" aria-labelledby="moves-title">
-          <div className="flex items-start justify-between gap-4 px-5 pb-3 pt-5">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-gold"><Icon name="sparkles" size={17} /></span>
-                <h2 id="moves-title" className="text-[16px] font-extrabold tracking-[-0.01em] text-ink">This week&apos;s highest-impact moves</h2>
-              </div>
-              <p className="mt-1 text-[11px] leading-relaxed text-sub">Three focused actions selected from your latest evidence audit.</p>
-            </div>
-            <span className="hidden items-center gap-1 text-[10px] font-semibold text-faint sm:flex">
-              Why these? <Icon name="alert" size={13} title="Recommendations are based on detected gaps and recent activity" />
-            </span>
+      {/* ── Tables ───────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <section className="premium-card flex flex-col overflow-hidden" aria-labelledby="requests-title">
+          <div className="panel-head">
+            <h2 id="requests-title" className="panel-title">Latest review requests</h2>
+            <Link href="/app/requests" className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-[12px] font-semibold text-white hover:bg-primary-dark">
+              Send request
+            </Link>
           </div>
+          <div className="flex-1 overflow-x-auto">
+            {latestRequests.length ? (
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    <th>Channel</th>
+                    <th>Sent</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {latestRequests.map((request) => <RequestRow key={request.id} request={request} />)}
+                </tbody>
+              </table>
+            ) : (
+              <EmptyRow icon="send" title="No review requests yet" body="Send your first request and it will be tracked here." />
+            )}
+          </div>
+          <div className="panel-foot">
+            <Link href="/app/requests" className="premium-card-link">View all requests</Link>
+            <span className="text-[12px] text-faint">{reviewedInWindow} reviewed in the last 30 days</span>
+          </div>
+        </section>
 
-          <div className="space-y-2 px-4 pb-4 sm:px-5">
+        <section className="premium-card flex flex-col overflow-hidden" aria-labelledby="reviews-title">
+          <div className="panel-head">
+            <h2 id="reviews-title" className="panel-title">Latest reviews</h2>
+            <Link href="/app/reviews" className="premium-card-link">View all</Link>
+          </div>
+          <div className="flex-1 overflow-x-auto">
+            {recentReviews.length ? (
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Reviewer</th>
+                    <th>Rating</th>
+                    <th>Source</th>
+                    <th>Date</th>
+                    <th className="text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentReviews.map((review) => <ReviewRow key={review.id} review={review} />)}
+                </tbody>
+              </table>
+            ) : (
+              <EmptyRow icon="star" title="No reviews imported yet" body="Connect Google and your reviews appear here." />
+            )}
+          </div>
+          <div className="panel-foot">
+            <Link href="/app/reviews" className="premium-card-link">Open reviews inbox</Link>
+            <span className="text-[12px] text-faint">{dashboard.newReviews.source}</span>
+          </div>
+        </section>
+      </div>
+
+      {/* ── Work + profile ───────────────────────────────────── */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)]">
+        <section className="premium-card flex flex-col" aria-labelledby="moves-title">
+          <div className="panel-head">
+            <h2 id="moves-title" className="panel-title">This week&apos;s highest-impact moves</h2>
+            <Link href="/app/this-week" className="premium-card-link">See all</Link>
+          </div>
+          <div className="flex-1 space-y-2 p-3">
             {suggestions.length ? (
-              suggestions.map((suggestion) => <SuggestionCard key={suggestion.id} suggestion={suggestion} />)
+              suggestions.map((suggestion) => <SuggestionRow key={suggestion.id} suggestion={suggestion} />)
             ) : tasks.length ? (
               tasks.map((task) => <TaskCard key={task.id} task={task} />)
             ) : (
-              <div className="rounded-[10px] border border-primary/20 bg-primary-wash p-5 text-center">
-                <Icon name="check-circle" size={22} className="mx-auto text-primary" />
-                <p className="mt-2 text-[13px] font-bold text-ink">You are clear for the week</p>
-                <p className="mt-1 text-[11px] text-sub">New recommendations will appear after the next verified sync.</p>
+              <div className="rounded-md border border-hairline bg-primary-wash px-4 py-6 text-center">
+                <Icon name="check-circle" size={20} className="mx-auto text-primary" />
+                <p className="mt-2 text-[14px] font-semibold text-ink">You are clear for the week</p>
+                <p className="mt-1 text-[12px] text-sub">New recommendations will appear after the next verified sync.</p>
               </div>
             )}
           </div>
-          <CardFooter href="/app/this-week" label="See all recommendations" />
         </section>
 
-        <section className="premium-card overflow-hidden" aria-labelledby="profile-title">
-          <div className="flex items-center justify-between px-5 pb-3 pt-5">
-            <h2 id="profile-title" className="text-[16px] font-extrabold tracking-[-0.01em] text-ink">Business profile</h2>
-            <Link href="/app/settings/business" className="premium-card-link inline-flex items-center gap-1.5">
-              <Icon name="pencil" size={13} /> Edit profile
-            </Link>
+        <section className="premium-card flex flex-col" aria-labelledby="profile-title">
+          <div className="panel-head">
+            <h2 id="profile-title" className="panel-title">Business profile</h2>
+            <Link href="/app/settings/business" className="premium-card-link">Edit</Link>
           </div>
-
-          <div className="grid gap-4 px-5 pb-4 sm:grid-cols-[44%_1fr]">
+          <div className="flex-1 p-4">
             {data.workspace.isDemo || googleProfileMedia?.googleUrl ? (
-              <div className="relative min-h-[154px] overflow-hidden rounded-[9px] bg-primary-wash">
+              <div className="relative h-[120px] overflow-hidden rounded-md border border-hairline bg-primary-wash">
                 <Image
                   src={googleProfileMedia?.googleUrl ?? "/images/dashboard/harbourview-clinic.png"}
                   alt={googleProfileMedia
@@ -164,96 +312,208 @@ export default async function DashboardPage() {
                   fill
                   priority={data.workspace.isDemo}
                   unoptimized={Boolean(googleProfileMedia)}
-                  sizes="(min-width: 1280px) 240px, (min-width: 640px) 44vw, 100vw"
+                  sizes="(min-width: 1280px) 320px, 100vw"
                   className="object-cover"
                 />
-                {googleProfileMedia?.attribution?.displayName ? (
-                  <span className="absolute bottom-2 left-2 rounded bg-black/65 px-2 py-1 text-[8px] font-semibold text-white">
-                    Photo: {googleProfileMedia.attribution.displayName}
-                  </span>
-                ) : null}
               </div>
             ) : (
-              <div className="grid min-h-[154px] place-items-center rounded-[9px] border border-dashed border-hairline bg-primary-wash text-center">
-                <div>
-                  <Icon name="camera" size={21} className="mx-auto text-primary" />
-                  <p className="mt-2 text-[10px] font-semibold text-sub">Google profile photos appear after sync</p>
-                </div>
+              <div className="grid h-[120px] place-items-center rounded-md border border-dashed border-hairline bg-primary-wash text-center">
+                <p className="text-[12px] text-sub">Google profile photos appear after sync</p>
               </div>
             )}
-
-            <div className="space-y-2.5 py-0.5 text-[11px] text-sub">
+            <dl className="mt-3 space-y-2 text-[13px]">
               <ProfileDetail icon="map-pin">
-                <span className="font-semibold text-ink">{data.location.address}</span><br />{data.location.city}
+                <span className="text-ink">{data.location.address}</span>, {data.location.city}
               </ProfileDetail>
-              {data.workspace.isDemo || syncedPhone ? <ProfileDetail icon="phone"><span className="font-semibold text-ink">{syncedPhone ?? "(416) 555-0182"}</span></ProfileDetail> : null}
+              {data.workspace.isDemo || syncedPhone ? <ProfileDetail icon="phone"><span className="text-ink">{syncedPhone ?? "(416) 555-0182"}</span></ProfileDetail> : null}
               <ProfileDetail icon="clock">
-                <span className="font-bold text-primary">{data.location.profile.hoursSet ? "Open" : "Hours needed"}</span>
+                <span className={data.location.profile.hoursSet ? "font-semibold text-primary-dark" : "font-semibold text-gold-deep"}>{data.location.profile.hoursSet ? "Open" : "Hours needed"}</span>
                 {data.workspace.isDemo && data.location.profile.hoursSet ? " · Closes 7:00 PM" : ""}
               </ProfileDetail>
-              <ProfileDetail icon="building"><span className="font-semibold text-ink">{data.location.category}</span></ProfileDetail>
+              <ProfileDetail icon="building"><span className="text-ink">{data.location.category}</span></ProfileDetail>
               {data.workspace.isDemo || syncedWebsite ? (
                 <ProfileDetail icon="external">
-                  <a href={syncedWebsite ?? "https://harbourviewphysio.ca"} target="_blank" rel="noreferrer" className="font-semibold text-primary-dark hover:underline">
+                  <a href={syncedWebsite ?? "https://harbourviewphysio.ca"} target="_blank" rel="noreferrer" className="text-primary-dark hover:underline">
                     {syncedWebsite ? displayHostname(syncedWebsite) : "harbourviewphysio.ca"}
                   </a>
                 </ProfileDetail>
               ) : null}
-            </div>
+            </dl>
           </div>
-          <CardFooter href="/app/settings/business" label="See full profile" meta={`${data.location.profile.completeness}% complete`} />
-        </section>
-      </div>
-
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.04fr)_minmax(0,.96fr)]">
-        <section className="premium-card overflow-hidden" aria-labelledby="reviews-title">
-          <div className="flex items-center justify-between px-5 pb-2 pt-5">
-            <h2 id="reviews-title" className="text-[16px] font-extrabold tracking-[-0.01em] text-ink">Recent reviews</h2>
-            <Link href="/app/reviews" className="premium-card-link">View all</Link>
+          <div className="panel-foot">
+            <span className="text-[12px] text-sub">Profile completeness</span>
+            <span className="flex items-center gap-2 text-[12px] font-semibold tabular-nums text-ink">
+              <span className="h-1.5 w-20 overflow-hidden rounded-full bg-hairline" aria-hidden="true">
+                <span className="block h-full bg-primary" style={{ width: `${Math.max(0, Math.min(100, data.location.profile.completeness))}%` }} />
+              </span>
+              {data.location.profile.completeness}%
+            </span>
           </div>
-
-          {recentReviews.length ? (
-            <div className="divide-y divide-hairline px-5">
-              {recentReviews.map((review, index) => <RecentReviewRow key={review.id} review={review} index={index} />)}
-            </div>
-          ) : (
-            <div className="px-5 py-8 text-center">
-              <Icon name="star" size={22} className="mx-auto text-gold" />
-              <p className="mt-2 text-[12px] font-bold text-ink">No reviews imported yet</p>
-            </div>
-          )}
-          <CardFooter href="/app/reviews" label="See all reviews" meta={dashboard.newReviews.source} />
         </section>
 
-        <section className="premium-card overflow-hidden" aria-labelledby="visibility-title">
-          <div className="flex items-center justify-between px-5 pb-3 pt-5">
-            <h2 id="visibility-title" className="text-[16px] font-extrabold tracking-[-0.01em] text-ink">Visibility in your area</h2>
-            <Link href="/app/rank-grid" className="premium-card-link">View full report</Link>
+        <section className="premium-card flex flex-col" aria-labelledby="visibility-title">
+          <div className="panel-head">
+            <h2 id="visibility-title" className="panel-title">Visibility in your area</h2>
+            <Link href="/app/rank-grid" className="premium-card-link">Full report</Link>
           </div>
-
-          <div className="grid gap-4 px-5 pb-4 sm:grid-cols-[150px_minmax(0,1fr)]">
-            <div className="flex flex-col justify-between py-1">
-              <div>
-                <p className="text-[12px] font-bold leading-relaxed text-ink">
-                  You rank in the local pack at <span className="font-serif text-[22px] text-primary-dark">{localPackPoints}</span> of {latestScan?.points.length ?? 0} grid points
-                </p>
-                <p className="mt-1.5 text-[10px] leading-relaxed text-sub">for “{latestScan?.keyword ?? "your primary keyword"}”</p>
-              </div>
-              <div className="mt-4 space-y-1.5 text-[9px] font-semibold text-sub">
-                <Legend color="bg-primary-dark" label="Top 3" />
-                <Legend color="bg-[#72A991]" label="Ranks 4–10" />
-                <Legend color="bg-gold" label="Outside top 10" />
-              </div>
-            </div>
+          <div className="flex-1 p-4">
             <DashboardVisibilityMap scan={latestScan} />
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[12px] text-sub">
+              <span>
+                Local pack at <span className="font-semibold tabular-nums text-ink">{localPackPoints}</span> of {latestScan?.points.length ?? 0} points
+                {latestScan ? ` for “${latestScan.keyword}”` : ""}
+              </span>
+              <span className="flex items-center gap-3">
+                <Legend color="bg-primary-dark" label="Top 3" />
+                <Legend color="bg-[#72A991]" label="4–10" />
+                <Legend color="bg-gold" label="10+" />
+              </span>
+            </div>
           </div>
-          <CardFooter
-            href="/app/rank-grid"
-            label="Open local rank grid"
-            meta={latestScan ? `${latestScan.source === "google_places" ? "Google Places" : data.workspace.isDemo ? "Sample rank scan" : "Rank scan"} · ${formatFreshness(latestScan.ranAt)}` : "No scan yet"}
-          />
+          <div className="panel-foot">
+            <Link href="/app/rank-grid" className="premium-card-link">Open rank grid</Link>
+            <span className="text-[12px] text-faint">
+              {latestScan ? `${latestScan.source === "google_places" ? "Google Places" : data.workspace.isDemo ? "Sample rank scan" : "Rank scan"} · ${formatFreshness(latestScan.ranAt)}` : "No scan yet"}
+            </span>
+          </div>
         </section>
       </div>
+    </div>
+  );
+}
+
+// ── Pieces ───────────────────────────────────────────────────
+
+function StatCard({
+  label,
+  value,
+  note,
+  tone,
+  href,
+  stars,
+}: {
+  label: string;
+  value: string;
+  note: string;
+  tone: DeltaTone;
+  href: string;
+  stars?: number;
+}) {
+  return (
+    <Link href={href} className="premium-card premium-card-interactive block p-4">
+      <div className="stat-label">{label}</div>
+      <div className="mt-2 flex items-baseline gap-2">
+        <span className="display-num text-[26px]">{value}</span>
+        {typeof stars === "number" ? <InkStars rating={Math.round(stars)} /> : null}
+      </div>
+      <div className={`mt-1.5 line-clamp-1 delta-pill delta-pill-${tone}`}>
+        {tone !== "neutral" ? <Icon name={tone === "up" ? "arrow-up" : "arrow-down"} size={11} /> : null}
+        {note}
+      </div>
+    </Link>
+  );
+}
+
+function InkStars({ rating }: { rating: number }) {
+  return (
+    <span className="inline-flex items-center gap-px" aria-label={`${rating} out of 5 stars`}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <Icon key={n} name={n <= rating ? "star-fill" : "star"} size={12} className={n <= rating ? "text-gold" : "text-hairline"} />
+      ))}
+    </span>
+  );
+}
+
+function TrendBars({ series }: { series: { label: string; values: { label: string; count: number }[]; color: string }[] }) {
+  const max = Math.max(1, ...series.flatMap((s) => s.values.map((v) => v.count)));
+  const months = series[0]?.values ?? [];
+  const summary = series.map((s) => `${s.label}: ${s.values.map((v) => `${v.label} ${v.count}`).join(", ")}`).join(". ");
+  return (
+    <div role="img" aria-label={summary}>
+      <div className="flex h-[150px] items-end gap-2" aria-hidden="true">
+        {months.map((month, index) => (
+          <div key={month.label} className="flex h-full flex-1 items-end justify-center gap-1">
+            {series.map((s) => {
+              const count = s.values[index]?.count ?? 0;
+              return (
+                <div
+                  key={s.label}
+                  title={`${s.label} · ${month.label}: ${count}`}
+                  className={`w-full max-w-[18px] rounded-t-sm ${s.color}`}
+                  style={{ height: `${Math.max(count ? 4 : 1, (count / max) * 100)}%` }}
+                />
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 flex gap-2" aria-hidden="true">
+        {months.map((month) => (
+          <div key={month.label} className="flex-1 text-center text-[11px] text-faint">{month.label}</div>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-4 text-[12px] text-sub">
+        {series.map((s) => (
+          <span key={s.label} className="inline-flex items-center gap-1.5">
+            <span className={`size-2.5 rounded-sm ${s.color}`} /> {s.label}
+            <span className="tabular-nums text-ink">{s.values.reduce((sum, v) => sum + v.count, 0)}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RequestRow({ request }: { request: ReviewRequest }) {
+  const meta = REQUEST_STATUS[request.status];
+  return (
+    <tr>
+      <td>
+        <div className="font-semibold text-ink">{request.customerName}</div>
+        {request.rating ? <div className="text-[11px] text-faint">Rated {request.rating}★</div> : null}
+      </td>
+      <td>
+        <span className="inline-flex items-center gap-1.5 text-sub">
+          <ChannelLogo channel={request.channel} size={14} /> {CHANNEL_LABEL[request.channel]}
+        </span>
+      </td>
+      <td className="whitespace-nowrap text-sub">{request.sentAt ? formatShortDate(request.sentAt) : "—"}</td>
+      <td><span className={`status-pill ${meta.cls}`}>{meta.label}</span></td>
+    </tr>
+  );
+}
+
+function ReviewRow({ review }: { review: Review }) {
+  return (
+    <tr>
+      <td>
+        <div className="font-semibold text-ink">{review.author}</div>
+        <div className="max-w-[170px] truncate text-[12px] text-sub xl:max-w-[150px] 2xl:max-w-[240px]">{review.text}</div>
+      </td>
+      <td><InkStars rating={review.rating} /></td>
+      <td>
+        <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-sub"><BrandLogo name="google" size={14} title="" /> Google</span>
+      </td>
+      <td className="whitespace-nowrap text-sub">{formatShortDate(review.publishedAt)}</td>
+      <td className="text-right">
+        {review.reply ? (
+          <span className="status-pill bg-primary-tint text-primary-dark">Replied</span>
+        ) : (
+          <Link href="/app/reviews" className="inline-flex h-7 items-center rounded-md border border-hairline bg-card px-2.5 text-[12px] font-semibold text-ink hover:border-primary/40 hover:bg-primary-wash">
+            Respond
+          </Link>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function EmptyRow({ icon, title, body }: { icon: IconName; title: string; body: string }) {
+  return (
+    <div className="px-6 py-10 text-center">
+      <Icon name={icon} size={20} className="mx-auto text-faint" />
+      <p className="mt-2 text-[14px] font-semibold text-ink">{title}</p>
+      <p className="mt-1 text-[12px] text-sub">{body}</p>
     </div>
   );
 }
@@ -268,139 +528,71 @@ const SUGGESTION_ICON: Record<ProfileSuggestion["kind"], IconName> = {
   connection: "external",
 };
 
-function SuggestionCard({ suggestion }: { suggestion: ProfileSuggestion }) {
+function SuggestionRow({ suggestion }: { suggestion: ProfileSuggestion }) {
   const href = suggestion.status === "needs_connection"
     ? "/app/settings/integrations"
     : suggestion.status === "needs_asset" || suggestion.status === "needs_facts" || suggestion.status === "needs_evidence"
       ? "/app/settings/business"
       : "/app/this-week";
   return (
-    <div className="flex items-center gap-3 rounded-[10px] border border-hairline bg-card px-3 py-2.5 transition-all hover:border-primary/20 hover:shadow-sm sm:px-3.5">
-      <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary-wash text-primary-dark">
-        <Icon name={SUGGESTION_ICON[suggestion.kind]} size={16} />
-      </span>
+    <div className="tile-row flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5 sm:flex-nowrap">
+      <span className="icon-plate icon-plate-sm"><Icon name={SUGGESTION_ICON[suggestion.kind]} size={15} /></span>
       <div className="min-w-0 flex-1">
-        <h3 className="truncate text-[13px] font-bold text-ink sm:text-[14px]">{suggestion.title}</h3>
-        <p className="mt-0.5 line-clamp-1 text-[11px] leading-relaxed text-sub sm:text-[12px]">{suggestion.rationale}</p>
+        <div className="truncate text-[13px] font-semibold text-ink">{suggestion.title}</div>
+        <div className="mt-0.5 flex items-center gap-2 text-[12px] text-sub">
+          <span className="status-pill bg-hairline/60 text-sub">{suggestionStatusLabel(suggestion.status)}</span>
+          <span className="tabular-nums text-faint">Priority {suggestion.priorityScore}</span>
+        </div>
       </div>
-      <div className="hidden min-w-[96px] text-right sm:block">
-        <p className="text-[9px] font-bold uppercase tracking-[0.08em] text-faint">{suggestionStatusLabel(suggestion.status)}</p>
-        <p className="mt-0.5 text-[10px] font-semibold tabular-nums text-sub">Priority {suggestion.priorityScore}</p>
-      </div>
-      <Link href={href} className="inline-flex h-8 shrink-0 items-center justify-center rounded-[8px] bg-primary-dark px-3 text-[10px] font-bold text-white hover:bg-primary">
+      <Link href={href} className="inline-flex h-7 w-full shrink-0 items-center justify-center rounded-md border border-hairline bg-card px-2.5 text-[12px] font-semibold text-ink hover:border-primary/40 hover:bg-primary-wash sm:w-auto">
         {suggestion.nextStep}
       </Link>
     </div>
   );
 }
 
-function KpiCard({
-  icon,
-  value,
-  label,
-  delta,
-  href,
-  linkLabel,
-}: {
-  icon: IconName;
-  value: string;
-  label: string;
-  delta: string;
-  href: string;
-  linkLabel: string;
-}) {
-  return (
-    <section className="premium-card flex min-h-[150px] flex-col overflow-hidden">
-      <div className="flex flex-1 items-start gap-3 px-4 pb-3 pt-4 sm:px-5">
-        <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary-wash text-primary-dark">
-          <Icon name={icon} size={16} />
-        </span>
-        <div className="min-w-0">
-          <div className="tnum font-serif text-[31px] font-semibold leading-none tracking-[-0.04em] text-ink">{value}</div>
-          <div className="mt-1 text-[11px] font-bold text-sub">{label}</div>
-          <div className="mt-2 line-clamp-1 text-[9px] font-semibold text-primary">{delta}</div>
-        </div>
-      </div>
-      <CardFooter href={href} label={linkLabel} compact />
-    </section>
-  );
-}
-
-function CardFooter({
-  href,
-  label,
-  meta,
-  compact,
-}: {
-  href: string;
-  label: string;
-  meta?: string;
-  compact?: boolean;
-}) {
-  return (
-    <div className={`flex items-center justify-between gap-3 border-t border-hairline ${compact ? "px-4 py-2.5 sm:px-5" : "px-5 py-3 sm:px-6"}`}>
-      <Link href={href} className="premium-card-link inline-flex items-center gap-1.5">
-        {label} <Icon name="arrow-right" size={12} />
-      </Link>
-      {meta ? <span className="max-w-[55%] truncate text-right text-[9px] font-medium text-faint">{meta}</span> : null}
-    </div>
-  );
-}
-
 function ProfileDetail({ icon, children }: { icon: IconName; children: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-2">
+    <div className="flex items-start gap-2 text-sub">
       <Icon name={icon} size={14} className="mt-0.5 shrink-0 text-faint" />
-      <div className="min-w-0 leading-relaxed">{children}</div>
-    </div>
-  );
-}
-
-function RecentReviewRow({ review, index }: { review: Review; index: number }) {
-  const palette = ["bg-[#DCE9E3] text-primary-dark", "bg-gold-tint text-gold-deep", "bg-[#E7E2F0] text-[#61517B]"];
-  const initials = review.author.split(" ").map((word) => word[0]).join("").slice(0, 2);
-
-  return (
-    <div className="flex items-center gap-3 py-3">
-      <span className={`grid size-8 shrink-0 place-items-center rounded-full text-[10px] font-extrabold ${palette[index % palette.length]}`}>
-        {initials}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-[12px] font-extrabold text-ink">{review.author}</span>
-          <span className="shrink-0 text-[9px] font-medium text-faint">{formatReviewDate(review.publishedAt)}</span>
-        </div>
-        <div className="mt-0.5 flex text-gold" aria-label={`${review.rating} out of 5 stars`}>
-          {Array.from({ length: 5 }, (_, star) => (
-            <Icon key={star} name={star < review.rating ? "star-fill" : "star"} size={10} />
-          ))}
-        </div>
-        <p className="mt-1 truncate text-[10px] leading-relaxed text-sub">“{review.text}”</p>
-      </div>
-      <Link href="/app/reviews" aria-label={`Open ${review.author}'s review`} className="grid size-7 shrink-0 place-items-center rounded-full text-faint hover:bg-primary-wash hover:text-ink">
-        <Icon name="more" size={15} />
-      </Link>
+      <dd className="min-w-0 leading-relaxed">{children}</dd>
     </div>
   );
 }
 
 function Legend({ color, label }: { color: string; label: string }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className={`size-2.5 rounded-full ${color}`} /> {label}
-    </div>
+    <span className="inline-flex items-center gap-1.5">
+      <span className={`size-2 rounded-full ${color}`} /> {label}
+    </span>
   );
 }
 
-function DeltaLine({ value, suffix }: { value: number | null; suffix: string }) {
-  if (value === null) return <p className="mt-2 text-[10px] font-semibold text-faint">Awaiting verified comparison</p>;
+function DeltaText({ value, suffix }: { value: number | null; suffix: string }) {
+  if (value === null) return <p className="mt-1 text-[12px] text-faint">Awaiting a verified comparison</p>;
   const positive = value >= 0;
   return (
-    <p className={`mt-2 flex items-center gap-1 text-[10px] font-bold ${positive ? "text-primary" : "text-danger"}`}>
+    <p className={`mt-1 flex items-center gap-1 text-[12px] font-semibold ${positive ? "text-primary-dark" : "text-danger"}`}>
       <Icon name={positive ? "arrow-up" : "arrow-down"} size={11} />
       {Math.abs(value)} {suffix}
     </p>
   );
+}
+
+// ── Helpers ──────────────────────────────────────────────────
+
+function monthlyCounts(isoDates: string[], months: number): { label: string; count: number }[] {
+  const now = new Date();
+  const buckets = Array.from({ length: months }, (_, offset) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (months - 1 - offset), 1);
+    return { key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`, label: new Intl.DateTimeFormat("en-US", { month: "short" }).format(d), count: 0 };
+  });
+  const byKey = new Map(buckets.map((bucket) => [bucket.key, bucket]));
+  for (const iso of isoDates) {
+    const bucket = byKey.get(iso.slice(0, 7));
+    if (bucket) bucket.count += 1;
+  }
+  return buckets;
 }
 
 function scoreLabel(value: number | null) {
@@ -431,6 +623,17 @@ function deltaCopy(signal: DashboardSignal) {
   return `${sign}${signal.delta}% vs prior 30 days`;
 }
 
+function deltaTone(signal: DashboardSignal): DeltaTone {
+  if (signal.delta === null) return "neutral";
+  return signal.delta >= 0 ? "up" : "down";
+}
+
+function deltaCount(current: number, prior: number) {
+  const diff = current - prior;
+  if (diff === 0) return "Same as the prior 30 days";
+  return `${diff > 0 ? "+" : ""}${diff} vs prior 30 days`;
+}
+
 function formatFreshness(iso: string) {
   const elapsed = Math.max(0, Date.now() - new Date(iso).getTime());
   const hours = Math.floor(elapsed / 3_600_000);
@@ -440,11 +643,7 @@ function formatFreshness(iso: string) {
   return `updated ${days}d ago`;
 }
 
-function formatReviewDate(iso: string) {
-  const days = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000));
-  if (days === 0) return "Today";
-  if (days === 1) return "Yesterday";
-  if (days < 7) return `${days} days ago`;
-  if (days < 35) return `${Math.floor(days / 7)} weeks ago`;
+function formatShortDate(iso: string) {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(iso));
 }
+

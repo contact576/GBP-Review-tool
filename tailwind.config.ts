@@ -78,11 +78,16 @@ const config: Config = {
         shimmer: {
           "100%": { transform: "translateX(100%)" },
         },
+        rise: {
+          from: { opacity: "0", transform: "translateY(10px) scale(0.992)" },
+          to: { opacity: "1", transform: "translateY(0) scale(1)" },
+        },
       },
       animation: {
         "fade-in": "fade-in 250ms ease-out",
         "slide-up": "slide-up 250ms ease-out",
         "slide-in-right": "slide-in-right 250ms ease-out",
+        rise: "rise 480ms cubic-bezier(0.2,0.7,0.2,1) both",
       },
     },
   },
