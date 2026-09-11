@@ -14,7 +14,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   return (
     <>
       {session.isDemo ? <DemoBanner /> : null}
-      <AdminShell>{children}</AdminShell>
+      <AdminShell hasBanner={session.isDemo}>{children}</AdminShell>
     </>
   );
 }

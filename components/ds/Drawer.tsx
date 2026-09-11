@@ -75,27 +75,27 @@ export function Drawer({
 
   return (
     <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="absolute inset-0 bg-ink/30 animate-fade-in" onClick={onClose} aria-hidden="true" />
+      <div className="absolute inset-0 bg-ink/25 backdrop-blur-[2px] animate-fade-in" onClick={onClose} aria-hidden="true" />
       <div
         ref={panelRef}
         tabIndex={-1}
         className={cn(
-          "absolute right-0 top-0 bottom-0 flex w-full flex-col bg-paper shadow-halo animate-slide-in-right",
+          "glass-strong absolute right-0 top-0 bottom-0 flex w-full flex-col overflow-hidden shadow-glass-lg animate-slide-in-right sm:bottom-3 sm:right-3 sm:top-3 sm:rounded-sheet",
           wide ? "sm:w-[540px]" : "sm:w-[440px]",
         )}
       >
-        <div className="flex items-center justify-between border-b border-hairline bg-card px-4 py-3">
+        <div className="flex items-center justify-between border-b border-soft px-5 py-3.5">
           <h2 className="text-[16px] font-bold text-ink">{title}</h2>
           <button
             onClick={onClose}
             aria-label="Close"
-            className="grid size-9 place-items-center rounded-btn text-sub hover:bg-primary-wash"
+            className="grid size-9 place-items-center rounded-full text-sub hover:bg-ink/[.06] hover:text-ink"
           >
             <Icon name="x" size={20} />
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-4">{children}</div>
-        {footer ? <div className="border-t border-hairline bg-card p-4">{footer}</div> : null}
+        {footer ? <div className="border-t border-soft bg-white/40 p-4">{footer}</div> : null}
       </div>
     </div>
   );

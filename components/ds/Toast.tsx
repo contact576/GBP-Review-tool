@@ -24,10 +24,10 @@ export function useToast(): ToastContextValue {
 }
 
 const toneStyles: Record<ToastItem["tone"], string> = {
-  success: "bg-ink text-white",
-  info: "bg-ink text-white",
-  warning: "bg-gold-tint text-gold-deep border border-gold/40",
-  danger: "bg-danger text-white",
+  success: "glass-dark text-white",
+  info: "glass-dark text-white",
+  warning: "glass-strong text-gold-deep",
+  danger: "bg-danger text-white shadow-halo",
 };
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
@@ -56,7 +56,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
               aria-live={assertive ? "assertive" : undefined}
               aria-atomic={assertive ? true : undefined}
               className={cn(
-                "pointer-events-auto flex items-center gap-2 rounded-btn px-4 py-3 text-[14px] font-medium shadow-halo animate-slide-up max-w-sm",
+                "pointer-events-auto flex items-center gap-2 rounded-full px-5 py-3 text-[14px] font-medium animate-slide-up max-w-sm",
                 toneStyles[t.tone],
               )}
             >

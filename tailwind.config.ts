@@ -44,9 +44,11 @@ const config: Config = {
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
       borderRadius: {
-        card: "16px",
-        btn: "12px",
-        input: "12px",
+        card: "20px", // glass panels
+        panel: "20px",
+        sheet: "28px",
+        btn: "999px", // capsule buttons
+        input: "14px",
         chip: "999px",
       },
       boxShadow: {
@@ -56,6 +58,11 @@ const config: Config = {
         sm: "0 1px 2px rgba(23,32,29,.05)",
         lg: "0 10px 28px rgba(23,32,29,.07)",
         halo: "0 24px 48px rgba(23,32,29,.10)",
+        // Glass elevation: rim (white inner + faint ink outer) and a soft, long drop.
+        glass:
+          "inset 0 1px 0 rgba(255,255,255,.9), 0 0 0 1px rgba(23,32,29,.06), 0 12px 32px -14px rgba(23,32,29,.16)",
+        "glass-lg":
+          "inset 0 1px 0 rgba(255,255,255,.9), 0 0 0 1px rgba(23,32,29,.07), 0 24px 60px -20px rgba(23,32,29,.28)",
       },
       transitionDuration: {
         "150": "150ms",

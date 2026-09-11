@@ -3,23 +3,31 @@
 @tailwind utilities;
 
 /*
- * Foundly surface ladder & elevation (authoritative note — see DESIGN.md).
- * Depth comes from the SURFACE LADDER + HAIRLINE first, not shadow.
- *   1. paper   #F7F6F2  — warm app canvas (never pure white)
- *   2. card    #FFFFFF  — surface floating on paper (hairline border)
- *   3. wash    #F0F6F3  — recessed/hover rows, section tints, chart fills
- *   4. hero    #0C4A3E  — the single dark polarity flip per screen
- * Elevation is HAIRLINE-FIRST: a 1px `hairline` rule + surface contrast does
- * most of the lifting. Only two shadow levels exist on top of that —
- *   Level-1  `shadow-sm`   resting cards / inputs (soft interactive lift)
- *   Level-2  `shadow-lg`   hover lift, popovers
- *   Level-2+ `shadow-halo` drawers / modals / toasts / hero (layered halo)
- * Never reach for a shadow where a surface change + hairline will read.
+ * Foundly surface system — "glass" edition.
+ *
+ * The material is frosted glass over a softly tinted ambient canvas (the Apple
+ * Liquid Glass idiom): translucent white panels that blur whatever sits behind
+ * them, a bright 1px specular rim on top, a faint ink hairline outside, and one
+ * long, soft drop shadow. Depth comes from translucency + blur first, shadow
+ * second. Structure (tables, stat rows, small-caps labels) stays conventional.
+ *
+ *   ambient-bg   fixed tinted canvas the glass has something to refract
+ *   glass        default panel (cards, stat tiles, tables, popovers)
+ *   glass-strong denser chrome (sidebar, floating header, tab bar, drawers)
+ *   glass-dark   deep-green glass (referral tile, toasts, hero polarity flip)
+ *   glass-input  translucent field
+ *
+ * Every glass class has a solid fallback when backdrop-filter is unsupported.
  */
 
 @layer base {
   :root {
     color-scheme: light;
+    --glass-alpha: 0.62;
+    --glass-blur: 24px;
+    --glass-rim: rgba(255, 255, 255, 0.9);
+    --glass-edge: rgba(23, 32, 29, 0.06);
+    --hairline-soft: rgba(23, 32, 29, 0.07);
   }
 
   html {
@@ -55,6 +63,88 @@
 }
 
 @layer components {
+  /* ── Ambient canvas ──────────────────────────────────────────
+     A fixed layer of soft brand-tinted light. Glass needs something behind it
+     to refract; this is that something. Sits at z-0 under a z-[1] shell. */
+  .ambient-bg {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(55% 45% at 6% 0%, rgba(143, 227, 206, 0.55) 0%, rgba(143, 227, 206, 0) 65%),
+      radial-gradient(40% 36% at 96% 4%, rgba(232, 163, 61, 0.2) 0%, rgba(232, 163, 61, 0) 65%),
+      radial-gradient(48% 42% at 72% 100%, rgba(12, 122, 99, 0.16) 0%, rgba(12, 122, 99, 0) 65%),
+      radial-gradient(38% 40% at 14% 92%, rgba(186, 214, 240, 0.55) 0%, rgba(186, 214, 240, 0) 65%),
+      linear-gradient(180deg, #F4F5F1 0%, #F1F2ED 100%);
+  }
+
+  /* ── Glass materials ─────────────────────────────────────── */
+  .glass,
+  .glass-strong,
+  .premium-card,
+  .tile-row,
+  .tab-strip {
+    position: relative;
+    background: rgba(255, 255, 255, var(--glass-alpha));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+    backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    box-shadow:
+      inset 0 1px 0 var(--glass-rim),
+      0 0 0 1px var(--glass-edge),
+      0 12px 32px -14px rgba(23, 32, 29, 0.16);
+  }
+  .glass-strong {
+    --glass-alpha: 0.76;
+    --glass-blur: 32px;
+  }
+  .glass-interactive,
+  .premium-card-interactive {
+    transition: background-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+  }
+  .glass-interactive:hover,
+  .premium-card-interactive:hover {
+    background: rgba(255, 255, 255, 0.78);
+    box-shadow:
+      inset 0 1px 0 var(--glass-rim),
+      0 0 0 1px rgba(23, 32, 29, 0.09),
+      0 18px 40px -16px rgba(23, 32, 29, 0.22);
+  }
+
+  .glass-dark {
+    position: relative;
+    background: rgba(12, 74, 62, 0.8);
+    -webkit-backdrop-filter: blur(28px) saturate(160%);
+    backdrop-filter: blur(28px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.22),
+      0 0 0 1px rgba(6, 45, 37, 0.35),
+      0 20px 44px -18px rgba(6, 45, 37, 0.5);
+    color: #fff;
+  }
+
+  .glass-input {
+    background: rgba(255, 255, 255, 0.55);
+    -webkit-backdrop-filter: blur(14px) saturate(160%);
+    backdrop-filter: blur(14px) saturate(160%);
+    border: 1px solid rgba(23, 32, 29, 0.1);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  }
+  .glass-input:hover { border-color: rgba(12, 122, 99, 0.4); }
+  .glass-input:focus-visible,
+  .glass-input:focus-within {
+    background: rgba(255, 255, 255, 0.85);
+    border-color: theme("colors.primary.DEFAULT");
+  }
+
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .glass, .glass-strong, .premium-card, .tile-row, .tab-strip { background: rgba(255, 255, 255, 0.94); }
+    .glass-dark { background: #0E5446; }
+    .glass-input { background: #fff; }
+  }
+
   /* Mono kicker — Spline Sans Mono, caps, tracked. Tabular so any coords /
      counts embedded in a kicker (e.g. rank-grid labels) never jitter. */
   .kicker {
@@ -90,37 +180,20 @@
     border: 1px solid theme("colors.hairline");
     border-radius: theme("borderRadius.btn");
   }
-}
 
-@layer utilities {
-  /* Tabular numerals — apply to every data figure (Hanken display numbers,
-     scores, prices, ratings, review counts, table cells) so numbers read as
-     trustworthy financial infrastructure and never reflow while animating. */
-  .tnum {
-    font-variant-numeric: tabular-nums;
-  }
-
-  /* ── Admin panels ────────────────────────────────────────────
-     Conventional SaaS admin surface (the GoHighLevel / Stripe-dashboard
-     idiom): white panel, 1px border, 8px radius, no gradient, no lift, no
-     entrance motion. Hierarchy comes from borders, weight and spacing. */
-  .premium-card {
-    position: relative;
-    border: 1px solid theme("colors.hairline");
-    border-radius: 8px;
-    background: theme("colors.card");
-    box-shadow: 0 1px 2px rgba(23, 32, 29, 0.03);
-  }
-  .premium-card-interactive:hover { border-color: rgba(23, 32, 29, 0.18); }
-  .premium-card-hero { background: theme("colors.card"); }
+  /* ── Panels (dashboard + admin surfaces) ─────────────────────
+     Same structure as a conventional admin panel — head / body / foot — on
+     the glass material. Hierarchy still comes from weight and spacing. */
+  .premium-card { border-radius: theme("borderRadius.panel"); }
+  .premium-card-hero { background: rgba(255, 255, 255, 0.7); }
 
   .panel-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 12px 16px;
-    border-bottom: 1px solid theme("colors.hairline");
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--hairline-soft);
   }
   .panel-title {
     font-size: 14px;
@@ -133,10 +206,10 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 10px 16px;
-    border-top: 1px solid theme("colors.hairline");
-    background: #FAFAF8;
-    border-radius: 0 0 8px 8px;
+    padding: 10px 18px;
+    border-top: 1px solid var(--hairline-soft);
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 0 0 theme("borderRadius.panel") theme("borderRadius.panel");
   }
 
   .premium-card-link {
@@ -170,11 +243,11 @@
     flex-shrink: 0;
     width: 36px;
     height: 36px;
-    border-radius: 6px;
-    background: theme("colors.primary.wash");
+    border-radius: 11px;
+    background: rgba(12, 122, 99, 0.1);
     color: theme("colors.primary.dark");
   }
-  .icon-plate-sm { width: 30px; height: 30px; }
+  .icon-plate-sm { width: 30px; height: 30px; border-radius: 9px; }
 
   .delta-pill {
     display: inline-flex;
@@ -191,50 +264,59 @@
 
   .dash-enter { animation: none; }
 
-  .tile-row {
-    border: 1px solid theme("colors.hairline");
-    border-radius: 6px;
-    background: theme("colors.card");
-  }
-  .tile-row:hover { background: #FAFAF8; }
+  .tile-row { border-radius: 14px; --glass-alpha: 0.45; --glass-blur: 16px; }
+  .tile-row:hover { background: rgba(255, 255, 255, 0.7); }
 
   /* Plain data table used inside dashboard panels. */
   .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   .tbl th {
-    padding: 8px 16px;
+    padding: 8px 18px;
     text-align: left;
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.05em;
     text-transform: uppercase;
     color: theme("colors.faint");
-    border-bottom: 1px solid theme("colors.hairline");
-    background: #FAFAF8;
+    border-bottom: 1px solid var(--hairline-soft);
+    background: rgba(255, 255, 255, 0.28);
     white-space: nowrap;
   }
   .tbl td {
-    padding: 10px 16px;
-    border-bottom: 1px solid theme("colors.hairline");
+    padding: 11px 18px;
+    border-bottom: 1px solid var(--hairline-soft);
     color: theme("colors.ink");
     vertical-align: middle;
   }
   .tbl tr:last-child td { border-bottom: 0; }
-  .tbl tbody tr:hover td { background: #FCFCFB; }
+  .tbl tbody tr:hover td { background: rgba(255, 255, 255, 0.45); }
   .tbl .num { text-align: right; font-variant-numeric: tabular-nums; }
 
-  /* Underline tab strip (section navigation). */
-  .tab-strip { display: flex; gap: 4px; border-bottom: 1px solid theme("colors.hairline"); overflow-x: auto; }
+  /* Segmented control (section navigation) — a glass capsule with a solid
+     white "thumb" on the current section, the way Apple segments views. */
+  .tab-strip {
+    display: inline-flex;
+    max-width: 100%;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 999px;
+    overflow-x: auto;
+    --glass-alpha: 0.5;
+  }
   .tab-strip a {
-    padding: 10px 12px;
-    font-size: 14px;
+    padding: 7px 14px;
+    border-radius: 999px;
+    font-size: 13px;
     font-weight: 600;
     color: theme("colors.sub");
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
     white-space: nowrap;
+    transition: color 150ms ease, background-color 150ms ease;
   }
   .tab-strip a:hover { color: theme("colors.ink"); }
-  .tab-strip a[aria-current="page"] { color: theme("colors.primary.dark"); border-bottom-color: theme("colors.primary.DEFAULT"); }
+  .tab-strip a[aria-current="page"] {
+    color: theme("colors.ink");
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(23, 32, 29, 0.1), 0 0 0 1px rgba(23, 32, 29, 0.05);
+  }
 
   /* Status pill: soft tint + same-hue text, 11px, never colour alone. */
   .status-pill {
@@ -257,6 +339,17 @@
       linear-gradient(rgba(13, 73, 60, .035) 1px, transparent 1px);
     background-size: 170px 150px, 190px 170px, 44px 44px, 44px 44px;
   }
+}
+
+@layer utilities {
+  /* Tabular numerals — apply to every data figure so numbers never reflow. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Translucent hairline for dividers inside glass. */
+  .border-soft { border-color: var(--hairline-soft); }
+  .divide-soft > :not([hidden]) ~ :not([hidden]) { border-color: var(--hairline-soft); }
 
   .no-scrollbar::-webkit-scrollbar {
     display: none;
@@ -269,7 +362,7 @@
   .shimmer {
     position: relative;
     overflow: hidden;
-    background: theme("colors.hairline");
+    background: rgba(23, 32, 29, 0.06);
   }
   .shimmer::after {
     content: "";
@@ -279,7 +372,7 @@
     background: linear-gradient(
       90deg,
       transparent,
-      rgba(255, 255, 255, 0.55),
+      rgba(255, 255, 255, 0.65),
       transparent
     );
     animation: shimmer 1.5s infinite;

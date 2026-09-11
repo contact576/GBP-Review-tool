@@ -35,7 +35,7 @@ function OpsMark() {
   );
 }
 
-export function AdminShell({ children }: { children: React.ReactNode }) {
+export function AdminShell({ children, hasBanner }: { children: React.ReactNode; hasBanner?: boolean }) {
   const pathname = usePathname();
 
   const NavLink = ({ item, onMobile }: { item: (typeof NAV)[number]; onMobile?: boolean }) => {
@@ -44,9 +44,9 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       <Link
         href={item.href}
         className={cn(
-          "flex items-center gap-2.5 rounded-btn text-[14px] font-medium transition-colors",
-          onMobile ? "shrink-0 px-3 py-2 whitespace-nowrap" : "px-2.5 py-2",
-          active ? "bg-white/15 text-white" : "text-white/55 hover:bg-white/10 hover:text-white",
+          "flex items-center gap-2.5 rounded-[12px] text-[14px] font-medium transition-colors",
+          onMobile ? "shrink-0 px-3 py-2 whitespace-nowrap" : "px-3 py-2",
+          active ? "bg-white/[.14] text-white shadow-[inset_0_1px_0_rgba(255,255,255,.12)]" : "text-white/55 hover:bg-white/[.08] hover:text-white",
         )}
       >
         <Icon name={item.icon} size={18} />
@@ -57,9 +57,10 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 
   return (
     <ToastProvider>
-      <div className="min-h-dvh bg-paper">
+      <div className="relative min-h-dvh">
+        <div aria-hidden="true" className="ambient-bg" />
         {/* Desktop sidebar — dark internal chrome */}
-        <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col bg-ink lg:flex">
+        <aside className={cn("fixed bottom-3 left-3 z-30 hidden w-[240px] flex-col overflow-hidden rounded-sheet bg-ink/[.88] shadow-[inset_0_1px_0_rgba(255,255,255,.1),0_0_0_1px_rgba(23,32,29,.4),0_24px_60px_-20px_rgba(23,32,29,.6)] backdrop-blur-2xl lg:flex", hasBanner ? "top-[52px]" : "top-3")}>
           <div className="flex items-center justify-between px-4 py-4">
             <OpsMark />
           </div>
@@ -75,17 +76,18 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           </nav>
           <div className="border-t border-white/10 p-3">
             <form action={signOutAction}>
-              <button className="flex w-full items-center gap-2.5 rounded-btn px-2.5 py-2 text-[14px] font-medium text-white/55 hover:bg-white/10 hover:text-white">
+              <button className="flex w-full items-center gap-2.5 rounded-[12px] px-3 py-2 text-[14px] font-medium text-white/55 hover:bg-white/[.08] hover:text-white">
                 <Icon name="external" size={18} /> Sign out
               </button>
             </form>
           </div>
         </aside>
 
-        <div className="lg:pl-60">
+        <div className="relative z-[1] lg:pl-[264px]">
           {/* Header — dark, clearly internal */}
-          <header className="sticky top-0 z-20 border-b border-white/10 bg-ink">
-            <div className="flex items-center justify-between px-4 py-3 lg:px-8">
+          <header className="sticky top-0 z-20 px-3 pt-3 lg:px-6 xl:px-8">
+            <div className="rounded-[20px] bg-ink/[.88] px-3 shadow-[inset_0_1px_0_rgba(255,255,255,.1),0_0_0_1px_rgba(23,32,29,.4),0_12px_32px_-14px_rgba(23,32,29,.5)] backdrop-blur-2xl lg:px-5">
+            <div className="flex min-h-[56px] items-center justify-between">
               <div className="flex items-center gap-2 lg:hidden">
                 <OpsMark />
               </div>
@@ -97,20 +99,21 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                   <Icon name="lock" size={11} /> Internal
                 </span>
                 <form action={signOutAction} className="lg:hidden">
-                  <button aria-label="Sign out" className="grid size-9 place-items-center rounded-btn text-white/60 hover:bg-white/10">
+                  <button aria-label="Sign out" className="grid size-9 place-items-center rounded-full text-white/60 hover:bg-white/10">
                     <Icon name="external" size={20} />
                   </button>
                 </form>
               </div>
             </div>
-            <nav className="flex gap-1 overflow-x-auto px-3 pb-2 no-scrollbar lg:hidden">
+            <nav className="flex gap-1 overflow-x-auto pb-2 no-scrollbar lg:hidden">
               {NAV.map((item) => (
                 <NavLink key={item.href} item={item} onMobile />
               ))}
             </nav>
+            </div>
           </header>
 
-          <main id="main" className="px-4 pb-16 pt-5 lg:px-8 lg:pb-12">
+          <main id="main" className="px-3 pb-16 pt-5 lg:px-6 lg:pb-12 xl:px-8">
             <div className="mx-auto max-w-[1560px]">{children}</div>
           </main>
         </div>

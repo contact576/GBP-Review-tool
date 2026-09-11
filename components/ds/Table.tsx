@@ -121,14 +121,14 @@ export function Table<T>({
   return (
     <div
       className={cn(
-        "w-full overflow-x-auto rounded-card border border-hairline bg-card",
+        "glass w-full overflow-x-auto rounded-card",
         containerClassName,
       )}
     >
       <table className={cn("w-full border-collapse text-[14px]", className)}>
         {caption ? <caption className="sr-only">{caption}</caption> : null}
         <thead>
-          <tr className="border-b border-hairline">
+          <tr className="border-b border-soft">
             {columns.map((col) => {
               const align = resolveAlign(col);
               const active = sort?.key === col.key;
@@ -156,7 +156,7 @@ export function Table<T>({
                   className={cn(
                     headPad,
                     "font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-faint whitespace-nowrap",
-                    stickyHeader && "sticky top-0 z-10 bg-card",
+                    stickyHeader && "sticky top-0 z-10 bg-white/70 backdrop-blur-md",
                     alignClass[align],
                     col.headerClassName,
                   )}
@@ -211,9 +211,9 @@ export function Table<T>({
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
                   aria-selected={selected || undefined}
                   className={cn(
-                    "border-b border-hairline last:border-0 transition-colors",
-                    interactive && "cursor-pointer hover:bg-primary-wash",
-                    selected && "bg-primary-wash",
+                    "border-b border-soft last:border-0 transition-colors",
+                    interactive && "cursor-pointer hover:bg-white/50",
+                    selected && "bg-primary/[.07]",
                   )}
                 >
                   {columns.map((col) => {

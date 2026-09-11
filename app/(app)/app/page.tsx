@@ -102,7 +102,7 @@ export default async function DashboardPage() {
       {!data.workspace.isDemo ? <GettingStartedCard data={data} /> : null}
 
       {/* ── Stat row ─────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6 lg:gap-4">
         <StatCard
           label="Invites sent"
           value={formatCompact(sentInWindow)}
@@ -213,7 +213,7 @@ export default async function DashboardPage() {
         <section className="premium-card flex flex-col overflow-hidden" aria-labelledby="requests-title">
           <div className="panel-head">
             <h2 id="requests-title" className="panel-title">Latest review requests</h2>
-            <Link href="/app/requests" className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-[12px] font-semibold text-white hover:bg-primary-dark">
+            <Link href="/app/requests" className="inline-flex h-8 items-center rounded-full bg-primary px-3.5 text-[12px] font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.24),0_6px_16px_-8px_rgba(12,122,99,0.7)] hover:bg-primary-dark">
               Send request
             </Link>
           </div>
@@ -287,7 +287,7 @@ export default async function DashboardPage() {
             ) : tasks.length ? (
               tasks.map((task) => <TaskCard key={task.id} task={task} />)
             ) : (
-              <div className="rounded-md border border-hairline bg-primary-wash px-4 py-6 text-center">
+              <div className="rounded-[14px] bg-primary/[.07] px-4 py-6 text-center">
                 <Icon name="check-circle" size={20} className="mx-auto text-primary" />
                 <p className="mt-2 text-[14px] font-semibold text-ink">You are clear for the week</p>
                 <p className="mt-1 text-[12px] text-sub">New recommendations will appear after the next verified sync.</p>
@@ -303,7 +303,7 @@ export default async function DashboardPage() {
           </div>
           <div className="flex-1 p-4">
             {data.workspace.isDemo || googleProfileMedia?.googleUrl ? (
-              <div className="relative h-[120px] overflow-hidden rounded-md border border-hairline bg-primary-wash">
+              <div className="relative h-[120px] overflow-hidden rounded-[14px] bg-primary/[.07] shadow-[0_0_0_1px_rgba(23,32,29,0.06)]">
                 <Image
                   src={googleProfileMedia?.googleUrl ?? "/images/dashboard/harbourview-clinic.png"}
                   alt={googleProfileMedia
@@ -317,7 +317,7 @@ export default async function DashboardPage() {
                 />
               </div>
             ) : (
-              <div className="grid h-[120px] place-items-center rounded-md border border-dashed border-hairline bg-primary-wash text-center">
+              <div className="grid h-[120px] place-items-center rounded-[14px] border border-dashed border-ink/15 bg-white/40 text-center">
                 <p className="text-[12px] text-sub">Google profile photos appear after sync</p>
               </div>
             )}
@@ -343,7 +343,7 @@ export default async function DashboardPage() {
           <div className="panel-foot">
             <span className="text-[12px] text-sub">Profile completeness</span>
             <span className="flex items-center gap-2 text-[12px] font-semibold tabular-nums text-ink">
-              <span className="h-1.5 w-20 overflow-hidden rounded-full bg-hairline" aria-hidden="true">
+              <span className="h-1.5 w-20 overflow-hidden rounded-full bg-ink/10" aria-hidden="true">
                 <span className="block h-full bg-primary" style={{ width: `${Math.max(0, Math.min(100, data.location.profile.completeness))}%` }} />
               </span>
               {data.location.profile.completeness}%
@@ -406,7 +406,7 @@ function StatCard({
         <span className="display-num text-[26px]">{value}</span>
         {typeof stars === "number" ? <InkStars rating={Math.round(stars)} /> : null}
       </div>
-      <div className={`mt-1.5 line-clamp-1 delta-pill delta-pill-${tone}`}>
+      <div className={`mt-1.5 delta-pill delta-pill-${tone} items-start whitespace-normal`}>
         {tone !== "neutral" ? <Icon name={tone === "up" ? "arrow-up" : "arrow-down"} size={11} /> : null}
         {note}
       </div>

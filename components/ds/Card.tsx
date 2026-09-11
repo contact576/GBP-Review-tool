@@ -11,8 +11,8 @@ export function Card({ padded = true, raised, as = "div", className, children, .
   return (
     <Comp
       className={cn(
-        "bg-card rounded-card border border-hairline",
-        raised ? "shadow-lg" : "shadow-sm",
+        "glass rounded-card",
+        raised ? "glass-strong shadow-glass-lg" : "",
         padded && "p-4 sm:p-5",
         className,
       )}

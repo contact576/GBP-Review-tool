@@ -12,6 +12,7 @@ export default async function AgencyLayout({ children }: { children: React.React
     <>
       {session.isDemo ? <DemoBanner /> : null}
       <AgencyShell
+        hasBanner={session.isDemo}
         brand={{
           brandName: wl.brandName,
           primary: wl.primary,

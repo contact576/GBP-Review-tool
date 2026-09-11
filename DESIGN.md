@@ -10,9 +10,21 @@
 > "trust-forward with celebratory energy," never casino theatrics.
 
 ## Theme & atmosphere
-- **Light-first**, warm-paper canvas (never stark white, never dark mode).
-- White cards float on paper with **two-layer soft shadows**; the single
-  deep-green **hero card** is the one emotional focal point per screen.
+- **Glass edition (2026-09-11).** The material is frosted glass over a fixed,
+  softly tinted ambient canvas (`.ambient-bg`: mint / gold / green / sky
+  radials on paper) — the Apple Liquid Glass idiom. Panels are translucent
+  white with `backdrop-filter: blur() saturate()`, a bright 1px specular rim on
+  top (`inset 0 1px 0 white`), a faint ink hairline outside, and one long soft
+  drop. Every glass class carries a solid fallback under `@supports not`.
+  Classes (`app/globals.css`): `.glass` (cards, tiles, tables, popovers),
+  `.glass-strong` (chrome: sidebar, floating header, tab bar, drawers),
+  `.glass-dark` (deep-green glass: referral tile, toasts), `.glass-input`.
+- **Floating chrome.** Sidebar, header bar and the phone tab bar are glass
+  panels inset 12px from the viewport (`rounded-sheet` 28 / `20px`), so page
+  content scrolls *under* them and shows through. Light-first, never dark mode.
+- Structure stays conventional (stat row, data tables, small-caps labels —
+  the GoHighLevel admin idiom); only the *material* is glass. No gradients on
+  panels, no glow charts, no entrance motion.
 - **One hero number per screen.** Generous whitespace. Quiet charts. Zero jargon
   ("people who found you", never "impressions/CTR").
 - **Two-accent discipline:** green = trust/go; gold = earned celebration, rationed.
@@ -68,11 +80,11 @@ page background. Status colors (primary/gold/danger) are non-themeable. On the
 ## Spacing, radii, elevation
 - **Spacing:** 4px base (`space-1..10`); card padding 16 mobile / 20–24 desktop;
   32 between sections. No arbitrary values.
-- **Radii:** card 16 · button 12 · input 12 · chip/pill 999.
-- **Elevation — two levels only.** `shadow-sm` (resting cards/inputs) and
-  `shadow-lg` (hero, popovers, modals, hover lift). Prefer a hairline + subtle
-  shadow over hard borders. (Linear discipline: hierarchy via surface + hairline,
-  not heavy drop shadows.)
+- **Radii:** card/panel 20 · sheet 28 · button 999 (capsule) · input 14 · chip 999.
+- **Elevation comes from translucency + blur first.** `.glass` carries its own
+  rim + drop; `shadow-glass-lg` for popovers/drawers. Dividers inside glass use
+  `border-soft` / `divide-soft` (ink at 7%), never the opaque `hairline`.
+  Primary buttons carry an inset top highlight + a tinted green drop.
 
 ## Layout & grid
 - Desktop-first here (owner requested); still responsive to phone.
