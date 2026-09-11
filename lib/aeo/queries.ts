@@ -141,3 +141,87 @@ export function buildDefaultQueries(
 
   return { queries, basis: { category: context.category, city, services: context.services }, blockers };
 }
+
+// ── Owner-written questions ─────────────────────────────────────────────────
+
+/** Most questions an owner can keep. Also the most a run can ask. */
+export const AEO_MAX_OWN_QUESTIONS = AEO_MAX_QUERIES_PER_RUN;
+/** Longest question kept, in characters. Matches the generated-question cap. */
+export const AEO_MAX_QUESTION_LENGTH = 140;
+
+export type AeoQuerySource = "own" | "generated";
+
+export interface AeoPlannedQuery {
+  query: string;
+  /** Whether the owner wrote it, or it was written from their profile. */
+  source: AeoQuerySource;
+}
+
+export interface AeoRunPlan extends AeoQueryPlan {
+  items: AeoPlannedQuery[];
+  /** The owner's questions, cleaned, in the order they were saved. */
+  own: string[];
+}
+
+/**
+ * Clean a list the owner typed: one line each, collapsed whitespace, length-
+ * capped, de-duplicated case-insensitively, at most `AEO_MAX_OWN_QUESTIONS`.
+ * Control characters go so a pasted newline cannot smuggle a second
+ * instruction into the prompt that wraps each question.
+ */
+export function cleanOwnQuestions(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const clean: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "string") continue;
+    const value = entry
+      .replace(/\p{Cc}+/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, AEO_MAX_QUESTION_LENGTH)
+      .trim();
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    clean.push(value);
+    if (clean.length >= AEO_MAX_OWN_QUESTIONS) break;
+  }
+  return clean;
+}
+
+/**
+ * The question set a run will ask: the owner's own questions first, then
+ * questions written from the profile to fill the run up to `limit`. When the
+ * owner has written a full set, nothing is generated and profile blockers no
+ * longer matter — their questions are the run.
+ */
+export function buildRunPlan(
+  context: AeoBusinessContext,
+  ownQuestions: unknown,
+  limit: number = AEO_DEFAULT_QUERY_COUNT,
+): AeoRunPlan {
+  const own = cleanOwnQuestions(ownQuestions);
+  const cap = Math.max(1, Math.min(Math.max(limit, own.length), AEO_MAX_QUERIES_PER_RUN));
+  const generated = buildDefaultQueries(context, AEO_MAX_QUERIES_PER_RUN);
+
+  const seen = new Set(own.map((query) => query.toLowerCase()));
+  const items: AeoPlannedQuery[] = own.map((query) => ({ query, source: "own" }));
+  for (const query of generated.queries) {
+    if (items.length >= cap) break;
+    if (seen.has(query.toLowerCase())) continue;
+    seen.add(query.toLowerCase());
+    items.push({ query, source: "generated" });
+  }
+
+  // A blocker only matters while generated questions are still needed.
+  const needsGenerated = own.length < cap;
+  return {
+    queries: items.map((item) => item.query),
+    items,
+    own,
+    basis: generated.basis,
+    blockers: needsGenerated ? generated.blockers : [],
+  };
+}

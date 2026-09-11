@@ -15,7 +15,7 @@ import { engineAvailability } from "@/lib/aeo/engines";
 import { aeoQuota } from "@/lib/aeo/metering";
 import type { AeoEngineOutcome, AeoMultiRunRecord } from "@/lib/aeo/multi";
 import { multiFromSnapshot } from "@/lib/aeo/persistence";
-import { AEO_DEFAULT_QUERY_COUNT, buildDefaultQueries } from "@/lib/aeo/queries";
+import { AEO_DEFAULT_QUERY_COUNT, buildRunPlan } from "@/lib/aeo/queries";
 import { NOT_CHECKED_COPY, isChecked, type AeoCheckedQuery, type AeoQueryOutcome } from "@/lib/aeo/types";
 import { viewFromSnapshot } from "@/lib/aeo/view";
 import { EngineGrid } from "./EngineGrid";
@@ -59,7 +59,7 @@ export default async function VisibilityPage() {
   const detected = ranAt ? formatDate(ranAt) : null;
   const hasSnapshot = multi !== null || legacy !== null;
 
-  const plan = buildDefaultQueries(context, AEO_DEFAULT_QUERY_COUNT);
+  const plan = buildRunPlan(context, data.workspace.industryConfig?.customQuestions, AEO_DEFAULT_QUERY_COUNT);
   const quota = aeoQuota(data.auditLog, data.subscription.tier);
   const availability = engineAvailability();
 
@@ -74,6 +74,8 @@ export default async function VisibilityPage() {
   const runner = (
     <RunCheck
       queries={plan.queries}
+      items={plan.items}
+      ownQuestions={plan.own}
       blockers={plan.blockers}
       quota={quota}
       engines={availability.map((entry) => ({

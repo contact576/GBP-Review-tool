@@ -8,7 +8,7 @@ import { connectedEngineIds, engineAvailability } from "@/lib/aeo/engines";
 import { aeoQuota } from "@/lib/aeo/metering";
 import { runMultiEngineCheck } from "@/lib/aeo/multi-runner";
 import { buildMultiAeoRunAuditEntry, toMultiAeoSnapshot } from "@/lib/aeo/persistence";
-import { AEO_DEFAULT_QUERY_COUNT, AEO_MAX_QUERIES_PER_RUN, buildDefaultQueries } from "@/lib/aeo/queries";
+import { AEO_DEFAULT_QUERY_COUNT, AEO_MAX_QUERIES_PER_RUN, buildRunPlan } from "@/lib/aeo/queries";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,10 +47,11 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "upgrade_required" }, { status: 403 });
   }
 
-  const plan = buildDefaultQueries(buildAeoContext(data), AEO_DEFAULT_QUERY_COUNT);
+  const plan = buildRunPlan(buildAeoContext(data), data.workspace.industryConfig?.customQuestions, AEO_DEFAULT_QUERY_COUNT);
   return NextResponse.json({
     ok: true,
     queries: plan.queries.slice(0, AEO_MAX_QUERIES_PER_RUN),
+    items: plan.items.slice(0, AEO_MAX_QUERIES_PER_RUN),
     blockers: plan.blockers,
     quota: aeoQuota(data.auditLog, data.subscription.tier),
     engines: engineAvailability().map((entry) => ({
@@ -116,12 +117,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "quota_exceeded", quota }, { status: 429 });
   }
 
-  // The query set is derived server-side from the workspace's own profile. The
-  // client cannot supply prompt text: it has no product need to, and accepting
-  // free text here would turn a metered visibility check into an open relay to
-  // the model.
+  // The query set is derived server-side: the owner's SAVED questions (written
+  // through a server action that cleans and caps them) plus questions written
+  // from the profile. The request body carries no prompt text — accepting free
+  // text here would turn a metered visibility check into an open relay to the
+  // model, whereas saved questions are bounded to 8 short lines per quota'd run.
   const context = buildAeoContext(data);
-  const plan = buildDefaultQueries(context, AEO_DEFAULT_QUERY_COUNT);
+  const plan = buildRunPlan(context, data.workspace.industryConfig?.customQuestions, AEO_DEFAULT_QUERY_COUNT);
   const queries = plan.queries.slice(0, AEO_MAX_QUERIES_PER_RUN);
 
   if (queries.length === 0) {

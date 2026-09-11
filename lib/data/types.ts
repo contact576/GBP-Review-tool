@@ -76,6 +76,12 @@ export interface IndustryConfig {
    * Matched case-insensitively.
    */
   excludedServices?: string[];
+  /**
+   * Questions the owner wrote for AI-Visibility checks, asked before any
+   * question written from the profile. Cleaned and capped by
+   * `cleanOwnQuestions` (lib/aeo/queries.ts) on the way in.
+   */
+  customQuestions?: string[];
 }
 
 export interface Workspace {

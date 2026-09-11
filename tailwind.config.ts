@@ -47,7 +47,7 @@ const config: Config = {
         card: "20px", // glass panels
         panel: "20px",
         sheet: "28px",
-        btn: "999px", // capsule buttons
+        btn: "12px", // boxes, menus, inputs-as-buttons; Button itself is a capsule (rounded-full)
         input: "14px",
         chip: "999px",
       },

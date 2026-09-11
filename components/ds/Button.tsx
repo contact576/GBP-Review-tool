@@ -10,7 +10,7 @@ type Size = "sm" | "md" | "lg";
 // (The global :focus-visible outline is intentionally replaced here with a
 // ring so filled buttons get a crisp, on-brand halo rather than a stray outline.)
 const base =
-  "inline-flex items-center justify-center gap-2 font-semibold rounded-btn transition-all duration-150 whitespace-nowrap select-none " +
+  "inline-flex items-center justify-center gap-2 font-semibold rounded-full transition-all duration-150 whitespace-nowrap select-none " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-paper " +
   "disabled:opacity-50 disabled:pointer-events-none disabled:shadow-none";
 

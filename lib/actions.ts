@@ -116,6 +116,7 @@ import { awardMilestones } from "@/lib/milestones/runner";
 import { createSignedContentAssetUrl } from "@/lib/security/content-asset-signature";
 import { collectWebsiteEvidence } from "@/lib/evidence/website";
 import { getIndustry, resolveServiceOptions } from "@/lib/industries";
+import { AEO_MAX_OWN_QUESTIONS, cleanOwnQuestions } from "@/lib/aeo/queries";
 
 // ── Helpers ─────────────────────────────────────────────────
 async function requireSession(): Promise<Session> {
@@ -3649,3 +3650,61 @@ export async function openBillingPortalAction(): Promise<BillingPortalResult> {
 }
 
 export type { Channel };
+
+// ── AI Visibility: the owner's own questions ────────────────────────────────
+
+export type AeoQuestionsActionResult =
+  | { ok: true; message: string; questions: string[] }
+  | { ok: false; message: string };
+
+/**
+ * Save the questions an owner wants put to the AI engines. They are asked
+ * before any question written from the profile (lib/aeo/queries.ts,
+ * `buildRunPlan`). Cleaned and capped here — one line each, 140 characters,
+ * at most `AEO_MAX_OWN_QUESTIONS` — so the metered run route never has to
+ * trust free text. `updateIndustry` is the sole writer of `industryConfig`, so
+ * every other field is read back and re-sent unchanged.
+ */
+export async function setAeoQuestionsAction(questions: unknown): Promise<AeoQuestionsActionResult> {
+  const { provider, ws, session } = await scoped("owner", "manager");
+  if (!Array.isArray(questions)) return { ok: false, message: "That list could not be read." };
+  const clean = cleanOwnQuestions(questions);
+  if (questions.some((entry) => typeof entry === "string" && entry.trim()) && clean.length === 0) {
+    return { ok: false, message: "Those questions could not be kept. Try plain text, one question at a time." };
+  }
+
+  const data = await provider.getData(ws);
+  if (!data) return { ok: false, message: "This workspace could not be loaded." };
+  const industryKey = (data.workspace.vertical || data.location.vertical || "").trim();
+  if (!industryKey) return { ok: false, message: "Choose a business type in Settings → Business first." };
+
+  const existing = data.workspace.industryConfig;
+  const config: IndustryConfig = {
+    ...(existing?.customLabel ? { customLabel: existing.customLabel } : {}),
+    ...(existing?.customAttributes?.length ? { customAttributes: existing.customAttributes } : {}),
+    ...(existing?.customServices?.length ? { customServices: existing.customServices } : {}),
+    ...(existing?.excludedServices?.length ? { excludedServices: existing.excludedServices } : {}),
+    ...(clean.length ? { customQuestions: clean } : {}),
+  };
+  await provider.updateIndustry(ws, industryKey, config);
+  await provider.appendAuditLog(ws, {
+    id: `audit_${randomBytes(12).toString("hex")}`,
+    workspaceId: ws,
+    actor: session.name,
+    action: "visibility.questions_updated",
+    targetType: "workspace",
+    targetId: ws,
+    at: new Date().toISOString(),
+    meta: { questionCount: clean.length },
+  });
+  revalidatePath("/app/visibility");
+
+  return {
+    ok: true,
+    questions: clean,
+    message:
+      clean.length === 0
+        ? "Your questions were cleared. The next check asks questions written from your profile."
+        : `${clean.length} of ${AEO_MAX_OWN_QUESTIONS} questions saved. The next check asks ${clean.length === 1 ? "it" : "them"} first.`,
+  };
+}
