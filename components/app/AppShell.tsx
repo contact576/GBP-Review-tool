@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
 import { trialLockAllowsPath } from "@/lib/billing/trial";
 import { Icon } from "@/components/icons";
+import { FoundlyMark } from "@/components/icons/FoundlyMark";
 import { Badge } from "@/components/ds/misc";
 import { ToastProvider } from "@/components/ds/Toast";
 import { ProductTour } from "./ProductTour";
@@ -483,16 +484,7 @@ export function Wordmark({ small, inverse }: { small?: boolean; inverse?: boolea
         small ? "text-[17px]" : "text-[19px]",
       )}
     >
-      <span
-        className={cn(
-          "relative grid place-items-center",
-          inverse
-            ? "size-7 text-gold"
-            : "size-8 rounded-[10px] bg-hero text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_2px_6px_rgba(6,45,37,0.35)]",
-        )}
-      >
-        <Icon name={inverse ? "leaf" : "sparkles"} size={inverse ? 23 : 16} className="text-gold" />
-      </span>
+      <FoundlyMark size={small ? 26 : 30} className="shrink-0 drop-shadow-[0_2px_4px_rgba(6,45,37,0.25)]" />
       <span className={inverse ? "text-[17px] tracking-[0.22em]" : "tracking-tight"}>{inverse ? "FOUNDLY" : "Foundly"}</span>
     </span>
   );
