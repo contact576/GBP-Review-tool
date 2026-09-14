@@ -9,8 +9,6 @@ import { signOutAction } from "@/lib/actions";
 import { Wallpaper } from "@/components/app/desktop/Wallpaper";
 import { AppIcon, type AppIconTone } from "@/components/app/desktop/AppIcon";
 import { Dock, type DockItem } from "@/components/app/desktop/Dock";
-import { MenuBarClock } from "@/components/app/desktop/MenuBarClock";
-import { SidebarClock } from "@/components/app/desktop/SidebarClock";
 
 const NAV: { href: string; label: string; icon: IconName; tone: AppIconTone; exact?: boolean }[] = [
   { href: "/admin", label: "Overview", icon: "grid", tone: "green", exact: true },
@@ -44,7 +42,7 @@ function OpsMark() {
 
 /**
  * Ops console chrome — the desktop edition in ink glass. Same wallpaper,
- * clock, menu bar and Dock as the owner console, but every panel of chrome is
+ * menu bar and Dock as the owner console, but every panel of chrome is
  * translucent graphite so the surface is unmistakably internal.
  */
 export function AdminShell({ children, hasBanner }: { children: React.ReactNode; hasBanner?: boolean }) {
@@ -71,14 +69,11 @@ export function AdminShell({ children, hasBanner }: { children: React.ReactNode;
             hasBanner ? "top-[52px]" : "top-3",
           )}
         >
-          <div className="flex items-center justify-between px-4 pb-2 pt-4">
+          <div className="flex items-center justify-between px-4 pb-3 pt-4">
             <OpsMark />
             <span className="inline-flex items-center gap-1 rounded-chip bg-danger px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-white">
               <Icon name="lock" size={11} /> Internal
             </span>
-          </div>
-          <div className="px-3 pb-2">
-            <SidebarClock inverse className="bg-white/[.08] shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]" />
           </div>
           <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-1" aria-label="Ops navigation">
             {NAV.map((item) => (
@@ -108,7 +103,6 @@ export function AdminShell({ children, hasBanner }: { children: React.ReactNode;
                 <span className="text-[13px] text-white/60">Internal · Foundly Ops · never tenant-facing</span>
               </div>
               <div className="flex items-center gap-2">
-                <MenuBarClock inverse className="hidden sm:inline-flex" />
                 <form action={signOutAction} className="lg:hidden">
                   <button aria-label="Sign out" className="grid size-9 place-items-center rounded-full text-white/60 hover:bg-white/10">
                     <Icon name="external" size={20} />

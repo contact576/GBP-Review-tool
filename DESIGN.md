@@ -40,10 +40,10 @@
   and magnifies (1.16×), tooltip names the app, a dot marks the open section.
   Phone: the Dock is the tab bar (labels under icons, no magnification).
   Content gets `pb-[calc(var(--dock-h)+40px)]` so nothing hides under it.
-- **Clocks.** `MenuBarClock` (weekday · date · time, minute ticks) sits at the
-  right of the menu bar; `SidebarClock` (analog face + digital time + date,
-  second ticks) sits under the wordmark. Both render after mount, so server
-  and client never disagree about the time.
+- **No clock.** The desktop metaphor stops short of a clock. The viewer's own
+  OS already shows the time, and a second one is noise on a console whose job
+  is business figures. (Both clocks were built and removed on 2026-09-14 at
+  the owner's request — do not reintroduce one.)
 - **Floating chrome.** Sidebar, menu bar and Dock are glass panels inset 12px
   from the viewport (`rounded-sheet` 28 / `20px` / Dock 26px), so page content
   scrolls *under* them and shows through. Light-first, never dark mode.

@@ -10,8 +10,6 @@ import { signOutAction } from "@/lib/actions";
 import { Wallpaper } from "@/components/app/desktop/Wallpaper";
 import { AppIcon, type AppIconTone } from "@/components/app/desktop/AppIcon";
 import { Dock, type DockItem } from "@/components/app/desktop/Dock";
-import { MenuBarClock } from "@/components/app/desktop/MenuBarClock";
-import { SidebarClock } from "@/components/app/desktop/SidebarClock";
 import { hexTint, hexMix } from "./brand";
 
 export interface AgencyBrand {
@@ -60,8 +58,8 @@ function BrandMark({ brand, small }: { brand: AgencyBrand; small?: boolean }) {
 /**
  * Agency console chrome — the desktop edition, in the agency's own brand.
  *
- * Same bones as the owner console (wallpaper, glass sidebar with a clock,
- * menu bar, Dock) with the agency's primary colour tinting the wallpaper,
+ * Same bones as the owner console (wallpaper, glass sidebar, menu bar, Dock)
+ * with the agency's primary colour tinting the wallpaper,
  * the Overview app icon and the active state. This is THEIR product, so the
  * Foundly wordmark never appears here.
  */
@@ -106,12 +104,9 @@ export function AgencyShell({
           )}
         >
           <div aria-hidden="true" className="h-1" style={{ backgroundColor: brand.primary }} />
-          <div className="px-5 pb-3 pt-4">
+          <div className="px-5 pb-4 pt-4">
             <BrandMark brand={brand} />
             <div className="kicker mt-1 text-faint">Growth control plane</div>
-          </div>
-          <div className="px-3 pb-2">
-            <SidebarClock />
           </div>
           <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-1" aria-label="Agency navigation">
             {NAV.map((item) => (
@@ -141,7 +136,6 @@ export function AgencyShell({
                 <span className="truncate">Agency console · {brand.brandName}</span>
               </div>
               <div className="flex items-center gap-2">
-                <MenuBarClock className="hidden sm:inline-flex" />
                 <form action={signOutAction} className="lg:hidden">
                   <button aria-label="Sign out" className="grid size-9 place-items-center rounded-full text-sub hover:bg-white/70 hover:text-ink">
                     <AppIcon icon="external" tone="slate" size="sm" />

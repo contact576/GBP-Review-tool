@@ -16,8 +16,6 @@ import type { OrganizationWorkspaceSummary } from "@/lib/data/provider";
 import { Wallpaper } from "./desktop/Wallpaper";
 import { AppIcon, type AppIconTone } from "./desktop/AppIcon";
 import { Dock, DockButton, type DockItem } from "./desktop/Dock";
-import { MenuBarClock } from "./desktop/MenuBarClock";
-import { SidebarClock } from "./desktop/SidebarClock";
 import { Greeting } from "./desktop/Greeting";
 
 /**
@@ -72,9 +70,8 @@ function isActive(pathname: string, href: string): boolean {
 /**
  * Owner console chrome — the desktop edition.
  *
- * A living wallpaper, a floating glass sidebar with a clock widget and
- * app-icon navigation, a menu bar with the live time, and a Dock of app icons
- * along the bottom. Content scrolls *under* every piece of chrome and shows
+ * A living wallpaper, a floating glass sidebar with app-icon navigation, a
+ * menu bar, and a Dock of app icons along the bottom. Content scrolls *under* every piece of chrome and shows
  * through it. On a phone the Dock becomes the tab bar.
  */
 export function AppShell({
@@ -167,12 +164,8 @@ export function AppShell({
             hasBanner || isDemo ? "top-[52px]" : "top-3",
           )}
         >
-          <div className="flex h-[68px] items-center px-5">
+          <div className="flex h-[76px] items-center px-5">
             <Wordmark />
-          </div>
-
-          <div className="px-3 pb-2">
-            <SidebarClock />
           </div>
 
           <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-1" aria-label="Main navigation">
@@ -271,7 +264,6 @@ export function AppShell({
                     </Badge>
                   </Link>
                 ) : null}
-                <MenuBarClock className="hidden sm:inline-flex" />
                 <Link
                   href="/app/notifications"
                   aria-label="Notifications"
