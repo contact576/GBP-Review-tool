@@ -9,6 +9,7 @@ import { TaskCard } from "@/components/app/TaskCard";
 import { GettingStartedCard } from "@/components/app/GettingStartedCard";
 import { DashboardGrowthChart } from "@/components/app/DashboardGrowthChart";
 import { DashboardVisibilityMap } from "@/components/app/DashboardVisibilityMap";
+import { Greeting } from "@/components/app/desktop/Greeting";
 import type { DashboardSignal } from "@/lib/data/dashboard";
 import type { ProfileSuggestion, RequestStatus, Review, ReviewRequest } from "@/lib/data/types";
 import { suggestionStatusLabel } from "@/lib/suggestions/inbox";
@@ -85,7 +86,7 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-4 pb-4">
       <div className="lg:hidden">
-        <h1 className="text-[22px] font-bold tracking-tight text-ink">Good morning, {firstName}</h1>
+        <h1 className="text-[22px] font-bold tracking-tight text-ink"><Greeting name={firstName ?? data.owner.name} /></h1>
         <p className="mt-0.5 text-[13px] text-sub">{data.location.name}</p>
       </div>
 

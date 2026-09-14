@@ -38,7 +38,9 @@ function DeltaChip({
  * optional favourable-aware delta, and an optional bottom sparkline. Use this
  * as the app's stat cell (Dashboard, Benchmark, Analytics, Billing).
  *
- * Presentational. `boxless` drops the card chrome for spec-cell rows.
+ * Presentational. `boxless` drops the card chrome for spec-cell rows. The
+ * box is the glass material, so a stat row lets the wallpaper through like
+ * every other panel.
  */
 export function StatTile({
   label,
@@ -88,7 +90,7 @@ export function StatTile({
       className={cn(
         boxless
           ? "flex flex-col"
-          : cn("rounded-card p-4 sm:p-5", onHero ? "bg-white/[0.06] border border-white/10" : "border border-hairline bg-card shadow-sm"),
+          : cn("rounded-card p-4 sm:p-5", onHero ? "bg-white/[0.06] border border-white/10" : "glass"),
         className,
       )}
     >

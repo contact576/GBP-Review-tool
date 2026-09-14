@@ -9,6 +9,7 @@ import { Input } from "@/components/ds/form";
 import { Table, type Column, type SortDirection } from "@/components/ds/Table";
 import { Icon } from "@/components/icons";
 import { formatMoney } from "@/lib/utils/format";
+import { PLANS, normalizePlan } from "@/lib/billing/plans";
 import type { PlatformTenant } from "@/lib/data/types";
 import { TenantStatusBadge } from "../../_components/TenantStatus";
 
@@ -20,7 +21,7 @@ type SortKey = "name" | "vertical" | "plan" | "mrr" | "locations" | "region";
  */
 export function ImpersonationNotice() {
   return (
-    <div className="flex items-start gap-2.5 rounded-card border border-hairline bg-primary-wash p-4">
+    <div className="glass flex items-start gap-2.5 rounded-card p-4">
       <Icon name="shield" size={18} className="mt-px shrink-0 text-primary" aria-hidden />
       <div className="text-[13px] leading-relaxed text-sub">
         <p className="text-[14px] font-semibold text-ink">Open a tenant as Foundly support</p>
@@ -89,6 +90,7 @@ export function TenantsTable({ tenants, canOpen = true }: { tenants: PlatformTen
       ? tenants.filter(
           (t) =>
             t.name.toLowerCase().includes(q) ||
+            (t.organizationName ?? "").toLowerCase().includes(q) ||
             (t.ownerEmail ?? "").toLowerCase().includes(q) ||
             t.vertical.toLowerCase().includes(q) ||
             t.region.toLowerCase().includes(q),
@@ -113,17 +115,22 @@ export function TenantsTable({ tenants, canOpen = true }: { tenants: PlatformTen
       ariaLabel: "Sort by tenant",
       render: (t) => (
         <div className="min-w-0">
-          {t.primaryWorkspaceId ? (
-            <Link
-              href={`/admin/tenants/${encodeURIComponent(t.id)}`}
-              className="text-[14px] font-semibold text-ink hover:underline focus-visible:underline focus-visible:outline-none"
-            >
-              {t.name}
-            </Link>
-          ) : (
-            <div className="text-[14px] font-semibold text-ink">{t.name}</div>
-          )}
-          {t.ownerEmail ? <div className="truncate text-[12px] text-faint">{t.ownerEmail}</div> : null}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {t.primaryWorkspaceId ? (
+              <Link
+                href={`/admin/tenants/${encodeURIComponent(t.id)}`}
+                className="text-[14px] font-semibold text-ink hover:underline focus-visible:underline focus-visible:outline-none"
+              >
+                {t.name}
+              </Link>
+            ) : (
+              <span className="text-[14px] font-semibold text-ink">{t.name}</span>
+            )}
+            {t.orgType === "agency" ? <Badge tone="primary" icon="grid">Agency</Badge> : null}
+          </div>
+          <div className="truncate text-[12px] text-faint">
+            {[t.ownerEmail, t.organizationName ? `org “${t.organizationName}”` : null].filter(Boolean).join(" · ")}
+          </div>
         </div>
       ),
     },
@@ -132,14 +139,14 @@ export function TenantsTable({ tenants, canOpen = true }: { tenants: PlatformTen
       header: "Vertical",
       sortable: true,
       ariaLabel: "Sort by vertical",
-      render: (t) => <span className="text-[14px] capitalize text-sub">{t.vertical}</span>,
+      render: (t) => <span className="text-[14px] capitalize text-sub">{t.vertical.replace(/_/g, " ")}</span>,
     },
     {
       key: "plan",
       header: "Plan",
       sortable: true,
       ariaLabel: "Sort by plan",
-      render: (t) => <span className="text-[14px] capitalize text-sub">{t.plan}</span>,
+      render: (t) => <span className="text-[14px] text-sub">{PLANS[normalizePlan(t.plan)].name}</span>,
     },
     {
       key: "mrr",
@@ -155,6 +162,14 @@ export function TenantsTable({ tenants, canOpen = true }: { tenants: PlatformTen
       numeric: true,
       sortable: true,
       ariaLabel: "Sort by locations",
+      render: (t) => (
+        <span className="tabular-nums">
+          {t.locations}
+          {typeof t.billedLocations === "number" && t.billedLocations !== t.locations ? (
+            <span className="text-[12px] text-faint"> · {t.billedLocations} billed</span>
+          ) : null}
+        </span>
+      ),
     },
     {
       key: "status",
@@ -182,7 +197,7 @@ export function TenantsTable({ tenants, canOpen = true }: { tenants: PlatformTen
       <div className="max-w-sm">
         <Input
           iconLeft="search"
-          placeholder="Search tenant, vertical or region…"
+          placeholder="Search tenant, owner, vertical or region…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           aria-label="Search tenants"
@@ -199,12 +214,14 @@ export function TenantsTable({ tenants, canOpen = true }: { tenants: PlatformTen
         caption="Platform tenants"
         emptyIcon="search"
         emptyTitle="No tenants found"
-        emptyDescription={`No tenants match “${query}”. Try a different name, vertical, or region.`}
+        emptyDescription={`No tenants match “${query}”. Try a different name, owner, vertical, or region.`}
       />
 
       <p className="text-[12px] tabular-nums text-faint">
-        {rows.length} of {tenants.length} tenants shown · open a tenant&rsquo;s name for its plan, trial, users and
-        deletion · Open tenant starts an audited support session.
+        {rows.length} of {tenants.length} tenants shown · a direct tenant is named after its business, an agency after
+        its organization · MRR is one subscription per organization; locations on a parent plan bill nothing of their
+        own · open a tenant&rsquo;s name for its plan, trial, users and deletion · Open tenant starts an audited support
+        session.
       </p>
     </div>
   );

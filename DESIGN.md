@@ -10,18 +10,43 @@
 > "trust-forward with celebratory energy," never casino theatrics.
 
 ## Theme & atmosphere
-- **Glass edition (2026-09-11).** The material is frosted glass over a fixed,
-  softly tinted ambient canvas (`.ambient-bg`: mint / gold / green / sky
-  radials on paper) — the Apple Liquid Glass idiom. Panels are translucent
-  white with `backdrop-filter: blur() saturate()`, a bright 1px specular rim on
-  top (`inset 0 1px 0 white`), a faint ink hairline outside, and one long soft
-  drop. Every glass class carries a solid fallback under `@supports not`.
-  Classes (`app/globals.css`): `.glass` (cards, tiles, tables, popovers),
-  `.glass-strong` (chrome: sidebar, floating header, tab bar, drawers),
-  `.glass-dark` (deep-green glass: referral tile, toasts), `.glass-input`.
-- **Floating chrome.** Sidebar, header bar and the phone tab bar are glass
-  panels inset 12px from the viewport (`rounded-sheet` 28 / `20px`), so page
-  content scrolls *under* them and shows through. Light-first, never dark mode.
+- **Desktop glass edition (2026-09-14).** The console is laid out like a
+  desktop: a living **wallpaper**, a floating **menu bar** with a live clock,
+  a **sidebar** with a clock widget and app-icon navigation, and a **Dock** of
+  app icons along the bottom. Every piece of chrome is frosted glass that lets
+  the wallpaper through (the Apple Liquid Glass idiom) — translucent white
+  (`--glass-alpha` 0.40 panels / 0.50 chrome), heavy `backdrop-filter:
+  blur() saturate()`, a diagonal specular gradient, a bright 1px rim on top,
+  a faint ink hairline outside, one long soft drop. Depth comes from
+  translucency first, shadow second. Every glass class carries a solid
+  fallback under `@supports not`.
+  Classes (`app/globals.css`): `.glass` (cards, stat tiles, tables, popovers),
+  `.glass-strong` (chrome: sidebar, menu bar, Dock, drawers), `.glass-dark`
+  (deep-green glass: referral tile, toasts), `.glass-ink` (graphite glass:
+  the internal ops console's chrome), `.glass-input`.
+- **Wallpaper** (`components/app/desktop/Wallpaper`): `.ambient-bg` base wash
+  + two slowly drifting blob layers (46s / 58s, alternate) + `.wallpaper-grain`
+  (SVG noise, soft-light). Reduced motion freezes the drift. An agency's shell
+  tints it with the agency's primary.
+- **App icons** (`components/app/desktop/AppIcon`, `.app-icon .ai-*`): a
+  squircle with a vertical two-stop fill, top-half gloss and tight drop, white
+  Icon glyph. Tones are few on purpose — `green`/`mint` = the product, `sky`
+  and `ink`/`slate` = neutral tools, `plum`/`rose` = studio and campaigns,
+  `gold` ONLY for earned celebration (Milestones), `brand` = the agency's own
+  colour. Sizes `sm` (sidebar 28), `md` (phone dock 36), `lg` (More sheet 52),
+  dock (44).
+- **Dock** (`components/app/desktop/Dock`, `.dock`): a glass capsule of app
+  icons fixed to the bottom, centred on the content area. Desktop: hover lifts
+  and magnifies (1.16×), tooltip names the app, a dot marks the open section.
+  Phone: the Dock is the tab bar (labels under icons, no magnification).
+  Content gets `pb-[calc(var(--dock-h)+40px)]` so nothing hides under it.
+- **Clocks.** `MenuBarClock` (weekday · date · time, minute ticks) sits at the
+  right of the menu bar; `SidebarClock` (analog face + digital time + date,
+  second ticks) sits under the wordmark. Both render after mount, so server
+  and client never disagree about the time.
+- **Floating chrome.** Sidebar, menu bar and Dock are glass panels inset 12px
+  from the viewport (`rounded-sheet` 28 / `20px` / Dock 26px), so page content
+  scrolls *under* them and shows through. Light-first, never dark mode.
 - Structure stays conventional (stat row, data tables, small-caps labels —
   the GoHighLevel admin idiom); only the *material* is glass. No gradients on
   panels, no glow charts, no entrance motion.
@@ -97,7 +122,10 @@ page background. Status colors (primary/gold/danger) are non-themeable. On the
 - **Button** (`components/ds/Button`): primary/secondary/ghost/danger/gold;
   sizes sm/md/lg (h-9/11/12, 44px min). **One primary CTA per section**
   (restraint from both references). Buttons are 12px-radius, not fully-pill.
-- **Card** (`components/ds/Card` + `CardHeader`): 16 radius, `p-4 sm:p-5`, shadow-sm.
+- **Card** (`components/ds/Card` + `CardHeader`): `.glass` on `rounded-card` (20),
+  `p-4 sm:p-5`. `StatTile` boxes are the same glass. Nothing in an authed
+  surface uses an opaque `bg-card` panel any more — the wallpaper must show
+  through every tile; `NotMeasured*` tiles keep the dashed edge on glass.
 - **PageHeader** (`components/app/PageHeader`): the ONLY page-title pattern
   (H1 26/30 + subtitle). Use on every authed surface.
 - **EmptyState** (`components/ds/misc`): icon + one sentence + one action —

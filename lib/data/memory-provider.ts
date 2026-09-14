@@ -274,6 +274,11 @@ function memoryUsersFor(data: FoundlyData): PlatformTenantUser[] {
 
 /** The roster maths over a set of workspaces, so the tenant page agrees with the roster. */
 function aggregatePlatformFor(members: FoundlyData[]) {
+  // The organization's billing workspace is its earliest one (the memory
+  // store keeps no organization.workspace_id) — the same rule the roster
+  // falls back to, so plan and MRR agree between the two providers.
+  const billingWorkspaceId = [...members]
+    .sort((a, b) => a.workspace.createdAt.localeCompare(b.workspace.createdAt))[0]?.workspace.id ?? null;
   const rows: PlatformWorkspaceRow[] = members.map((data) => ({
     workspaceId: data.workspace.id,
     organizationId: data.organization.id,
@@ -286,6 +291,9 @@ function aggregatePlatformFor(members: FoundlyData[]) {
     status: data.subscription.status,
     ownerEmail: null,
     createdAt: data.workspace.createdAt,
+    orgType: data.organization.orgType,
+    billingWorkspaceId,
+    stripeSubscriptionId: data.subscription.stripeSubscriptionId ?? null,
   }));
   const snapshot = aggregatePlatform({ workspaces: rows, deliveryFailures: [], durability: [], reviewsLast7d: 0, now: new Date() });
   const first = members[0];

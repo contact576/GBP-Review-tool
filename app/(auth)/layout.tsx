@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { Wordmark } from "@/components/app/AppShell";
+import { Wallpaper } from "@/components/app/desktop/Wallpaper";
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="relative flex min-h-dvh flex-col">
-      <div aria-hidden="true" className="ambient-bg" />
+      <Wallpaper />
       <div id="main" className="relative z-[1] flex flex-1 flex-col items-center px-4 py-10 sm:justify-center sm:py-16">
         <Link href="/" aria-label="Foundly home" className="mb-8">
           <Wordmark />

@@ -119,6 +119,7 @@ export function WhiteLabelStudio({ initial, sample }: { initial: StudioInitial; 
   const [primary, setPrimary] = useState(initial.primary);
   const [accent, setAccent] = useState(initial.accent);
   const [logoText, setLogoText] = useState(initial.logoText);
+  const [domain, setDomain] = useState(initial.domain ?? "");
 
   const primaryValid = isValidHex(primary);
   const accentValid = isValidHex(accent);
@@ -143,7 +144,7 @@ export function WhiteLabelStudio({ initial, sample }: { initial: StudioInitial; 
         primaryDark: primary === initial.primary ? initial.primaryDark : darkenHex(primary),
         accent,
         logoText: logoText.trim() || brandName.trim() || initial.logoText,
-        domain: initial.domain,
+        domain: domain.trim().toLowerCase() || undefined,
         contrastValid: passes,
       });
       toast(
@@ -167,6 +168,12 @@ export function WhiteLabelStudio({ initial, sample }: { initial: StudioInitial; 
             </Field>
             <Field label="Logo text" hint="First letter becomes the logo mark.">
               <Input value={logoText} onChange={(e) => setLogoText(e.target.value)} placeholder="Northside" />
+            </Field>
+            <Field
+              label="Portal domain (optional)"
+              hint="Stored with your branding and printed on reports. Serving the portal on this domain is not provisioned in this deployment — clients still sign in at Foundly."
+            >
+              <Input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="reviews.northside.agency" maxLength={253} />
             </Field>
             <SwatchRow value={primary} onChange={setPrimary} />
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -245,7 +252,7 @@ export function WhiteLabelStudio({ initial, sample }: { initial: StudioInitial; 
         <div className="kicker text-faint">Live preview · updates as you type</div>
 
         {/* Report header */}
-        <div className="overflow-hidden rounded-card border border-hairline shadow-sm">
+        <div className="glass overflow-hidden rounded-card">
           <div className="flex items-center justify-between gap-3 p-4" style={{ backgroundColor: safePrimary, color: onPrimary }}>
             <div className="flex items-center gap-2.5">
               <span
@@ -261,7 +268,7 @@ export function WhiteLabelStudio({ initial, sample }: { initial: StudioInitial; 
             </div>
             <div className="text-right text-[11px] opacity-80">
               <div className="font-semibold">{sample.name}</div>
-              <div>Last 30 days</div>
+              <div>{domain.trim() ? domain.trim().toLowerCase() : "Last 30 days"}</div>
             </div>
           </div>
 

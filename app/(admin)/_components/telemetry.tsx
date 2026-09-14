@@ -93,7 +93,7 @@ export function TelemetrySourceBadge({ telemetry }: { telemetry: PlatformTelemet
  */
 export function MonitoringCallout({ subject }: { subject: string }) {
   return (
-    <div className="flex items-start gap-2.5 rounded-card border border-dashed border-hairline bg-card p-4">
+    <div className="glass flex items-start gap-2.5 rounded-card border-dashed p-4">
       <Icon name="alert" size={18} className="mt-px shrink-0 text-faint" aria-hidden />
       <div className="text-[13px] leading-relaxed text-sub">
         <p className="text-[14px] font-semibold text-ink">
@@ -123,7 +123,7 @@ export function NotMeasuredTile({
     <div
       role="img"
       aria-label={`${label}: not measured. ${caption}.`}
-      className="rounded-card border border-dashed border-hairline bg-card p-4 sm:p-5"
+      className="glass rounded-card border-dashed p-4 sm:p-5"
     >
       <div className="kicker normal-case text-faint">{label}</div>
       <div

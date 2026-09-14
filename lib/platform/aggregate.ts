@@ -35,8 +35,17 @@ import { computeRetention } from "./retention";
  * Honesty rules, in one place:
  *   - MRR counts only subscriptions that are actually being billed (active or
  *     past-due). A trial is $0 until it converts, and so is a paused one.
+ *   - A subscription is billed ONCE per organization. Locations an agency (or
+ *     a multi-location owner) adds under its organization copy the parent's
+ *     tier and status so entitlements follow them, but Stripe charges the
+ *     organization's billing workspace — a sibling only bills separately when
+ *     it carries a Stripe subscription of its own. Counting every copy was
+ *     reporting one $299 agency as $897 (2026-09-14).
  *   - A tenant is one organization, however many workspaces it has. Its plan is
  *     its highest, its status its worst (past due beats active beats trial).
+ *   - A direct tenant is named after its business (the location), not the
+ *     organization record, which registration fills with "<Owner>'s Business".
+ *     An agency is named after the organization — that is the agency.
  *   - Fraud detection and month-over-month retention are NOT computed here.
  *     They are reported as not covered, so the console shows "Not measured"
  *     for them instead of a reassuring zero.
@@ -54,6 +63,15 @@ export interface PlatformWorkspaceRow {
   status: string;
   ownerEmail: string | null;
   createdAt: string;
+  /** `organization.org_type` — "agency" or "direct". Absent on older callers → direct. */
+  orgType?: string | null;
+  /**
+   * The organization's billing workspace (`organization.workspace_id`) — the
+   * one Stripe charges. Absent → the organization's earliest workspace.
+   */
+  billingWorkspaceId?: string | null;
+  /** Set when THIS workspace carries its own Stripe subscription. */
+  stripeSubscriptionId?: string | null;
 }
 
 export interface DeliveryFailureRow {
@@ -86,7 +104,13 @@ export interface PlatformAggregateInput {
   workspaces: PlatformWorkspaceRow[];
   deliveryFailures: DeliveryFailureRow[];
   durability: DurabilityRow[];
+  /**
+   * Reviews detected in the last 7 days. Prefer `reviewsLast7dByWorkspace`,
+   * which is scoped to the roster; this platform-wide number is the fallback
+   * for callers that cannot group (the demo fixture).
+   */
   reviewsLast7d: number;
+  reviewsLast7dByWorkspace?: { workspaceId: string; count: number }[];
   now: Date;
   /**
    * Omitted → fraud is reported as not covered (the memory provider's demo
@@ -117,6 +141,17 @@ export function workspaceMrr(tier: string, interval: string, status: string): nu
   return interval === "annual" ? plan.priceAnnualMonthly : plan.priceMonthly;
 }
 
+/**
+ * Does this workspace's subscription bill on its own? True for the
+ * organization's billing workspace and for any workspace with its own Stripe
+ * subscription; false for the copies siblings carry.
+ */
+export function workspaceBills(row: PlatformWorkspaceRow, orgPrimaryWorkspaceId: string): boolean {
+  if (row.stripeSubscriptionId) return true;
+  const billing = row.billingWorkspaceId ?? orgPrimaryWorkspaceId;
+  return row.workspaceId === billing;
+}
+
 function tenantStatus(status: string, tier: PlanTier): PlatformTenant["status"] {
   if (status === "past_due") return "past_due";
   if (status === "trialing") return "trialing";
@@ -138,11 +173,20 @@ const FAILURE_LABEL: Record<string, string> = {
 /**
  * Accounts created by automated checks against the live deployment. Their
  * owners use reserved test domains, so they can never be customers; keeping
- * them in the roster would inflate every count on the console.
+ * them in the roster would inflate every count on the console. The SQL
+ * providers reuse the same pattern so every cross-tenant read agrees.
  */
+export const TEST_ACCOUNT_EMAIL_RE = /@(example\.(com|net|org)|foundly\.invalid|foundly\.local)$/;
+
 export function isTestAccount(ownerEmail: string | null | undefined): boolean {
   const email = (ownerEmail ?? "").trim().toLowerCase();
-  return /@(example\.(com|net|org)|foundly\.invalid|foundly\.local)$/.test(email);
+  return TEST_ACCOUNT_EMAIL_RE.test(email);
+}
+
+/** The name the roster shows for an organization's workspaces. */
+export function tenantDisplayName(primary: Pick<PlatformWorkspaceRow, "organizationName" | "locationName" | "orgType">): string {
+  if (primary.orgType === "agency") return primary.organizationName || primary.locationName;
+  return primary.locationName || primary.organizationName;
 }
 
 export function aggregatePlatform(input: PlatformAggregateInput): PlatformSnapshot {
@@ -161,20 +205,30 @@ export function aggregatePlatform(input: PlatformAggregateInput): PlatformSnapsh
     let plan: PlanTier = "free";
     let status: PlatformTenant["status"] = "free";
     let mrr = 0;
+    let billedLocations = 0;
     for (const row of rows) {
       const tier = normalizePlan(row.tier);
       if (PLAN_RANK[tier] > PLAN_RANK[plan]) plan = tier;
       const rowStatus = tenantStatus(row.status, tier);
       if (STATUS_RANK[rowStatus] < STATUS_RANK[status]) status = rowStatus;
-      mrr += workspaceMrr(row.tier, row.interval, row.status);
+      if (workspaceBills(row, primary.workspaceId)) {
+        const amount = workspaceMrr(row.tier, row.interval, row.status);
+        mrr += amount;
+        if (amount > 0) billedLocations += 1;
+      }
     }
+    const orgType: PlatformTenant["orgType"] = primary.orgType === "agency" ? "agency" : "direct";
+    const name = tenantDisplayName(primary);
     return {
       id: organizationId,
-      name: primary.organizationName || primary.locationName,
+      name,
+      organizationName: primary.organizationName && primary.organizationName !== name ? primary.organizationName : undefined,
+      orgType,
       vertical: primary.vertical,
       plan,
       mrr,
       locations: rows.length,
+      billedLocations,
       status,
       region: (primary.region === "CA" ? "CA" : "US") as Region,
       primaryWorkspaceId: primary.workspaceId,
@@ -184,7 +238,7 @@ export function aggregatePlatform(input: PlatformAggregateInput): PlatformSnapsh
   });
   tenants.sort((a, b) => b.mrr - a.mrr || a.name.localeCompare(b.name));
 
-  const nameByWorkspace = new Map(real.map((row) => [row.workspaceId, row.organizationName || row.locationName]));
+  const nameByWorkspace = new Map(real.map((row) => [row.workspaceId, row.locationName || row.organizationName]));
 
   const deliveryIncidents: DeliveryIncident[] = input.deliveryFailures
     .filter((row) => row.count > 0 && nameByWorkspace.has(row.workspaceId))
@@ -213,6 +267,14 @@ export function aggregatePlatform(input: PlatformAggregateInput): PlatformSnapsh
 
   const paying = tenants.filter((t) => t.status === "active" || t.status === "past_due").length;
   const trialing = tenants.filter((t) => t.status === "trialing").length;
+
+  // Weekly detected reviews, scoped to the roster when the caller grouped
+  // them — the ops team's own workspace and test accounts never count.
+  const weeklyDetectedReviews = input.reviewsLast7dByWorkspace
+    ? input.reviewsLast7dByWorkspace
+        .filter((row) => nameByWorkspace.has(row.workspaceId))
+        .reduce((sum, row) => sum + row.count, 0)
+    : input.reviewsLast7d;
 
   // Fraud: only when the caller fetched the rows. Signals are scoped to the
   // roster above, so demo, ops and test workspaces can never raise a flag.
@@ -249,7 +311,7 @@ export function aggregatePlatform(input: PlatformAggregateInput): PlatformSnapsh
       trialConversion: paying + trialing > 0 ? paying / (paying + trialing) : 0,
       logoChurn: retention?.logoChurn ?? 0,
       nrr: retention?.nrr ?? 0,
-      weeklyDetectedReviews: input.reviewsLast7d,
+      weeklyDetectedReviews,
     },
     measuredAt: input.now.toISOString(),
     coverage,

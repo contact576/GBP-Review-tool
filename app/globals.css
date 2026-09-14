@@ -3,19 +3,24 @@
 @tailwind utilities;
 
 /*
- * Foundly surface system — "glass" edition.
+ * Foundly surface system — "desktop glass" edition.
  *
- * The material is frosted glass over a softly tinted ambient canvas (the Apple
- * Liquid Glass idiom): translucent white panels that blur whatever sits behind
- * them, a bright 1px specular rim on top, a faint ink hairline outside, and one
- * long, soft drop shadow. Depth comes from translucency + blur first, shadow
- * second. Structure (tables, stat rows, small-caps labels) stays conventional.
+ * The console is laid out like a desktop: a living wallpaper, a floating
+ * menu bar with a live clock, a sidebar with app-icon plates, and a Dock of
+ * app icons along the bottom. Every piece of chrome is frosted glass that
+ * lets the wallpaper through (the Apple Liquid Glass idiom): translucent
+ * white, heavy blur + saturation, a bright specular rim on top, a faint ink
+ * hairline outside, and one long soft drop. Depth comes from translucency
+ * first, shadow second. Structure (tables, stat rows, small-caps labels)
+ * stays conventional.
  *
- *   ambient-bg   fixed tinted canvas the glass has something to refract
- *   glass        default panel (cards, stat tiles, tables, popovers)
- *   glass-strong denser chrome (sidebar, floating header, tab bar, drawers)
- *   glass-dark   deep-green glass (referral tile, toasts, hero polarity flip)
- *   glass-input  translucent field
+ *   wallpaper     fixed, slowly drifting mesh of brand-tinted light + grain
+ *   glass         default panel (cards, stat tiles, tables, popovers)
+ *   glass-strong  chrome (sidebar, menu bar, dock, drawers) — denser
+ *   glass-dark    deep-green / ink glass (referral tile, toasts, ops chrome)
+ *   glass-input   translucent field
+ *   app-icon      squircle icon plate, the way an app icon reads in a Dock
+ *   dock          the floating Dock capsule and its magnifying items
  *
  * Every glass class has a solid fallback when backdrop-filter is unsupported.
  */
@@ -23,11 +28,13 @@
 @layer base {
   :root {
     color-scheme: light;
-    --glass-alpha: 0.62;
-    --glass-blur: 24px;
-    --glass-rim: rgba(255, 255, 255, 0.9);
-    --glass-edge: rgba(23, 32, 29, 0.06);
+    --glass-alpha: 0.4;
+    --glass-blur: 28px;
+    --glass-sat: 190%;
+    --glass-rim: rgba(255, 255, 255, 0.92);
+    --glass-edge: rgba(23, 32, 29, 0.07);
     --hairline-soft: rgba(23, 32, 29, 0.07);
+    --dock-h: 88px;
   }
 
   html {
@@ -63,20 +70,63 @@
 }
 
 @layer components {
-  /* ── Ambient canvas ──────────────────────────────────────────
-     A fixed layer of soft brand-tinted light. Glass needs something behind it
-     to refract; this is that something. Sits at z-0 under a z-[1] shell. */
+  /* ── Wallpaper ───────────────────────────────────────────────
+     A fixed, slowly drifting mesh of soft brand-tinted light — what the glass
+     refracts. Three layers: the base wash with static radials, two drifting
+     blob fields (::before / ::after, offset phases), and a grain veil the
+     <Wallpaper> component adds on top. Reduced motion freezes the drift. */
   .ambient-bg {
     position: fixed;
     inset: 0;
     z-index: -1;
+    overflow: hidden;
     pointer-events: none;
     background:
-      radial-gradient(55% 45% at 6% 0%, rgba(143, 227, 206, 0.55) 0%, rgba(143, 227, 206, 0) 65%),
-      radial-gradient(40% 36% at 96% 4%, rgba(232, 163, 61, 0.2) 0%, rgba(232, 163, 61, 0) 65%),
-      radial-gradient(48% 42% at 72% 100%, rgba(12, 122, 99, 0.16) 0%, rgba(12, 122, 99, 0) 65%),
-      radial-gradient(38% 40% at 14% 92%, rgba(186, 214, 240, 0.55) 0%, rgba(186, 214, 240, 0) 65%),
-      linear-gradient(180deg, #F4F5F1 0%, #F1F2ED 100%);
+      radial-gradient(60% 48% at 4% 0%, rgba(143, 227, 206, 0.7) 0%, rgba(143, 227, 206, 0) 66%),
+      radial-gradient(44% 40% at 98% 2%, rgba(240, 185, 91, 0.32) 0%, rgba(240, 185, 91, 0) 66%),
+      radial-gradient(52% 46% at 74% 100%, rgba(12, 122, 99, 0.26) 0%, rgba(12, 122, 99, 0) 66%),
+      radial-gradient(42% 44% at 12% 94%, rgba(160, 200, 245, 0.7) 0%, rgba(160, 200, 245, 0) 66%),
+      linear-gradient(180deg, #f6f7f3 0%, #eef2ec 55%, #f1f0ea 100%);
+  }
+  .ambient-bg::before,
+  .ambient-bg::after {
+    content: "";
+    position: absolute;
+    inset: -20%;
+    pointer-events: none;
+    will-change: transform;
+  }
+  .ambient-bg::before {
+    background:
+      radial-gradient(34% 30% at 28% 34%, rgba(93, 214, 178, 0.5) 0%, rgba(93, 214, 178, 0) 70%),
+      radial-gradient(30% 28% at 78% 30%, rgba(245, 205, 130, 0.36) 0%, rgba(245, 205, 130, 0) 70%),
+      radial-gradient(38% 34% at 60% 78%, rgba(120, 180, 235, 0.42) 0%, rgba(120, 180, 235, 0) 70%);
+    animation: wallpaper-drift-a 46s ease-in-out infinite alternate;
+  }
+  .ambient-bg::after {
+    background:
+      radial-gradient(30% 26% at 70% 60%, rgba(12, 122, 99, 0.2) 0%, rgba(12, 122, 99, 0) 70%),
+      radial-gradient(26% 24% at 18% 68%, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 70%),
+      radial-gradient(28% 26% at 44% 18%, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0) 70%);
+    animation: wallpaper-drift-b 58s ease-in-out infinite alternate;
+  }
+  .wallpaper-grain {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.35;
+    mix-blend-mode: soft-light;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.2 0 0 0 0 0.24 0 0 0 0 0.22 0 0 0 0.6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    background-size: 180px 180px;
+  }
+  @keyframes wallpaper-drift-a {
+    from { transform: translate3d(-3%, -2%, 0) scale(1); }
+    to { transform: translate3d(3%, 4%, 0) scale(1.08); }
+  }
+  @keyframes wallpaper-drift-b {
+    from { transform: translate3d(3%, 2%, 0) scale(1.04) rotate(0.001deg); }
+    to { transform: translate3d(-4%, -3%, 0) scale(1); }
   }
 
   /* ── Glass materials ─────────────────────────────────────── */
@@ -86,18 +136,27 @@
   .tile-row,
   .tab-strip {
     position: relative;
-    background: rgba(255, 255, 255, var(--glass-alpha));
-    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
-    backdrop-filter: blur(var(--glass-blur)) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.55);
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0.08) 38%, rgba(255, 255, 255, 0.22) 100%),
+      rgba(255, 255, 255, var(--glass-alpha));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+    border: 1px solid rgba(255, 255, 255, 0.62);
     box-shadow:
       inset 0 1px 0 var(--glass-rim),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.28),
       0 0 0 1px var(--glass-edge),
-      0 12px 32px -14px rgba(23, 32, 29, 0.16);
+      0 14px 36px -16px rgba(23, 32, 29, 0.2);
   }
   .glass-strong {
-    --glass-alpha: 0.76;
-    --glass-blur: 32px;
+    --glass-alpha: 0.5;
+    --glass-blur: 40px;
+    --glass-sat: 200%;
+    box-shadow:
+      inset 0 1px 0 var(--glass-rim),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.3),
+      0 0 0 1px rgba(23, 32, 29, 0.08),
+      0 24px 60px -24px rgba(23, 32, 29, 0.32);
   }
   .glass-interactive,
   .premium-card-interactive {
@@ -105,28 +164,46 @@
   }
   .glass-interactive:hover,
   .premium-card-interactive:hover {
-    background: rgba(255, 255, 255, 0.78);
+    --glass-alpha: 0.6;
     box-shadow:
       inset 0 1px 0 var(--glass-rim),
-      0 0 0 1px rgba(23, 32, 29, 0.09),
-      0 18px 40px -16px rgba(23, 32, 29, 0.22);
+      inset 0 -1px 0 rgba(255, 255, 255, 0.3),
+      0 0 0 1px rgba(23, 32, 29, 0.1),
+      0 22px 48px -18px rgba(23, 32, 29, 0.26);
   }
 
   .glass-dark {
     position: relative;
-    background: rgba(12, 74, 62, 0.8);
-    -webkit-backdrop-filter: blur(28px) saturate(160%);
-    backdrop-filter: blur(28px) saturate(160%);
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0) 45%),
+      rgba(12, 74, 62, 0.72);
+    -webkit-backdrop-filter: blur(32px) saturate(170%);
+    backdrop-filter: blur(32px) saturate(170%);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.26),
+      0 0 0 1px rgba(6, 45, 37, 0.35),
+      0 22px 48px -18px rgba(6, 45, 37, 0.5);
+    color: #fff;
+  }
+  /* Ink glass — the internal ops console's chrome. Same recipe, graphite tint. */
+  .glass-ink {
+    position: relative;
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0) 45%),
+      rgba(23, 32, 29, 0.72);
+    -webkit-backdrop-filter: blur(36px) saturate(170%);
+    backdrop-filter: blur(36px) saturate(170%);
     border: 1px solid rgba(255, 255, 255, 0.14);
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.22),
-      0 0 0 1px rgba(6, 45, 37, 0.35),
-      0 20px 44px -18px rgba(6, 45, 37, 0.5);
+      inset 0 1px 0 rgba(255, 255, 255, 0.18),
+      0 0 0 1px rgba(23, 32, 29, 0.45),
+      0 24px 60px -24px rgba(23, 32, 29, 0.6);
     color: #fff;
   }
 
   .glass-input {
-    background: rgba(255, 255, 255, 0.55);
+    background: rgba(255, 255, 255, 0.5);
     -webkit-backdrop-filter: blur(14px) saturate(160%);
     backdrop-filter: blur(14px) saturate(160%);
     border: 1px solid rgba(23, 32, 29, 0.1);
@@ -142,7 +219,161 @@
   @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .glass, .glass-strong, .premium-card, .tile-row, .tab-strip { background: rgba(255, 255, 255, 0.94); }
     .glass-dark { background: #0E5446; }
+    .glass-ink { background: #1B2523; }
     .glass-input { background: #fff; }
+    .ambient-bg::before, .ambient-bg::after { animation: none; }
+  }
+
+  /* ── App icon plates ─────────────────────────────────────────
+     A squircle with a vertical two-stop fill, a gloss on the top half and a
+     tight drop — the way an app icon sits in a Dock. Glyphs are the Icon set,
+     white. Tones are deliberately few: green family for the product, sky and
+     graphite for neutral tools, gold only where celebration is earned. */
+  .app-icon {
+    position: relative;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    border-radius: 30%;
+    color: #fff;
+    background-image: linear-gradient(180deg, var(--ai-from) 0%, var(--ai-to) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.42),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.12),
+      0 1px 2px rgba(23, 32, 29, 0.18),
+      0 6px 14px -6px var(--ai-shadow);
+    overflow: hidden;
+  }
+  .app-icon::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.32) 0%, rgba(255, 255, 255, 0.06) 48%, rgba(255, 255, 255, 0) 52%);
+    pointer-events: none;
+  }
+  .app-icon > * { position: relative; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.2)); }
+  .app-icon-sm { width: 28px; height: 28px; border-radius: 9px; }
+  .app-icon-md { width: 36px; height: 36px; border-radius: 11px; }
+  .app-icon-lg { width: 52px; height: 52px; border-radius: 30%; }
+
+  .ai-green  { --ai-from: #159A7C; --ai-to: #085546; --ai-shadow: rgba(8, 85, 70, 0.55); }
+  .ai-mint   { --ai-from: #7BE2C7; --ai-to: #1E9C7E; --ai-shadow: rgba(30, 156, 126, 0.5); }
+  .ai-sky    { --ai-from: #6DB5F0; --ai-to: #2264B3; --ai-shadow: rgba(34, 100, 179, 0.5); }
+  .ai-gold   { --ai-from: #F5C56B; --ai-to: #C77E1B; --ai-shadow: rgba(199, 126, 27, 0.5); }
+  .ai-ink    { --ai-from: #4A5653; --ai-to: #17201D; --ai-shadow: rgba(23, 32, 29, 0.55); }
+  .ai-slate  { --ai-from: #9DB0AC; --ai-to: #5C6663; --ai-shadow: rgba(92, 102, 99, 0.5); }
+  .ai-plum   { --ai-from: #A88BDA; --ai-to: #5C3AA8; --ai-shadow: rgba(92, 58, 168, 0.5); }
+  .ai-rose   { --ai-from: #E8899A; --ai-to: #B23A2E; --ai-shadow: rgba(178, 58, 46, 0.5); }
+  .ai-brand  { --ai-from: var(--brand-from, #159A7C); --ai-to: var(--brand-to, #085546); --ai-shadow: var(--brand-shadow, rgba(8, 85, 70, 0.55)); }
+
+  /* ── Dock ───────────────────────────────────────────────────
+     A floating glass capsule of app icons. Items lift and magnify on hover,
+     show their name in a tooltip above, and carry a small dot beneath when
+     that app is the current section (the running-app indicator). */
+  .dock {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    padding: 8px 10px;
+    border-radius: 26px;
+  }
+  .dock-item {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 2px 8px;
+    border-radius: 16px;
+    transform-origin: 50% 100%;
+    transition: transform 200ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+  .dock-item:hover,
+  .dock-item:focus-visible { transform: translateY(-8px) scale(1.16); z-index: 1; }
+  .dock-item:focus-visible { outline: none; }
+  .dock-item:focus-visible .app-icon { box-shadow: 0 0 0 2px #fff, 0 0 0 4px theme("colors.primary.DEFAULT"); }
+  .dock-item:active { transform: translateY(-4px) scale(1.08); }
+  .dock-label {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%) translateY(4px);
+    padding: 5px 10px;
+    border-radius: 10px;
+    background: rgba(23, 32, 29, 0.86);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease, transform 160ms ease;
+  }
+  .dock-item:hover .dock-label,
+  .dock-item:focus-visible .dock-label { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .dock-dot {
+    position: absolute;
+    bottom: 1px;
+    left: 50%;
+    width: 4px;
+    height: 4px;
+    margin-left: -2px;
+    border-radius: 999px;
+    background: rgba(23, 32, 29, 0.55);
+    opacity: 0;
+    transition: opacity 150ms ease;
+  }
+  .dock-item[aria-current="page"] .dock-dot { opacity: 1; }
+  .dock-divider { align-self: stretch; width: 1px; margin: 6px 4px 12px; background: rgba(23, 32, 29, 0.12); }
+
+  /* Phone dock: labels under the icons, no magnification (touch). */
+  .dock-phone { gap: 0; padding: 6px 6px 4px; border-radius: 28px; }
+  .dock-phone .dock-item { flex: 1; gap: 3px; padding: 4px 2px 6px; }
+  .dock-phone .dock-item:hover, .dock-phone .dock-item:active { transform: none; }
+  .dock-phone .dock-label {
+    position: static;
+    transform: none;
+    opacity: 1;
+    padding: 0;
+    background: transparent;
+    color: theme("colors.sub");
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .dock-phone .dock-item[aria-current="page"] .dock-label { color: theme("colors.ink"); font-weight: 600; }
+  .dock-phone .dock-dot { bottom: -1px; }
+
+  /* ── Menu bar clock ────────────────────────────────────────── */
+  .menubar-clock {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 12px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: theme("colors.ink");
+    white-space: nowrap;
+  }
+  .menubar-clock .sep { color: theme("colors.faint"); }
+
+  /* ── Sidebar clock widget ───────────────────────────────────── */
+  .clock-face {
+    position: relative;
+    width: 52px;
+    height: 52px;
+    border-radius: 999px;
+    background:
+      radial-gradient(circle at 50% 38%, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.6) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.95),
+      inset 0 -1px 0 rgba(23, 32, 29, 0.06),
+      0 0 0 1px rgba(23, 32, 29, 0.08),
+      0 8px 18px -10px rgba(23, 32, 29, 0.4);
   }
 
   /* Mono kicker — Spline Sans Mono, caps, tracked. Tabular so any coords /
@@ -185,7 +416,7 @@
      Same structure as a conventional admin panel — head / body / foot — on
      the glass material. Hierarchy still comes from weight and spacing. */
   .premium-card { border-radius: theme("borderRadius.panel"); }
-  .premium-card-hero { background: rgba(255, 255, 255, 0.7); }
+  .premium-card-hero { --glass-alpha: 0.52; }
 
   .panel-head {
     display: flex;
@@ -208,7 +439,7 @@
     gap: 12px;
     padding: 10px 18px;
     border-top: 1px solid var(--hairline-soft);
-    background: rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.22);
     border-radius: 0 0 theme("borderRadius.panel") theme("borderRadius.panel");
   }
 
@@ -264,8 +495,8 @@
 
   .dash-enter { animation: none; }
 
-  .tile-row { border-radius: 14px; --glass-alpha: 0.45; --glass-blur: 16px; }
-  .tile-row:hover { background: rgba(255, 255, 255, 0.7); }
+  .tile-row { border-radius: 14px; --glass-alpha: 0.3; --glass-blur: 16px; }
+  .tile-row:hover { --glass-alpha: 0.55; }
 
   /* Plain data table used inside dashboard panels. */
   .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -278,7 +509,7 @@
     text-transform: uppercase;
     color: theme("colors.faint");
     border-bottom: 1px solid var(--hairline-soft);
-    background: rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.2);
     white-space: nowrap;
   }
   .tbl td {
@@ -288,7 +519,7 @@
     vertical-align: middle;
   }
   .tbl tr:last-child td { border-bottom: 0; }
-  .tbl tbody tr:hover td { background: rgba(255, 255, 255, 0.45); }
+  .tbl tbody tr:hover td { background: rgba(255, 255, 255, 0.4); }
   .tbl .num { text-align: right; font-variant-numeric: tabular-nums; }
 
   /* Segmented control (section navigation) — a glass capsule with a solid
@@ -300,7 +531,7 @@
     padding: 3px;
     border-radius: 999px;
     overflow-x: auto;
-    --glass-alpha: 0.5;
+    --glass-alpha: 0.34;
   }
   .tab-strip a {
     padding: 7px 14px;
@@ -314,7 +545,7 @@
   .tab-strip a:hover { color: theme("colors.ink"); }
   .tab-strip a[aria-current="page"] {
     color: theme("colors.ink");
-    background: #fff;
+    background: rgba(255, 255, 255, 0.92);
     box-shadow: 0 1px 2px rgba(23, 32, 29, 0.1), 0 0 0 1px rgba(23, 32, 29, 0.05);
   }
 
@@ -379,7 +610,7 @@
   }
 }
 
-/* Respect reduced motion everywhere — no sweeps, count-ups, confetti. */
+/* Respect reduced motion everywhere — no sweeps, count-ups, confetti, drift. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -390,3 +621,9 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* Ink-chrome Dock (ops console): divider and phone labels need to read on graphite. */
+.dock.glass-ink .dock-divider { background: rgba(255, 255, 255, 0.16); }
+.dock.dock-inverse .dock-label { color: rgba(255, 255, 255, 0.66); }
+.dock.dock-inverse .dock-item[aria-current="page"] .dock-label { color: #fff; }
+.dock.glass-ink .dock-dot { background: rgba(255, 255, 255, 0.7); }

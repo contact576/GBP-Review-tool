@@ -10,12 +10,15 @@ export function ClientActions({
   clientId,
   contactEmail,
   canOpen = true,
+  deliveryConnected = true,
 }: {
   brandName: string;
   clientId: string;
   contactEmail?: string;
   /** False when the client's workspace can no longer be read. */
   canOpen?: boolean;
+  /** An email sender is configured for the agency workspace. */
+  deliveryConnected?: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [opening, startOpen] = useTransition();
@@ -58,7 +61,7 @@ export function ClientActions({
           fullWidth
           className="sm:flex-1"
           loading={pending}
-          disabled={!contactEmail || opening}
+          disabled={!contactEmail || !deliveryConnected || opening}
           onClick={send}
         >
           Send branded report
@@ -70,9 +73,11 @@ export function ClientActions({
       </p>
       <p className="flex items-start gap-1.5 text-[12px] text-faint">
         <Icon name={contactEmail ? "mail" : "alert"} size={13} className="mt-px shrink-0" />
-        {contactEmail
-          ? `Deliver the ${brandName}-branded report to ${contactEmail}.`
-          : "Add a valid client contact email before sending."}
+        {!deliveryConnected
+          ? "Connect an email sender (Settings → Channels in your own workspace) before sending reports."
+          : contactEmail
+            ? `Deliver the ${brandName}-branded report to ${contactEmail}.`
+            : "Add a valid client contact email before sending."}
       </p>
       {message ? <p role="status" className="text-[12px] font-medium text-sub">{message}</p> : null}
     </div>

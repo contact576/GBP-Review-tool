@@ -1205,6 +1205,14 @@ export interface AgencyClient {
   ownerHasLogin?: boolean;
   /** When an owner invite was last sent to the client, if ever. */
   invitedAt?: string;
+  /**
+   * Reviews detected per calendar month over the last six months (oldest
+   * first, current month last), from the client's own review table. Feeds
+   * the portfolio chart on the agency overview.
+   */
+  reviewsByMonth?: { month: string; count: number }[];
+  /** When the newest review on the linked listing was published, if any. */
+  lastReviewAt?: string;
 }
 
 /**
@@ -1308,11 +1316,22 @@ export interface GrowthReport {
 // ── Admin platform KPIs (aggregate, seeded) ─────────────────
 export interface PlatformTenant {
   id: Id;
+  /** Display name: the business for a direct tenant, the organization for an agency. */
   name: string;
+  /** The organization record's name, when it differs from `name` (e.g. "Priya's Business"). */
+  organizationName?: string;
+  /** Direct sign-up or an agency managing client workspaces. Absent on seeded fixtures. */
+  orgType?: "direct" | "agency";
   vertical: Vertical;
   plan: PlanTier;
   mrr: number;
   locations: number;
+  /**
+   * Workspaces whose subscription is actually billed (the organization's
+   * billing workspace plus any with their own Stripe subscription). An agency
+   * with five clients has 6 locations and 1 billed. Absent on seeded fixtures.
+   */
+  billedLocations?: number;
   status: "trialing" | "active" | "past_due" | "free";
   region: Region;
   /** The tenant's main workspace — what "Open tenant" enters. Absent on seeded fixtures. */
@@ -1397,6 +1416,12 @@ export interface PlatformTenantUser {
   /** Has a password or a Google identity — can actually sign in. */
   hasLogin: boolean;
   createdAt?: string;
+  /**
+   * An owner seat an agency created for a client workspace and has not yet
+   * handed over: the row carries the agency's own email and no credentials.
+   * Derived by the ops console; never a claim that the client can sign in.
+   */
+  seatHeldByAgency?: boolean;
 }
 
 export interface PlatformTenantWorkspace {

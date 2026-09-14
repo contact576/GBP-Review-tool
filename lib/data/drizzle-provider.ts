@@ -1,5 +1,6 @@
 import { and, eq, gt, inArray, isNotNull, isNull, like, lte, or, sql } from "drizzle-orm";
 import {
+  TEST_ACCOUNT_EMAIL_RE,
   aggregatePlatform,
   type DeliveryFailureRow,
   type DurabilityRow,
@@ -1757,16 +1758,23 @@ export const drizzleProvider: DataProvider = {
     const pg = getSql();
     const now = new Date();
     const iso = (daysAgo: number) => new Date(now.getTime() - daysAgo * 86_400_000).toISOString();
+    // Joined on the workspace's organization_id (not organization.workspace_id,
+    // which names only the org's billing workspace — a client workspace an
+    // agency created has no organization row pointing at it and used to come
+    // back nameless). The billing workspace and any Stripe subscription ride
+    // along so the aggregate can bill each organization once.
     const workspaces = await pg<PlatformWorkspaceRow[]>`
       select w.id as "workspaceId", w.organization_id as "organizationId",
              coalesce(o.name, '') as "organizationName", l.name as "locationName",
              w.vertical, w.region, s.tier, s.interval, s.status, w.created_at as "createdAt",
+             o.org_type as "orgType", o.workspace_id as "billingWorkspaceId",
+             s.stripe_subscription_id as "stripeSubscriptionId",
              (select u.email from app_user u where u.workspace_id = w.id
                 and u.role in ('owner','agency_admin') order by u.created_at nulls last limit 1) as "ownerEmail"
       from workspace w
       join location l on l.workspace_id = w.id
       join subscription s on s.workspace_id = w.id
-      left join organization o on o.workspace_id = w.id
+      left join organization o on o.id = w.organization_id
       where w.is_demo = false
         and not exists (select 1 from app_user pa where pa.workspace_id = w.id and pa.role = 'platform_admin')
       order by w.created_at`;
@@ -1783,10 +1791,12 @@ export const drizzleProvider: DataProvider = {
              count(*) filter (where durability = 'vanished')::int as vanished
       from review
       group by 1`;
-    const weekly = await pg<{ count: number }[]>`
-      select count(*)::int as count from review r
-      join workspace w on w.id = r.workspace_id
-      where w.is_demo = false and r.published_at >= ${iso(7)}`;
+    // Grouped per workspace so the aggregate can keep the count to the roster
+    // (the ops team's own workspace and test accounts never count).
+    const weekly = await pg<{ workspaceId: string; count: number }[]>`
+      select r.workspace_id as "workspaceId", count(*)::int as count from review r
+      where r.published_at >= ${iso(7)}
+      group by 1`;
 
     // Fraud detector inputs (lib/platform/fraud.ts). Bounded windows: the
     // velocity signal needs 31 days of matched reviews, the burst signal 7
@@ -1848,7 +1858,8 @@ export const drizzleProvider: DataProvider = {
       workspaces,
       deliveryFailures,
       durability,
-      reviewsLast7d: weekly[0]?.count ?? 0,
+      reviewsLast7d: 0,
+      reviewsLast7dByWorkspace: weekly,
       now,
       fraud,
       history,
@@ -1945,6 +1956,9 @@ export const drizzleProvider: DataProvider = {
         userRows.find((u) => u.workspaceId === row.workspace.id && (u.role === "owner" || u.role === "agency_admin"))?.email ??
         null,
       createdAt: row.workspace.createdAt,
+      orgType: orgRow.orgType,
+      billingWorkspaceId: orgRow.workspaceId,
+      stripeSubscriptionId: row.subscription.stripeSubscriptionId,
     }));
     // Reuse the roster maths so the tenant page and the roster never disagree
     // on plan, status or MRR. Test-account exclusion is bypassed on purpose:
@@ -1984,6 +1998,10 @@ export const drizzleProvider: DataProvider = {
       left join organization o on o.id = w.organization_id
       where w.is_demo = false
         and not exists (select 1 from app_user pa where pa.workspace_id = w.id and pa.role = 'platform_admin')
+        -- The same test-account rule as the roster, so the ledger never shows
+        -- tenants the console says do not exist.
+        and not exists (select 1 from app_user tu where tu.workspace_id = w.id
+                          and tu.role in ('owner','agency_admin') and tu.email ~* ${TEST_ACCOUNT_EMAIL_RE.source})
       order by a.at desc
       limit ${Math.max(1, Math.min(limit, 500))}`;
     return rows.map((row) => ({ ...mapAudit(row), tenant: row.tenant, organizationId: row.organizationId }));

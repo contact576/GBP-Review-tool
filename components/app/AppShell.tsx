@@ -13,17 +13,45 @@ import { ProductTour } from "./ProductTour";
 import { BOTTOM_TABS, MORE_ITEMS, type NavItem } from "./nav";
 import { signOutAction, switchWorkspaceAction } from "@/lib/actions";
 import type { OrganizationWorkspaceSummary } from "@/lib/data/provider";
+import { Wallpaper } from "./desktop/Wallpaper";
+import { AppIcon, type AppIconTone } from "./desktop/AppIcon";
+import { Dock, DockButton, type DockItem } from "./desktop/Dock";
+import { MenuBarClock } from "./desktop/MenuBarClock";
+import { SidebarClock } from "./desktop/SidebarClock";
+import { Greeting } from "./desktop/Greeting";
 
-const DESKTOP_NAV: (NavItem & { tour: string })[] = [
-  { label: "Overview", href: "/app", icon: "home", tour: "nav-overview" },
-  { label: "This week", href: "/app/this-week", icon: "sparkles", tour: "nav-this-week" },
-  { label: "Content Studio", href: "/app/studio", icon: "pencil", tour: "nav-studio" },
-  { label: "Reviews", href: "/app/reviews", icon: "star", tour: "nav-reviews" },
-  { label: "Visibility", href: "/app/visibility", icon: "map-pin", tour: "nav-visibility" },
-  { label: "Campaigns", href: "/app/campaigns", icon: "megaphone", tour: "nav-campaigns" },
-  { label: "Customers", href: "/app/customers", icon: "users", tour: "nav-customers" },
-  { label: "Analytics", href: "/app/analytics", icon: "chart", tour: "nav-analytics" },
+/**
+ * The owner console's apps. One list drives the sidebar, the desktop Dock and
+ * the phone Dock, so a section has the same icon and colour wherever it is
+ * launched from. Tones are restrained on purpose (DESIGN.md): the product is
+ * the green family, sky and graphite are neutral tools, gold is earned only.
+ */
+const APPS: (NavItem & { tone: AppIconTone; tour: string; exact?: boolean })[] = [
+  { label: "Overview", href: "/app", icon: "home", tone: "green", tour: "nav-overview", exact: true },
+  { label: "This week", href: "/app/this-week", icon: "sparkles", tone: "mint", tour: "nav-this-week" },
+  { label: "Content Studio", href: "/app/studio", icon: "pencil", tone: "plum", tour: "nav-studio" },
+  { label: "Reviews", href: "/app/reviews", icon: "star", tone: "sky", tour: "nav-reviews" },
+  { label: "Visibility", href: "/app/visibility", icon: "map-pin", tone: "ink", tour: "nav-visibility" },
+  { label: "Campaigns", href: "/app/campaigns", icon: "megaphone", tone: "rose", tour: "nav-campaigns" },
+  { label: "Customers", href: "/app/customers", icon: "users", tone: "slate", tour: "nav-customers" },
+  { label: "Analytics", href: "/app/analytics", icon: "chart", tone: "green", tour: "nav-analytics" },
 ];
+
+const TONE_BY_HREF: Record<string, AppIconTone> = Object.fromEntries(APPS.map((app) => [app.href, app.tone]));
+const EXTRA_TONES: Record<string, AppIconTone> = {
+  "/app/requests": "mint",
+  "/app/whatsapp": "green",
+  "/app/profile": "sky",
+  "/app/benchmark": "slate",
+  "/app/rank-grid": "ink",
+  "/app/report": "plum",
+  "/app/milestones": "gold",
+  "/app/settings/business": "ink",
+  "/app/notifications": "slate",
+};
+function toneFor(href: string): AppIconTone {
+  return TONE_BY_HREF[href] ?? EXTRA_TONES[href] ?? "slate";
+}
 
 /** Bottom-tab `data-tour` ids, keyed by href, so the phone tour can spotlight them. */
 const TAB_TOUR: Record<string, string> = {
@@ -33,17 +61,21 @@ const TAB_TOUR: Record<string, string> = {
   "/app/customers": "tab-customers",
 };
 
+/** Sidebar width + its 12px inset on each side — what the Dock centres against. */
+const SIDEBAR_SPAN = 264;
+
 function isActive(pathname: string, href: string): boolean {
   if (href === "/app") return pathname === "/app";
   return pathname === href || pathname.startsWith(href + "/");
 }
 
 /**
- * Owner console chrome — the glass edition.
+ * Owner console chrome — the desktop edition.
  *
- * Everything that frames the page is a floating frosted-glass panel inset from
- * the viewport edge (sidebar, header bar, phone tab bar) over a fixed ambient
- * canvas, so the content scrolls *under* the chrome and shows through it.
+ * A living wallpaper, a floating glass sidebar with a clock widget and
+ * app-icon navigation, a menu bar with the live time, and a Dock of app icons
+ * along the bottom. Content scrolls *under* every piece of chrome and shows
+ * through it. On a phone the Dock becomes the tab bar.
  */
 export function AppShell({
   children,
@@ -93,11 +125,31 @@ export function AppShell({
 
   const navLink = (active: boolean) =>
     cn(
-      "relative flex min-h-10 items-center gap-3 rounded-[12px] px-3 text-[14px] font-medium transition-[background-color,color,box-shadow] duration-150",
+      "relative flex min-h-10 items-center gap-3 rounded-[12px] px-2.5 text-[14px] font-medium transition-[background-color,color,box-shadow] duration-150",
       active
-        ? "bg-white/85 text-primary-dark shadow-[0_1px_2px_rgba(23,32,29,0.08),0_0_0_1px_rgba(23,32,29,0.05)]"
-        : "text-sub hover:bg-white/45 hover:text-ink",
+        ? "bg-white/80 text-ink shadow-[0_1px_2px_rgba(23,32,29,0.08),0_0_0_1px_rgba(23,32,29,0.05)]"
+        : "text-sub hover:bg-white/40 hover:text-ink",
     );
+
+  const dockItems: DockItem[] = APPS.map((app) => ({
+    label: app.label,
+    href: app.href,
+    icon: app.icon,
+    tone: app.tone,
+    exact: app.exact,
+  }));
+  const dockSecondary: DockItem[] = [
+    { label: "Notifications", href: "/app/notifications", icon: "bell", tone: "slate", badge: unread },
+    { label: "Settings", href: "/app/settings/business", icon: "settings", tone: "ink" },
+  ];
+  const phoneItems: DockItem[] = BOTTOM_TABS.map((tab) => ({
+    label: tab.label,
+    href: tab.href,
+    icon: tab.icon,
+    tone: toneFor(tab.href),
+    tour: TAB_TOUR[tab.href],
+    exact: tab.href === "/app",
+  }));
 
   return (
     <ToastProvider>
@@ -106,7 +158,7 @@ export function AppShell({
         <ProductTour workspaceId={currentWorkspaceId} isDemo={isDemo} />
       </Suspense>
       <div className="relative min-h-dvh">
-        <div aria-hidden="true" className="ambient-bg" />
+        <Wallpaper />
 
         {/* ── Desktop sidebar: a floating glass panel ─────────── */}
         <aside
@@ -115,16 +167,20 @@ export function AppShell({
             hasBanner || isDemo ? "top-[52px]" : "top-3",
           )}
         >
-          <div className="flex h-[76px] items-center px-6">
+          <div className="flex h-[68px] items-center px-5">
             <Wordmark />
           </div>
 
+          <div className="px-3 pb-2">
+            <SidebarClock />
+          </div>
+
           <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-1" aria-label="Main navigation">
-            {DESKTOP_NAV.map((item) => {
+            {APPS.map((item) => {
               const active = isActive(pathname, item.href);
               return (
                 <Link key={item.href} href={item.href} data-tour={item.tour} className={navLink(active)}>
-                  <Icon name={item.icon} size={18} className={active ? "text-primary" : "text-faint"} />
+                  <AppIcon icon={item.icon} tone={item.tone} size="sm" />
                   {item.label}
                 </Link>
               );
@@ -152,7 +208,7 @@ export function AppShell({
           <div className="space-y-0.5 border-t border-soft p-3">
             {agencyMode ? (
               <Link href="/agency" className={cn(navLink(false), "min-h-9 text-[13px] font-semibold text-ink")}>
-                <Icon name="grid" size={17} className="text-primary" /> Agency console
+                <AppIcon icon="grid" tone="green" size="sm" /> Agency console
               </Link>
             ) : null}
             <Link
@@ -160,18 +216,18 @@ export function AppShell({
               data-tour="nav-settings"
               className={cn(navLink(pathname.startsWith("/app/settings")), "min-h-9 text-[13px]")}
             >
-              <Icon name="settings" size={17} className={pathname.startsWith("/app/settings") ? "text-primary" : "text-faint"} /> Settings
+              <AppIcon icon="settings" tone="ink" size="sm" /> Settings
             </Link>
             <form action={signOutAction}>
               <button className={cn(navLink(false), "min-h-9 w-full text-[13px]")}>
-                <Icon name="external" size={17} className="text-faint" /> Sign out
+                <AppIcon icon="external" tone="slate" size="sm" /> Sign out
               </button>
             </form>
           </div>
         </aside>
 
         <div className="relative z-[1] lg:pl-[264px]">
-          {/* ── Floating header bar ─────────────────────────── */}
+          {/* ── Menu bar ─────────────────────────────────────── */}
           <header className="sticky top-0 z-20 px-3 pt-3 lg:px-6 lg:pt-3 xl:px-8">
             <div className="glass-strong flex min-h-[60px] items-center justify-between gap-3 rounded-[20px] px-3 lg:px-5">
               <div className="flex items-center gap-2 lg:hidden">
@@ -181,7 +237,7 @@ export function AppShell({
               {dashboardHome ? (
                 <div className="hidden min-w-0 lg:block">
                   <h1 className="text-[20px] font-bold leading-tight tracking-tight text-ink">
-                    Good morning, {ownerName.split(" ")[0]}
+                    <Greeting name={ownerName.split(" ")[0] ?? ownerName} />
                   </h1>
                   <DashboardBusinessSwitcher
                     business={business}
@@ -215,6 +271,7 @@ export function AppShell({
                     </Badge>
                   </Link>
                 ) : null}
+                <MenuBarClock className="hidden sm:inline-flex" />
                 <Link
                   href="/app/notifications"
                   aria-label="Notifications"
@@ -232,67 +289,40 @@ export function AppShell({
             </div>
           </header>
 
-          <main
-            id="main"
-            className={cn(
-              "px-3 pb-32 pt-5 lg:px-6 lg:pb-12 lg:pt-6 xl:px-8",
-            )}
-          >
+          <main id="main" className="px-3 pb-32 pt-5 lg:px-6 lg:pb-[calc(var(--dock-h)+40px)] lg:pt-6 xl:px-8">
             <div className={cn("mx-auto", dashboardHome ? "max-w-[1500px]" : "max-w-[1400px]")}>{children}</div>
           </main>
         </div>
 
-        {/* ── Phone tab bar: a floating glass capsule ──────────── */}
-        <nav
-          className="glass-strong fixed inset-x-3 bottom-3 z-30 flex rounded-full p-1 lg:hidden"
-          style={{ marginBottom: "env(safe-area-inset-bottom)" }}
-          aria-label="Primary"
-        >
-          {BOTTOM_TABS.map((tab) => {
-            const active = isActive(pathname, tab.href);
-            return (
-              <Link
-                key={tab.href}
-                href={tab.href}
-                data-tour={TAB_TOUR[tab.href]}
-                className={cn(
-                  "flex min-h-[54px] flex-1 flex-col items-center justify-center gap-0.5 rounded-full text-[11px] font-medium transition-colors",
-                  active ? "bg-white/85 text-primary-dark shadow-[0_1px_2px_rgba(23,32,29,0.08)]" : "text-sub",
-                )}
-              >
-                <Icon name={tab.icon} size={22} className={active ? "text-primary" : undefined} />
-                {tab.label}
-              </Link>
-            );
-          })}
-          <button
-            onClick={() => setMoreOpen(true)}
-            className="flex min-h-[54px] flex-1 flex-col items-center justify-center gap-0.5 rounded-full text-[11px] font-medium text-sub"
-          >
-            <Icon name="more" size={22} />
-            More
-          </button>
-        </nav>
+        {/* ── The Dock ─────────────────────────────────────────── */}
+        <Dock items={dockItems} secondary={dockSecondary} pathname={pathname} offsetLeft={SIDEBAR_SPAN} />
+        <Dock
+          variant="phone"
+          ariaLabel="Primary"
+          items={phoneItems}
+          pathname={pathname}
+          trailing={<DockButton phone label="More" icon="more" tone="slate" onClick={() => setMoreOpen(true)} />}
+        />
 
         {moreOpen ? (
-          <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true">
+          <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="More">
             <div className="absolute inset-0 bg-ink/25 backdrop-blur-[2px] animate-fade-in" onClick={() => setMoreOpen(false)} />
             <div className="glass-strong absolute inset-x-2 bottom-2 rounded-sheet p-4 pb-6 animate-slide-up">
               <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-ink/15" />
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-4 gap-2">
                 {MORE_ITEMS.map((item) => (
                   <Link
                     key={item.href}
                     href={item.href}
                     onClick={() => setMoreOpen(false)}
-                    className="flex flex-col items-center gap-1.5 rounded-[16px] bg-white/60 p-3 text-center shadow-[0_0_0_1px_rgba(23,32,29,0.05)]"
+                    className="flex flex-col items-center gap-1.5 rounded-[16px] p-2 text-center"
                   >
-                    <Icon name={item.icon} size={20} className="text-primary" />
-                    <span className="text-[12px] font-medium leading-tight text-ink">{item.label}</span>
+                    <AppIcon icon={item.icon} tone={toneFor(item.href)} size="lg" />
+                    <span className="text-[11px] font-medium leading-tight text-ink">{item.label}</span>
                   </Link>
                 ))}
               </div>
-              <form action={signOutAction} className="mt-3">
+              <form action={signOutAction} className="mt-4">
                 <button className="w-full rounded-full bg-white/60 py-3 text-[14px] font-semibold text-sub shadow-[0_0_0_1px_rgba(23,32,29,0.05)]">Sign out</button>
               </form>
             </div>
@@ -394,8 +424,8 @@ function DashboardDateRange() {
   const range = `${monthDay.format(start)} – ${monthDay.format(end)}, ${end.getFullYear()}`;
 
   return (
-    <div className="glass mr-1 hidden h-9 items-center gap-2 rounded-full px-3.5 text-[13px] font-medium tabular-nums text-ink sm:flex">
-      <Icon name="clock" size={15} className="text-faint" />
+    <div className="glass mr-1 hidden h-9 items-center gap-2 rounded-full px-3.5 text-[13px] font-medium tabular-nums text-ink xl:flex">
+      <Icon name="chart" size={15} className="text-faint" />
       {range}
       <Icon name="chevron-down" size={13} className="text-faint" />
     </div>

@@ -6,9 +6,31 @@ import { createAgencyClientAction } from "@/lib/actions";
 import { Button } from "@/components/ds/Button";
 import { Card } from "@/components/ds/Card";
 import { Field, Input, Select } from "@/components/ds/form";
+import { Icon } from "@/components/icons";
 import type { Region } from "@/lib/data/types";
 
-export function AddAgencyClient({ enabled }: { enabled: boolean }) {
+export interface IndustryOption {
+  key: string;
+  label: string;
+}
+export interface IndustryGroupOption {
+  label: string;
+  industries: IndustryOption[];
+}
+
+export function AddAgencyClient({
+  enabled,
+  groups,
+  defaultRegion,
+  agencyEmail,
+}: {
+  enabled: boolean;
+  /** The full industry catalogue, grouped — the same one onboarding uses. */
+  groups: IndustryGroupOption[];
+  defaultRegion: Region;
+  /** The agency's own address, so the form can warn when it is entered as the client's. */
+  agencyEmail?: string;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -16,9 +38,13 @@ export function AddAgencyClient({ enabled }: { enabled: boolean }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [businessName, setBusinessName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
-  const [industryKey, setIndustryKey] = useState("professional_services");
-  const [region, setRegion] = useState<Region>("US");
+  const [industryKey, setIndustryKey] = useState(groups[0]?.industries[0]?.key ?? "professional_services");
+  const [region, setRegion] = useState<Region>(defaultRegion);
   const [city, setCity] = useState("");
+  const [address, setAddress] = useState("");
+
+  const label = groups.flatMap((group) => group.industries).find((industry) => industry.key === industryKey)?.label ?? industryKey.replace(/_/g, " ");
+  const isOwnEmail = Boolean(agencyEmail) && contactEmail.trim().toLowerCase() === agencyEmail?.toLowerCase();
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -28,9 +54,10 @@ export function AddAgencyClient({ enabled }: { enabled: boolean }) {
         businessName,
         contactEmail,
         industryKey,
-        category: industryKey.replace(/_/g, " "),
+        category: label,
         region,
         city,
+        address,
       });
       if (!result.ok) {
         setError(result.error);
@@ -39,11 +66,12 @@ export function AddAgencyClient({ enabled }: { enabled: boolean }) {
       setNotice(
         result.google
           ? `${businessName} added and matched to its Google listing: ${result.google.name}, ${result.google.city} — ${result.google.rating.toFixed(1)}★ from ${result.google.reviewCount} reviews.`
-          : `${businessName} added. No confident Google match was found — open the client workspace and link its listing under Settings → Business.`,
+          : `${businessName} added. No confident Google match was found — open the client and link its listing.`,
       );
       setBusinessName("");
       setContactEmail("");
       setCity("");
+      setAddress("");
       setOpen(false);
       router.refresh();
     });
@@ -67,25 +95,33 @@ export function AddAgencyClient({ enabled }: { enabled: boolean }) {
           <div>
             <div className="kicker mb-1">New client workspace</div>
             <h2 className="text-[18px] font-bold text-ink">Add an isolated client</h2>
-            <p className="mt-1 text-[13px] text-sub">Each client gets separate data, integrations, and reporting.</p>
+            <p className="mt-1 text-[13px] text-sub">
+              Each client gets separate data, integrations, and reporting. We look for its Google listing as soon as it is created.
+            </p>
           </div>
           <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
         </div>
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
           <Field label="Business name" required>
-            <Input value={businessName} onChange={(event) => setBusinessName(event.target.value)} required maxLength={120} />
+            <Input value={businessName} onChange={(event) => setBusinessName(event.target.value)} required maxLength={120} placeholder="Townhill Constructions" />
           </Field>
-          <Field label="Report email" required>
-            <Input type="email" value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} required maxLength={254} />
+          <Field
+            label="Client contact email"
+            required
+            hint={isOwnEmail ? undefined : "Receives the branded report and, later, their own login invite."}
+            error={isOwnEmail ? "That is your own address. Use the client's — it receives their reports and login invite." : undefined}
+          >
+            <Input type="email" value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} required maxLength={254} invalid={isOwnEmail} placeholder="owner@client.com" />
           </Field>
           <Field label="Industry">
             <Select value={industryKey} onChange={(event) => setIndustryKey(event.target.value)}>
-              <option value="professional_services">Professional services</option>
-              <option value="dental">Dental</option>
-              <option value="medical_clinic">Medical clinic</option>
-              <option value="restaurant">Restaurant</option>
-              <option value="home_services">Home services</option>
-              <option value="auto_repair">Auto repair</option>
+              {groups.map((group) => (
+                <optgroup key={group.label} label={group.label}>
+                  {group.industries.map((industry) => (
+                    <option key={industry.key} value={industry.key}>{industry.label}</option>
+                  ))}
+                </optgroup>
+              ))}
             </Select>
           </Field>
           <Field label="Region">
@@ -94,13 +130,20 @@ export function AddAgencyClient({ enabled }: { enabled: boolean }) {
               <option value="CA">Canada</option>
             </Select>
           </Field>
-          <Field label="City">
-            <Input value={city} onChange={(event) => setCity(event.target.value)} maxLength={100} />
+          <Field label="City" hint="Helps match the right Google listing.">
+            <Input value={city} onChange={(event) => setCity(event.target.value)} maxLength={100} placeholder="Brampton" />
+          </Field>
+          <Field label="Street address (optional)">
+            <Input value={address} onChange={(event) => setAddress(event.target.value)} maxLength={180} />
           </Field>
         </div>
         {error ? <p role="alert" className="text-[13px] font-medium text-danger">{error}</p> : null}
-        <div className="flex justify-end">
-          <Button type="submit" loading={pending} icon="plus">Create client workspace</Button>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="flex items-start gap-1.5 text-[12px] text-faint">
+            <Icon name="google" size={13} className="mt-px shrink-0" />
+            A match is linked only when the listing name plausibly matches; otherwise the client is created unlinked and you pick the listing yourself.
+          </p>
+          <Button type="submit" loading={pending} icon="plus" disabled={isOwnEmail}>Create client workspace</Button>
         </div>
       </form>
     </Card>

@@ -135,7 +135,7 @@ export function ClientGooglePanel({
         </div>
 
         {places?.length ? (
-          <ul className="divide-y divide-hairline rounded-card border border-hairline">
+          <ul className="glass divide-y divide-soft rounded-card">
             {places.map((place) => (
               <li key={place.placeId} className="flex flex-wrap items-center justify-between gap-2 p-3">
                 <div className="min-w-0">
@@ -169,7 +169,7 @@ export function ClientGooglePanel({
  * can log in to their own workspace. Inviting mints a password-setup link.
  */
 export function ClientAccessPanel({
-  clientId, contactEmail, ownerEmail, ownerHasLogin, invitedAt, brandName, enabled,
+  clientId, contactEmail, ownerEmail, ownerHasLogin, invitedAt, brandName, enabled, agencyEmail,
 }: {
   clientId: string;
   contactEmail?: string;
@@ -178,6 +178,8 @@ export function ClientAccessPanel({
   invitedAt?: string;
   brandName: string;
   enabled: boolean;
+  /** The agency's own login, lower-cased — inviting it would invite yourself. */
+  agencyEmail?: string;
 }) {
   const router = useRouter();
   const { toast } = useToast();
@@ -186,6 +188,7 @@ export function ClientAccessPanel({
   const [inviting, startInvite] = useTransition();
   const [notice, setNotice] = useState<{ text: string; link?: string } | null>(null);
   const dirty = email.trim().toLowerCase() !== (contactEmail ?? "").toLowerCase();
+  const isOwnEmail = Boolean(agencyEmail) && email.trim().toLowerCase() === agencyEmail;
 
   function saveContact() {
     startSaveContact(async () => {
@@ -231,13 +234,18 @@ export function ClientAccessPanel({
       <div className="space-y-3 text-[13px] text-sub">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <div className="flex-1">
-            <Field label="Contact email" hint="Receives the branded report, and the invitation below.">
+            <Field
+              label="Contact email"
+              hint={isOwnEmail ? undefined : "Receives the branded report, and the invitation below."}
+              error={isOwnEmail ? `This is ${brandName}'s own address. Enter the client's email so reports and the login invite reach them.` : undefined}
+            >
               <Input
                 type="email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 maxLength={254}
                 disabled={!enabled}
+                invalid={isOwnEmail}
               />
             </Field>
           </div>
@@ -262,7 +270,7 @@ export function ClientAccessPanel({
         </div>
 
         {!ownerHasLogin ? (
-          <Button variant="primary" icon="mail" loading={inviting} disabled={!enabled || dirty || !email.trim()} onClick={invite}>
+          <Button variant="primary" icon="mail" loading={inviting} disabled={!enabled || dirty || !email.trim() || isOwnEmail} onClick={invite}>
             {invitedAt ? "Send the invitation again" : `Invite ${email.trim() ? "the client" : "…"} as ${brandName}`}
           </Button>
         ) : null}

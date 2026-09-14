@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clientStatus, growthTrend, rollupAgencyBook, rollupAgencyClient } from "@/lib/agency/rollup";
+import { clientStatus, growthTrend, reviewsByMonth, rollupAgencyBook, rollupAgencyClient } from "@/lib/agency/rollup";
 import type { AgencyClient, AgencyClientLive } from "@/lib/data/types";
 
 const now = new Date("2026-09-03T12:00:00Z");
@@ -112,5 +112,19 @@ describe("rollupAgencyBook", () => {
     const book = rollupAgencyBook([stored, orphan], new Map([["loc_town", live()]]), now);
     expect(book[0]?.name).toBe("Townhill Constructions");
     expect(book[1]).toEqual(orphan);
+  });
+});
+
+describe("reviewsByMonth", () => {
+  it("buckets reviews into the last six calendar months, oldest first, with honest zeros", () => {
+    const months = reviewsByMonth(live().reviews, now);
+    expect(months.map((m) => m.month)).toEqual(["2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"]);
+    expect(months.map((m) => m.count)).toEqual([0, 0, 1, 0, 2, 0]);
+  });
+
+  it("is carried on the rolled-up client with the newest review date", () => {
+    const client = rollupAgencyClient(stored, live(), now);
+    expect(client.reviewsByMonth?.length).toBe(6);
+    expect(client.lastReviewAt).toBe("2026-08-30T00:00:00Z");
   });
 });

@@ -3158,6 +3158,79 @@ export async function syncAgencyClientAction(
   return { ok: true, message: `Synced ${target.name}: ${stars}★ from ${pub.reviewCount ?? 0} Google reviews.${profileNote}` };
 }
 
+export interface AgencyBulkSyncResult {
+  ok: boolean;
+  synced: number;
+  failed: number;
+  skipped: number;
+  message: string;
+}
+
+/**
+ * Sync every client that has a Google listing, one after another. Unlinked
+ * clients are skipped and counted, never invented; a failure on one client
+ * does not stop the rest. Capped so a runaway book cannot hold a request.
+ */
+export async function syncAllAgencyClientsAction(): Promise<AgencyBulkSyncResult> {
+  const ctx = await agencyContext();
+  if (!ctx) return { ok: false, synced: 0, failed: 0, skipped: 0, message: "Client management requires the Agency plan." };
+  if (ctx.session.isDemo) {
+    return { ok: false, synced: 0, failed: 0, skipped: 0, message: "The demo uses sample data — sign up to sync real Google data." };
+  }
+  const clients = (await ctx.provider.listAgencyClients(ctx.ws)).slice(0, 50);
+  let synced = 0;
+  let failed = 0;
+  let skipped = 0;
+  for (const client of clients) {
+    if (!client.workspaceId || !client.googleLinked) {
+      skipped += 1;
+      continue;
+    }
+    try {
+      const pub = await ctx.provider.syncGooglePublic(client.workspaceId);
+      await ctx.provider.syncGoogleProfile(client.workspaceId).catch(() => null);
+      if (pub.ok) synced += 1;
+      else failed += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  if (synced) {
+    await agencyAudit(ctx.provider, ctx.ws, ctx.session, "agency.clients_synced", "agency", ctx.ws, { synced, failed, skipped });
+  }
+  revalidatePath("/agency", "layout");
+  const parts = [`Synced ${synced} client${synced === 1 ? "" : "s"} from Google`];
+  if (failed) parts.push(`${failed} failed`);
+  if (skipped) parts.push(`${skipped} skipped without a linked listing`);
+  return { ok: failed === 0, synced, failed, skipped, message: `${parts.join(" · ")}.` };
+}
+
+/**
+ * The exact branded report a client would receive, rendered for the agency
+ * to look at before sending. Same template, same live figures as the send
+ * path — never a mock-up that could differ from the email.
+ */
+export async function previewAgencyReportAction(
+  locationId: string,
+): Promise<{ ok: true; subject: string; html: string; to?: string } | { ok: false; error: string }> {
+  const ctx = await agencyContext();
+  if (!ctx) return { ok: false, error: "Agency reporting requires the Agency plan." };
+  const wanted = String(locationId ?? "").trim();
+  const client = (await ctx.provider.listAgencyClients(ctx.ws)).find((entry) => entry.locationId === wanted);
+  if (!client) return { ok: false, error: "That client is not part of this agency." };
+  const report = agencyGrowthReportEmail({
+    brandName: ctx.data.agency.whiteLabel.brandName,
+    primary: ctx.data.agency.whiteLabel.primary,
+    clientName: client.name,
+    city: client.city,
+    growthScore: client.growthScore,
+    rating: client.rating,
+    newReviews30d: client.newReviews30d,
+    needsReply: client.needsReply,
+  });
+  return { ok: true, subject: report.subject, html: report.html, to: client.contactEmail };
+}
+
 /** How long a client-owner invite link stays valid. */
 const CLIENT_INVITE_DAYS = 7;
 

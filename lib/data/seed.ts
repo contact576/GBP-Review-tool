@@ -728,10 +728,11 @@ export function buildSeed(): FoundlyData {
     },
     platform: {
       tenants: [
-        { id: "org_harbourview", name: "Harbourview Physiotherapy", vertical: "physiotherapy", plan: "growth", mrr: 99, locations: 1, status: "trialing", region: "CA" },
-        { id: "org_maple", name: "Maple Dental Studio", vertical: "dental", plan: "growth", mrr: 99, locations: 1, status: "active", region: "CA" },
-        { id: "org_summit", name: "Summit HVAC & Heating", vertical: "hvac", plan: "growth", mrr: 99, locations: 1, status: "past_due", region: "CA" },
-        { id: "org_northside", name: "Northside Marketing (Agency)", vertical: "physiotherapy", plan: "agency", mrr: 897, locations: 12, status: "active", region: "CA" },
+        { id: "org_harbourview", name: "Harbourview Physiotherapy", orgType: "direct", vertical: "physiotherapy", plan: "growth", mrr: 0, locations: 1, billedLocations: 0, status: "trialing", region: "CA" },
+        { id: "org_maple", name: "Maple Dental Studio", orgType: "direct", vertical: "dental", plan: "growth", mrr: 99, locations: 1, billedLocations: 1, status: "active", region: "CA" },
+        { id: "org_summit", name: "Summit HVAC & Heating", orgType: "direct", vertical: "hvac", plan: "growth", mrr: 99, locations: 1, billedLocations: 1, status: "past_due", region: "CA" },
+        // One Agency subscription however many client workspaces hang off it — the same rule the live roster applies.
+        { id: "org_northside", name: "Northside Marketing", orgType: "agency", vertical: "physiotherapy", plan: "agency", mrr: 299, locations: 12, billedLocations: 1, status: "active", region: "CA" },
       ],
       deliveryIncidents: [
         { id: "di_1", tenant: "Summit HVAC & Heating", channel: "sms", type: "Carrier filtering spike", severity: "medium", count: 14, at: hoursAgo(2) },
@@ -749,8 +750,8 @@ export function buildSeed(): FoundlyData {
       kpis: {
         totalTenants: 4,
         activeLocations: 15,
-        mrr: 1274,
-        trialConversion: 0.12,
+        mrr: 497,
+        trialConversion: 0.75,
         logoChurn: 0.038,
         nrr: 1.06,
         weeklyDetectedReviews: 34,

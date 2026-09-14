@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { aggregatePlatform, workspaceMrr, type PlatformWorkspaceRow } from "@/lib/platform/aggregate";
+import {
+  aggregatePlatform,
+  isTestAccount,
+  tenantDisplayName,
+  workspaceBills,
+  workspaceMrr,
+  type PlatformWorkspaceRow,
+} from "@/lib/platform/aggregate";
 
 const now = new Date("2026-09-03T12:00:00Z");
 
@@ -35,12 +42,42 @@ describe("workspaceMrr", () => {
   });
 });
 
+describe("workspaceBills", () => {
+  it("bills the organization's billing workspace and any workspace with its own Stripe subscription", () => {
+    expect(workspaceBills(ws({ workspaceId: "ws_a", organizationId: "org", billingWorkspaceId: "ws_a" }), "ws_a")).toBe(true);
+    expect(workspaceBills(ws({ workspaceId: "ws_b", organizationId: "org", billingWorkspaceId: "ws_a" }), "ws_a")).toBe(false);
+    expect(workspaceBills(ws({ workspaceId: "ws_b", organizationId: "org", billingWorkspaceId: "ws_a", stripeSubscriptionId: "sub_1" }), "ws_a")).toBe(true);
+  });
+
+  it("falls back to the organization's earliest workspace when no billing workspace is known", () => {
+    expect(workspaceBills(ws({ workspaceId: "ws_a", organizationId: "org" }), "ws_a")).toBe(true);
+    expect(workspaceBills(ws({ workspaceId: "ws_b", organizationId: "org" }), "ws_a")).toBe(false);
+  });
+});
+
+describe("tenantDisplayName", () => {
+  it("names a direct tenant after its business and an agency after its organization", () => {
+    expect(tenantDisplayName({ organizationName: "Shrikaanth's Business", locationName: "Digiator", orgType: "direct" })).toBe("Digiator");
+    expect(tenantDisplayName({ organizationName: "PPC Guru", locationName: "Jaydeep's Business", orgType: "agency" })).toBe("PPC Guru");
+    expect(tenantDisplayName({ organizationName: "Only Org", locationName: "", orgType: null })).toBe("Only Org");
+  });
+});
+
+describe("isTestAccount", () => {
+  it("matches the reserved test domains only", () => {
+    expect(isTestAccount("e2e-auto-1@example.com")).toBe(true);
+    expect(isTestAccount("demo@foundly.local")).toBe(true);
+    expect(isTestAccount("contact@ppcguru.ca")).toBe(false);
+    expect(isTestAccount(null)).toBe(false);
+  });
+});
+
 describe("aggregatePlatform", () => {
   it("rolls an organization's workspaces into one tenant with its highest plan and worst status", () => {
     const snapshot = aggregatePlatform({
       workspaces: [
-        ws({ workspaceId: "ws_a", organizationId: "org_1", organizationName: "PPC Guru", tier: "agency", status: "active", createdAt: "2026-01-01T00:00:00Z" }),
-        ws({ workspaceId: "ws_b", organizationId: "org_1", organizationName: "PPC Guru", tier: "agency", status: "past_due", createdAt: "2026-02-01T00:00:00Z" }),
+        ws({ workspaceId: "ws_a", organizationId: "org_1", organizationName: "PPC Guru", orgType: "agency", billingWorkspaceId: "ws_a", tier: "agency", status: "active", createdAt: "2026-01-01T00:00:00Z" }),
+        ws({ workspaceId: "ws_b", organizationId: "org_1", organizationName: "PPC Guru", orgType: "agency", billingWorkspaceId: "ws_a", tier: "agency", status: "past_due", createdAt: "2026-02-01T00:00:00Z" }),
         ws({ workspaceId: "ws_c", organizationId: "org_2", organizationName: "Solo Plumber", tier: "growth", status: "trialing" }),
       ],
       deliveryFailures: [],
@@ -53,14 +90,83 @@ describe("aggregatePlatform", () => {
     expect(agency.plan).toBe("agency");
     expect(agency.status).toBe("past_due");
     expect(agency.locations).toBe(2);
-    expect(agency.mrr).toBe(598);
+    expect(agency.orgType).toBe("agency");
     expect(agency.primaryWorkspaceId).toBe("ws_a");
     const solo = snapshot.tenants.find((t) => t.id === "org_2")!;
     expect(solo.status).toBe("trialing");
     expect(solo.mrr).toBe(0);
-    expect(snapshot.kpis).toMatchObject({ totalTenants: 2, activeLocations: 3, mrr: 598, weeklyDetectedReviews: 4 });
+    expect(solo.orgType).toBe("direct");
+    expect(snapshot.kpis).toMatchObject({ totalTenants: 2, activeLocations: 3, weeklyDetectedReviews: 4 });
     expect(snapshot.kpis.trialConversion).toBeCloseTo(0.5);
     expect(snapshot.measuredAt).toBe(now.toISOString());
+  });
+
+  it("bills an agency once, not once per client workspace it created", () => {
+    // PPC Guru on 2026-09-14: one $299 Agency plan, two client workspaces
+    // carrying copies of the same tier and status. The console said $897.
+    const snapshot = aggregatePlatform({
+      workspaces: [
+        ws({ workspaceId: "ws_agency", organizationId: "org_ppc", organizationName: "PPC Guru", locationName: "PPC Guru", orgType: "agency", billingWorkspaceId: "ws_agency", tier: "agency", status: "active", createdAt: "2026-08-07T00:00:00Z" }),
+        ws({ workspaceId: "ws_town", organizationId: "org_ppc", organizationName: "PPC Guru", locationName: "Townhill", orgType: "agency", billingWorkspaceId: "ws_agency", tier: "agency", status: "active", createdAt: "2026-09-02T00:00:00Z" }),
+        ws({ workspaceId: "ws_tune", organizationId: "org_ppc", organizationName: "PPC Guru", locationName: "Tune Epicenter", orgType: "agency", billingWorkspaceId: "ws_agency", tier: "agency", status: "active", createdAt: "2026-09-02T00:01:00Z" }),
+      ],
+      deliveryFailures: [],
+      durability: [],
+      reviewsLast7d: 0,
+      now,
+    });
+    const tenant = snapshot.tenants[0]!;
+    expect(tenant.name).toBe("PPC Guru");
+    expect(tenant.mrr).toBe(299);
+    expect(tenant.locations).toBe(3);
+    expect(tenant.billedLocations).toBe(1);
+    expect(snapshot.kpis.mrr).toBe(299);
+  });
+
+  it("still bills a sibling that carries its own Stripe subscription", () => {
+    const snapshot = aggregatePlatform({
+      workspaces: [
+        ws({ workspaceId: "ws_a", organizationId: "org_m", organizationName: "Multi Co", billingWorkspaceId: "ws_a", tier: "multi", status: "active", createdAt: "2026-01-01T00:00:00Z" }),
+        ws({ workspaceId: "ws_b", organizationId: "org_m", organizationName: "Multi Co", billingWorkspaceId: "ws_a", tier: "multi", status: "active", stripeSubscriptionId: "sub_b", createdAt: "2026-02-01T00:00:00Z" }),
+        ws({ workspaceId: "ws_c", organizationId: "org_m", organizationName: "Multi Co", billingWorkspaceId: "ws_a", tier: "multi", status: "active", createdAt: "2026-03-01T00:00:00Z" }),
+      ],
+      deliveryFailures: [],
+      durability: [],
+      reviewsLast7d: 0,
+      now,
+    });
+    expect(snapshot.tenants[0]).toMatchObject({ mrr: 138, locations: 3, billedLocations: 2 });
+  });
+
+  it("names a direct tenant after its business and keeps the organization record's name aside", () => {
+    const snapshot = aggregatePlatform({
+      workspaces: [
+        ws({ workspaceId: "ws_1", organizationId: "org_1", organizationName: "Shrikaanth's Business", locationName: "PPC Guru", orgType: "direct" }),
+        ws({ workspaceId: "ws_2", organizationId: "org_2", organizationName: "Shrikaanth's Business", locationName: "Digiator", orgType: "direct" }),
+      ],
+      deliveryFailures: [],
+      durability: [],
+      reviewsLast7d: 0,
+      now,
+    });
+    expect(snapshot.tenants.map((t) => t.name).sort()).toEqual(["Digiator", "PPC Guru"]);
+    expect(snapshot.tenants.every((t) => t.organizationName === "Shrikaanth's Business")).toBe(true);
+  });
+
+  it("counts weekly reviews only for roster workspaces when they are grouped", () => {
+    const snapshot = aggregatePlatform({
+      workspaces: [ws({ workspaceId: "ws_real", organizationId: "org_real", organizationName: "Real Co" })],
+      deliveryFailures: [],
+      durability: [],
+      reviewsLast7d: 999,
+      reviewsLast7dByWorkspace: [
+        { workspaceId: "ws_real", count: 3 },
+        { workspaceId: "ws_ops", count: 5 },
+        { workspaceId: "ws_demo_on_prod", count: 40 },
+      ],
+      now,
+    });
+    expect(snapshot.kpis.weeklyDetectedReviews).toBe(3);
   });
 
   it("does not claim to measure fraud or retention", () => {
@@ -71,7 +177,7 @@ describe("aggregatePlatform", () => {
 
   it("turns grouped send failures into incidents named after the tenant, worst first", () => {
     const snapshot = aggregatePlatform({
-      workspaces: [ws({ workspaceId: "ws_a", organizationId: "org_1", organizationName: "Maple Dental" })],
+      workspaces: [ws({ workspaceId: "ws_a", organizationId: "org_1", organizationName: "Maple Dental", locationName: "Maple Dental" })],
       deliveryFailures: [
         { workspaceId: "ws_a", channel: "sms", status: "failed", count: 22, latestAt: "2026-09-02T00:00:00Z" },
         { workspaceId: "ws_a", channel: "email", status: "suppressed", count: 3, latestAt: "2026-09-01T00:00:00Z" },
@@ -90,8 +196,8 @@ describe("aggregatePlatform", () => {
   it("computes the filtered rate from vanished over posted, and skips tenants with nothing posted", () => {
     const snapshot = aggregatePlatform({
       workspaces: [
-        ws({ workspaceId: "ws_a", organizationId: "org_1", organizationName: "A" }),
-        ws({ workspaceId: "ws_b", organizationId: "org_2", organizationName: "B" }),
+        ws({ workspaceId: "ws_a", organizationId: "org_1", organizationName: "A", locationName: "A" }),
+        ws({ workspaceId: "ws_b", organizationId: "org_2", organizationName: "B", locationName: "B" }),
       ],
       deliveryFailures: [],
       durability: [
@@ -108,7 +214,7 @@ describe("aggregatePlatform", () => {
   it("leaves automated test accounts out of every figure, and says how many", () => {
     const snapshot = aggregatePlatform({
       workspaces: [
-        ws({ workspaceId: "ws_real", organizationId: "org_real", organizationName: "Real Co", ownerEmail: "owner@realco.ca" }),
+        ws({ workspaceId: "ws_real", organizationId: "org_real", organizationName: "Real Co", locationName: "Real Co", ownerEmail: "owner@realco.ca" }),
         ws({ workspaceId: "ws_e2e", organizationId: "org_e2e", organizationName: "Redline Auto Works", ownerEmail: "e2e-auto-1@example.com" }),
         ws({ workspaceId: "ws_demo", organizationId: "org_demo", organizationName: "Demo", ownerEmail: "demo@foundly.local" }),
       ],
@@ -125,7 +231,7 @@ describe("aggregatePlatform", () => {
 });
 
 describe("aggregatePlatform — fraud and retention coverage", () => {
-  const rosterWs = ws({ workspaceId: "ws_a", organizationId: "org_1", organizationName: "Acme" });
+  const rosterWs = ws({ workspaceId: "ws_a", organizationId: "org_1", organizationName: "Acme", locationName: "Acme" });
 
   it("covers fraud only when the rows were fetched, and names the signals that ran", () => {
     const without = aggregatePlatform({ workspaces: [rosterWs], deliveryFailures: [], durability: [], reviewsLast7d: 0, now });

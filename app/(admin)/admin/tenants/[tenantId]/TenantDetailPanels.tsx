@@ -70,6 +70,8 @@ interface WorkspaceSub {
   interval: "monthly" | "annual";
   trialEndsAt?: string;
   stripeSubscriptionId?: string;
+  /** This workspace is the one being billed (organization billing workspace, or its own Stripe subscription). */
+  billed: boolean;
 }
 
 /**
@@ -177,10 +179,16 @@ export function TenantSubscriptionPanel({ workspaces, enabled }: { workspaces: W
             This workspace has a Stripe subscription. Changing it here does not change Stripe — the next webhook can
             overwrite a manual status. Use it for comps and corrections only.
           </p>
-        ) : (
+        ) : current.billed ? (
           <p className="text-[12px] text-faint">
             No Stripe subscription — this is the only place this workspace&rsquo;s plan is set. MRR on the roster
             follows active / past-due at the plan price.
+          </p>
+        ) : (
+          <p className="flex items-start gap-1.5 rounded-btn bg-primary-wash p-2.5 text-[12px] text-sub">
+            <Icon name="building" size={14} className="mt-px shrink-0 text-primary" />
+            This location rides on the organization&rsquo;s plan: its tier and status are copies for entitlements and
+            bill nothing of their own. Set the plan on the billing workspace to change what the organization pays.
           </p>
         )}
 
@@ -188,7 +196,11 @@ export function TenantSubscriptionPanel({ workspaces, enabled }: { workspaces: W
 
         <div className="space-y-2">
           <div className="text-[13px] text-sub">
-            Trial {current.trialEndsAt ? `ends ${formatDate(current.trialEndsAt)}` : "has no end date"}.
+            {current.status === "trialing"
+              ? `Trial ${current.trialEndsAt ? `ends ${formatDate(current.trialEndsAt)}` : "has no end date"}.`
+              : current.status === "active" || current.status === "past_due"
+                ? "Paid subscription — not on a trial. Extending starts a trial and pauses billing status."
+                : "No trial in play."}
           </div>
           <div className="flex items-end gap-2">
             <div className="w-28">
@@ -236,7 +248,13 @@ function UserRow({ user, enabled }: { user: PlatformTenantUser; enabled: boolean
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="truncate text-[14px] font-semibold text-ink">{user.email}</span>
           <Badge tone="neutral">{user.role.replace("_", " ")}</Badge>
-          {user.hasLogin ? <Badge tone="primary" icon="check-circle">Login</Badge> : <Badge tone="sub" icon="lock">No login</Badge>}
+          {user.hasLogin ? (
+            <Badge tone="primary" icon="check-circle">Login</Badge>
+          ) : user.seatHeldByAgency ? (
+            <Badge tone="gold" icon="users">Seat held by agency · client not invited</Badge>
+          ) : (
+            <Badge tone="sub" icon="lock">No login</Badge>
+          )}
           {user.emailVerified ? <Badge tone="primary" icon="mail">Verified</Badge> : <Badge tone="gold" icon="alert">Unverified</Badge>}
         </div>
         <div className="truncate text-[12px] text-sub">
@@ -255,12 +273,16 @@ function UserRow({ user, enabled }: { user: PlatformTenantUser; enabled: boolean
   );
 }
 
-export function TenantUsersPanel({ users, enabled }: { users: PlatformTenantUser[]; enabled: boolean }) {
+export function TenantUsersPanel({ users, enabled, heldSeats = 0 }: { users: PlatformTenantUser[]; enabled: boolean; heldSeats?: number }) {
   return (
     <Card>
-      <CardHeader kicker="Access" title="Users" />
+      <CardHeader
+        kicker="Access"
+        title="Users"
+        action={heldSeats ? <Badge tone="gold" icon="users">{heldSeats} seat{heldSeats === 1 ? "" : "s"} held by the agency</Badge> : undefined}
+      />
       {users.length ? (
-        <ul className="divide-y divide-hairline">
+        <ul className="divide-y divide-soft">
           {users.map((user) => (
             <UserRow key={user.id} user={user} enabled={enabled} />
           ))}
@@ -271,7 +293,7 @@ export function TenantUsersPanel({ users, enabled }: { users: PlatformTenantUser
       <p className="mt-3 flex items-start gap-1.5 text-[12px] text-faint">
         <Icon name="shield" size={13} className="mt-px shrink-0" />
         Sign out everywhere bumps the user&rsquo;s session version, invalidating every issued token. Verified gates
-        sending review requests, not signing in.
+        sending review requests, not signing in.{heldSeats ? " A held seat is the agency’s own address on a client workspace it created; the client can sign in only after the agency invites them." : ""}
       </p>
     </Card>
   );
