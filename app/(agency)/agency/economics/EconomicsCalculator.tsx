@@ -1,9 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardHeader } from "@/components/ds/Card";
+import { Button } from "@/components/ds/Button";
 import { Field, Input } from "@/components/ds/form";
 import { StatTile } from "@/components/charts/StatTile";
+import { useToast } from "@/components/ds/Toast";
+import { updateAgencyRatesAction } from "@/lib/actions";
 
 function money(sym: string, n: number): string {
   return `${sym}${Math.round(n).toLocaleString("en")}`;
@@ -15,11 +19,16 @@ function clampNum(v: string, min = 0): number {
 }
 
 export function EconomicsCalculator({
-  currencySymbol, defaults,
+  currencySymbol, defaults, canSave,
 }: {
   currencySymbol: string;
   defaults: { locations: number; wholesale: number; retail: number };
+  /** False on the demo — the calculator still works, the rates just don't persist. */
+  canSave: boolean;
 }) {
+  const router = useRouter();
+  const { toast } = useToast();
+  const [saving, startSaving] = useTransition();
   const [locations, setLocations] = useState(String(defaults.locations));
   const [wholesale, setWholesale] = useState(String(defaults.wholesale));
   const [retail, setRetail] = useState(String(defaults.retail));
@@ -35,13 +44,26 @@ export function EconomicsCalculator({
   const annualMargin = monthlyMargin * 12;
   const marginPct = nRetail > 0 ? Math.round((perUnitMargin / nRetail) * 100) : 0;
   const underwater = perUnitMargin < 0;
+  const dirty = nWhole !== defaults.wholesale || nRetail !== defaults.retail;
+
+  function save() {
+    startSaving(async () => {
+      const result = await updateAgencyRatesAction({ wholesaleRate: nWhole, retailAverage: nRetail });
+      if (!result.ok) {
+        toast(result.error, "danger", "alert");
+        return;
+      }
+      toast("Rates saved — the Clients page uses them now", "success", "check-circle");
+      router.refresh();
+    });
+  }
 
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
       <Card>
         <CardHeader kicker="Inputs" title="Wholesale economics" />
         <div className="space-y-4">
-          <Field label="Locations" hint="How many client locations you resell to.">
+          <Field label="Locations" hint="How many client locations you resell to. Prefilled from your book.">
             <Input type="number" min={0} inputMode="numeric" value={locations} onChange={(e) => setLocations(e.target.value)} />
           </Field>
           <Field label={`Wholesale rate (${currencySymbol} / location / mo)`} hint="What you pay Foundly per location.">
@@ -59,6 +81,16 @@ export function EconomicsCalculator({
           Per location you keep <span className="font-semibold text-ink">{money(currencySymbol, perUnitMargin)}</span> of{" "}
           <span className="font-semibold text-ink">{money(currencySymbol, nRetail)}</span> — a{" "}
           <span className="font-semibold text-ink">{marginPct}%</span> margin.
+        </div>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[12px] text-faint">
+            {canSave
+              ? "Saved rates drive the Clients page summary and every branded report's economics."
+              : "The demo keeps rates for this session only."}
+          </span>
+          <Button icon="check" size="sm" onClick={save} loading={saving} disabled={!canSave || !dirty || underwater}>
+            Save rates
+          </Button>
         </div>
       </Card>
 

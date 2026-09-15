@@ -19,6 +19,7 @@ import type { ProfileSuggestion } from "@/lib/data/types";
 import { isContentSuggestionPreview, suggestionToGenerationKind } from "@/lib/ai/content-studio";
 import { suggestionStatusLabel } from "@/lib/suggestions/inbox";
 import { ContentPreviewGenerator } from "./ContentPreviewGenerator";
+import { ManualDraftCreator } from "./ManualDraftCreator";
 
 export default async function StudioPage() {
   const data = await getData();
@@ -92,6 +93,9 @@ export default async function StudioPage() {
             title="Content queue"
             action={<Badge tone="neutral">{contentSuggestions.length} suggestions</Badge>}
           />
+          <div className="mb-4">
+            <ManualDraftCreator disabled={!openAiConnected} />
+          </div>
           {contentSuggestions.length ? (
             <div className="space-y-4">
               {contentSuggestions.map((suggestion) => (
@@ -102,7 +106,7 @@ export default async function StudioPage() {
             <EmptyState
               icon="sparkles"
               title="No content drafts are waiting"
-              description="Sync your Google Business Profile to refresh the audit and prepare the next evidence-backed idea."
+              description="Start one above, or connect your Google Business Profile so the audit can propose evidence-backed ideas automatically."
             />
           )}
         </Card>

@@ -31,6 +31,52 @@ describe("website evidence extraction", () => {
     expect(parsed.sameOriginLinks).toContain("https://harbourview.example/services");
   });
 
+  it("reads service names from nav links and service-page headings, never section titles", () => {
+    const home = parseWebsiteHtml(`
+      <html><body>
+        <nav>
+          <a href="/">Home</a>
+          <a href="/services">Our Services</a>
+          <a href="/services/deep-cleaning">DEEP CLEANING</a>
+          <a href="/services/move-out-cleaning">Move-out cleaning</a>
+          <a href="/services/deep-cleaning">Learn more</a>
+          <a href="/contact">Contact us</a>
+        </nav>
+        <h2>Why choose us</h2>
+        <h2>Our Services</h2>
+      </body></html>
+    `, "https://sparkle.example/");
+    expect(home.facts.services).toEqual(["Deep Cleaning", "Move-out cleaning"]);
+    // The services index is queued for crawling; the homepage's own section
+    // headings never became services.
+    expect(home.sameOriginLinks).toContain("https://sparkle.example/services");
+
+    const servicesPage = parseWebsiteHtml(`
+      <html><body>
+        <h1>Our Services</h1>
+        <h2>Carpet cleaning</h2>
+        <h2>Window washing</h2>
+        <h2>Ready to book? Call us today!</h2>
+        <h3>What our customers say</h3>
+      </body></html>
+    `, "https://sparkle.example/services");
+    expect(servicesPage.facts.services).toEqual(["Carpet cleaning", "Window washing"]);
+  });
+
+  it("recognises schema.org Service entities and offer catalogs", () => {
+    const parsed = parseWebsiteHtml(`
+      <html><head><script type="application/ld+json">{
+        "@type":"Dentist","name":"Bright Dental",
+        "hasOfferCatalog":{"@type":"OfferCatalog","itemListElement":[
+          {"@type":"Offer","itemOffered":{"@type":"Service","name":"Teeth Whitening"}},
+          {"@type":"Service","name":"Root Canal"}
+        ]}
+      }</script></head><body></body></html>
+    `, "https://bright.example/");
+    expect(parsed.facts.services).toEqual(expect.arrayContaining(["Teeth Whitening", "Root Canal"]));
+    expect(parsed.facts.services).not.toContain("Bright Dental");
+  });
+
   it("blocks loopback, private, link-local, and metadata-style addresses", () => {
     expect(isBlockedIp("127.0.0.1")).toBe(true);
     expect(isBlockedIp("10.0.0.1")).toBe(true);

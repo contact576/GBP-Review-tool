@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
 import { Card } from "@/components/ds/Card";
@@ -12,6 +12,7 @@ import { Table, type Column, type SortDirection } from "@/components/ds/Table";
 import { Drawer } from "@/components/ds/Drawer";
 import { useToast } from "@/components/ds/Toast";
 import { Icon, type IconName } from "@/components/icons";
+import { BrandLogo, ChannelLogo } from "@/components/icons/brands";
 import { marketingConsented } from "@/lib/data/selectors";
 import {
   canSendService,
@@ -21,8 +22,216 @@ import {
 } from "@/lib/compliance/consent";
 import { customersToCsv, downloadCsv, parseCustomersCsv } from "@/lib/utils/csv";
 import { initials, maskEmail, maskPhone, formatRelative, formatDate, pluralize } from "@/lib/utils/format";
-import { sendRequestAction, addCustomerAction, importCustomersAction } from "@/lib/actions";
-import type { Customer, ReviewRequest, LifecycleStage, Region } from "@/lib/data/types";
+import { toWhatsAppNumber, whatsAppChatUrl } from "@/lib/whatsapp/link";
+import { WHATSAPP_TEMPLATES, renderWhatsAppMessage } from "@/lib/whatsapp/templates";
+import {
+  sendRequestAction,
+  addCustomerAction,
+  importCustomersAction,
+  prepareWhatsAppRequestsAction,
+  markWhatsAppRequestSentAction,
+  type WhatsAppRecipient,
+} from "@/lib/actions";
+import type { Customer, ReviewRequest, LifecycleStage, Region, Channel } from "@/lib/data/types";
+
+/** Which channels can reach a customer right now, and why not when they can't. */
+interface ChannelOption {
+  channel: Channel;
+  label: string;
+  enabled: boolean;
+  /** Shown under a disabled chip — the honest reason, never a greyed mystery. */
+  reason?: string;
+}
+
+function channelOptions(input: {
+  email?: string;
+  phone?: string;
+  region: Region;
+  emailReady: boolean;
+  smsReady: boolean;
+  serviceConsent: boolean;
+}): ChannelOption[] {
+  const email = (input.email ?? "").trim();
+  const phone = (input.phone ?? "").trim();
+  const waNumber = toWhatsAppNumber(phone || undefined, input.region);
+  const consentReason = input.serviceConsent ? undefined : "Needs service-message consent first.";
+  return [
+    {
+      channel: "email",
+      label: "Email",
+      enabled: Boolean(email) && input.emailReady && input.serviceConsent,
+      reason: consentReason ?? (!email ? "No email address." : !input.emailReady ? "Email sending isn't connected yet (Settings → Channels)." : undefined),
+    },
+    {
+      channel: "sms",
+      label: "SMS",
+      enabled: Boolean(phone) && input.smsReady && input.serviceConsent,
+      reason: consentReason ?? (!phone ? "No phone number." : !input.smsReady ? "SMS isn't connected yet (Settings → Channels)." : undefined),
+    },
+    {
+      channel: "whatsapp",
+      label: "WhatsApp",
+      enabled: Boolean(waNumber) && input.serviceConsent,
+      reason: consentReason ?? (!phone ? "No phone number." : !waNumber ? "That number isn't dialable on WhatsApp." : "Opens in your own WhatsApp — you press send."),
+    },
+  ];
+}
+
+/**
+ * Three chips, one per channel, each honest about whether it can send.
+ * WhatsApp is always described as manual: Foundly opens the chat with the
+ * message typed, the owner presses send.
+ */
+function ChannelPicker({
+  options,
+  value,
+  onChange,
+  allowNone,
+}: {
+  options: ChannelOption[];
+  value: Channel | null;
+  onChange: (channel: Channel | null) => void;
+  allowNone?: boolean;
+}) {
+  const selected = options.find((option) => option.channel === value);
+  return (
+    <div>
+      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Send by">
+        {options.map((option) => {
+          const active = value === option.channel;
+          return (
+            <button
+              key={option.channel}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              disabled={!option.enabled}
+              title={!option.enabled ? option.reason : undefined}
+              onClick={() => onChange(active && allowNone ? null : option.channel)}
+              className={cn(
+                "inline-flex min-h-[40px] items-center gap-1.5 rounded-chip border px-3 py-2 text-[13px] font-medium transition-colors",
+                active
+                  ? "border-primary bg-primary-tint text-primary-dark"
+                  : "border-hairline bg-card text-sub hover:border-primary/40 hover:text-ink",
+                !option.enabled && "cursor-not-allowed opacity-50 hover:border-hairline hover:text-sub",
+              )}
+            >
+              {active ? <Icon name="check" size={14} /> : <ChannelLogo channel={option.channel} size={14} />}
+              {option.label}
+            </button>
+          );
+        })}
+        {allowNone ? (
+          <button
+            type="button"
+            role="radio"
+            aria-checked={value === null}
+            onClick={() => onChange(null)}
+            className={cn(
+              "inline-flex min-h-[40px] items-center gap-1.5 rounded-chip border px-3 py-2 text-[13px] font-medium transition-colors",
+              value === null
+                ? "border-primary bg-primary-tint text-primary-dark"
+                : "border-hairline bg-card text-sub hover:border-primary/40 hover:text-ink",
+            )}
+          >
+            {value === null ? <Icon name="check" size={14} /> : <Icon name="clock" size={14} />}
+            Not now
+          </button>
+        ) : null}
+      </div>
+      {selected?.channel === "whatsapp" ? (
+        <p className="mt-2 text-[12px] leading-relaxed text-sub">{selected.reason}</p>
+      ) : null}
+      {options.some((option) => !option.enabled) ? (
+        <ul className="mt-2 space-y-0.5">
+          {options
+            .filter((option) => !option.enabled && option.reason)
+            .map((option) => (
+              <li key={option.channel} className="text-[12px] text-faint">
+                <span className="font-semibold text-sub">{option.label}:</span> {option.reason}
+              </li>
+            ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The manual WhatsApp hand-off for one customer: open the chat with the
+ * message typed, then ask the owner whether they pressed send. Nothing is
+ * marked sent until they say so — the ledger never claims a message that
+ * never left.
+ */
+function WhatsAppHandoff({
+  recipient,
+  business,
+  onSent,
+  onSkip,
+}: {
+  recipient: WhatsAppRecipient;
+  business: string;
+  onSent: () => void;
+  onSkip: () => void;
+}) {
+  const [opened, setOpened] = useState(false);
+  const message = renderWhatsAppMessage(WHATSAPP_TEMPLATES[0]?.body ?? "{{link}}", {
+    name: recipient.name,
+    business,
+    link: recipient.link,
+  });
+  return (
+    <div className="space-y-3 rounded-card border border-primary/30 bg-primary-wash/60 p-4">
+      <div className="flex items-start gap-3">
+        <div className="grid size-9 shrink-0 place-items-center rounded-btn bg-primary text-white">
+          <BrandLogo name="whatsapp" size={20} title="" />
+        </div>
+        <div className="min-w-0">
+          <div className="text-[14px] font-bold text-ink">Send it from your WhatsApp</div>
+          <p className="mt-0.5 text-[12px] leading-relaxed text-sub">
+            Opens a chat with {recipient.name} ({recipient.phoneDisplay}) with the message below typed in. Press send there,
+            then confirm here.
+          </p>
+        </div>
+      </div>
+      <p className="whitespace-pre-wrap rounded-btn border border-hairline bg-card px-3 py-2.5 text-[13px] leading-relaxed text-ink">
+        {message}
+      </p>
+      {!opened ? (
+        <Button
+          fullWidth
+          icon="external"
+          onClick={() => {
+            window.open(whatsAppChatUrl(recipient.phone, message), "_blank", "noopener,noreferrer");
+            setOpened(true);
+          }}
+        >
+          Open WhatsApp chat
+        </Button>
+      ) : (
+        <div className="space-y-2">
+          <Button fullWidth icon="check-circle" onClick={onSent}>
+            I pressed send
+          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              icon="external"
+              fullWidth
+              onClick={() => window.open(whatsAppChatUrl(recipient.phone, message), "_blank", "noopener,noreferrer")}
+            >
+              Open again
+            </Button>
+            <Button variant="ghost" size="sm" fullWidth onClick={onSkip}>
+              I didn&apos;t send it
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 type TabKey = "all" | "regulars" | "never" | "reviewed" | "suppressed";
 type DrawerTab = "overview" | "consent" | "activity";
@@ -43,15 +252,26 @@ export function CustomersView({
   requests,
   region,
   locationId,
+  business,
+  emailReady,
+  smsReady,
 }: {
   customers: Customer[];
   requests: ReviewRequest[];
   region: Region;
   locationId: string;
+  business: string;
+  /** Resolved server-side from the real adapters — never guessed in the client. */
+  emailReady: boolean;
+  smsReady: boolean;
 }) {
   const { toast } = useToast();
   const router = useRouter();
   const [pending, start] = useTransition();
+  /** Channel chosen in the detail drawer; null until the owner picks one. */
+  const [detailChannel, setDetailChannel] = useState<Channel | null>(null);
+  /** A WhatsApp request that has been minted and is waiting for the owner to press send. */
+  const [waHandoff, setWaHandoff] = useState<WhatsAppRecipient | null>(null);
 
   const [tab, setTab] = useState<TabKey>("all");
   const [query, setQuery] = useState("");
@@ -72,6 +292,29 @@ export function CustomersView({
   const [addService, setAddService] = useState(false);
   const [addMarketing, setAddMarketing] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  /** "Send a review request now" channel, chosen while adding; null = just add. */
+  const [addChannel, setAddChannel] = useState<Channel | null>(null);
+
+  const addOptions = useMemo(
+    () =>
+      channelOptions({
+        email: addEmail,
+        phone: addPhone,
+        region,
+        emailReady,
+        smsReady,
+        serviceConsent: addService,
+      }),
+    [addEmail, addPhone, region, emailReady, smsReady, addService],
+  );
+
+  // A channel that stops being possible (email cleared, consent unticked) is
+  // dropped rather than silently sent through anyway.
+  useEffect(() => {
+    if (addChannel && !addOptions.find((option) => option.channel === addChannel)?.enabled) {
+      setAddChannel(null);
+    }
+  }, [addChannel, addOptions]);
 
   // "Import CSV" state
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -151,10 +394,82 @@ export function CustomersView({
     [openCustomer, requests],
   );
 
+  const detailOptions = useMemo(
+    () =>
+      openCustomer
+        ? channelOptions({
+            email: openCustomer.email,
+            phone: openCustomer.phone,
+            region,
+            emailReady,
+            smsReady,
+            serviceConsent: canSendService(openCustomer),
+          })
+        : [],
+    [openCustomer, region, emailReady, smsReady],
+  );
+
   function openDetail(id: string) {
     setOpenId(id);
     setDrawerTab("overview");
     setRevealContact(false);
+    setWaHandoff(null);
+    // Default to the first channel that can actually send, so the primary
+    // button is live the moment the drawer opens when anything is possible.
+    const customer = customers.find((c) => c.id === id);
+    const options = customer
+      ? channelOptions({
+          email: customer.email,
+          phone: customer.phone,
+          region,
+          emailReady,
+          smsReady,
+          serviceConsent: canSendService(customer),
+        })
+      : [];
+    setDetailChannel(options.find((option) => option.enabled)?.channel ?? null);
+  }
+
+  function closeDetail() {
+    setOpenId(null);
+    setWaHandoff(null);
+  }
+
+  /**
+   * Mint one WhatsApp request and hand the owner the chat. The request stays
+   * queued until they confirm the send in `WhatsAppHandoff`.
+   */
+  async function startWhatsApp(customerId: string): Promise<boolean> {
+    const result = await prepareWhatsAppRequestsAction({ locationId, customerIds: [customerId] });
+    const recipient = result.recipients[0];
+    if (!recipient) {
+      toast(result.skipped[0]?.reason ?? "This customer can't be messaged on WhatsApp right now.", "warning", "alert");
+      return false;
+    }
+    setWaHandoff(recipient);
+    return true;
+  }
+
+  function confirmWhatsAppSent() {
+    if (!waHandoff) return;
+    const requestId = waHandoff.requestId;
+    const name = waHandoff.name;
+    setWaHandoff(null);
+    start(async () => {
+      await markWhatsAppRequestSentAction(requestId);
+      toast(`Marked as sent to ${name} on WhatsApp`, "success", "send");
+      setAddOpen(false);
+      setOpenId(null);
+      router.refresh();
+    });
+  }
+
+  function skipWhatsApp() {
+    toast("Left as not sent — you can try again from Requests.", "info", "clock");
+    setWaHandoff(null);
+    setAddOpen(false);
+    setOpenId(null);
+    router.refresh();
   }
 
   function exportAll() {
@@ -167,17 +482,23 @@ export function CustomersView({
     toast("Record exported", "success", "download");
   }
 
-  function sendRequest(c: Customer) {
+  function describeDelivery(status: string, name: string, channel: Channel): { text: string; tone: "success" | "warning" | "info"; icon: IconName } {
+    if (status === "sent") return { text: `Request accepted for delivery to ${name} by ${channel === "sms" ? "SMS" : "email"}`, tone: "success", icon: "send" };
+    if (status === "held") return { text: `Saved for ${name} — texts hold until 8 AM in their local time`, tone: "info", icon: "clock" };
+    if (status === "suppressed") return { text: `Saved, but ${name} can't be messaged yet (consent or opt-out)`, tone: "warning", icon: "shield" };
+    return { text: `Request saved, but delivery failed for ${name}`, tone: "warning", icon: "alert" };
+  }
+
+  function sendRequest(c: Customer, channel: Channel) {
     start(async () => {
-      const result = await sendRequestAction({ locationId, customerId: c.id, channel: c.email ? "email" : "sms" });
-      toast(
-        result.status === "sent"
-          ? `Request accepted for delivery to ${c.name}`
-          : `Request saved, but delivery failed for ${c.name}`,
-        result.status === "sent" ? "success" : "warning",
-        result.status === "sent" ? "send" : "alert",
-      );
-      setOpenId(null);
+      if (channel === "whatsapp") {
+        await startWhatsApp(c.id);
+        return;
+      }
+      const result = await sendRequestAction({ locationId, customerId: c.id, channel });
+      const note = describeDelivery(result.status, c.name, channel);
+      toast(note.text, note.tone, note.icon);
+      closeDetail();
       router.refresh();
     });
   }
@@ -189,6 +510,8 @@ export function CustomersView({
     setAddService(false);
     setAddMarketing(false);
     setAddError(null);
+    setAddChannel(null);
+    setWaHandoff(null);
   }
 
   function addCustomer() {
@@ -203,8 +526,9 @@ export function CustomersView({
       setAddError("Add an email or a phone number so you can reach them.");
       return;
     }
+    const channel = addChannel;
     startAdd(async () => {
-      await addCustomerAction({
+      const { id } = await addCustomerAction({
         name,
         email: email || undefined,
         phone: phone || undefined,
@@ -215,7 +539,26 @@ export function CustomersView({
           ? makeConsentSourceText(region, addMarketing)
           : "Added manually — no consent captured yet.",
       });
-      toast(`${name} added`, "success", "check-circle");
+      if (!channel) {
+        toast(`${name} added`, "success", "check-circle");
+        setAddOpen(false);
+        resetAddForm();
+        router.refresh();
+        return;
+      }
+      if (channel === "whatsapp") {
+        // The customer is saved; the drawer now becomes the WhatsApp hand-off.
+        const handed = await startWhatsApp(id);
+        if (!handed) {
+          setAddOpen(false);
+          resetAddForm();
+        }
+        router.refresh();
+        return;
+      }
+      const result = await sendRequestAction({ locationId, customerId: id, channel });
+      const note = describeDelivery(result.status, name, channel);
+      toast(`${name} added. ${note.text}`, note.tone, note.icon);
       setAddOpen(false);
       resetAddForm();
       router.refresh();
@@ -512,14 +855,33 @@ export function CustomersView({
       {/* Add-customer drawer */}
       <Drawer
         open={addOpen}
-        onClose={() => setAddOpen(false)}
-        title="Add customer"
+        onClose={() => {
+          if (waHandoff) return; // finish or skip the WhatsApp hand-off first
+          setAddOpen(false);
+        }}
+        title={waHandoff ? "Send on WhatsApp" : "Add customer"}
         footer={
-          <Button onClick={addCustomer} loading={addPending} icon="plus" fullWidth>
-            Add customer
-          </Button>
+          waHandoff ? undefined : (
+            <Button
+              onClick={addCustomer}
+              loading={addPending}
+              icon={addChannel ? "send" : "plus"}
+              fullWidth
+            >
+              {addChannel === "email"
+                ? "Add & send by email"
+                : addChannel === "sms"
+                  ? "Add & send by SMS"
+                  : addChannel === "whatsapp"
+                    ? "Add & open WhatsApp"
+                    : "Add customer"}
+            </Button>
+          )
         }
       >
+        {waHandoff ? (
+          <WhatsAppHandoff recipient={waHandoff} business={business} onSent={confirmWhatsAppSent} onSkip={skipWhatsApp} />
+        ) : (
         <div className="space-y-4">
           <Field label="Name" required>
             <Input
@@ -579,40 +941,73 @@ export function CustomersView({
             </p>
           </div>
 
+          {/* Send now — the ask goes out the moment the customer is saved. */}
+          <div className="space-y-3 rounded-card border border-hairline bg-card p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[13px] font-bold text-sub">Send a review request now?</div>
+              {addChannel ? <Badge tone="primary" icon="send">Sends on save</Badge> : <Badge tone="sub">Optional</Badge>}
+            </div>
+            <ChannelPicker options={addOptions} value={addChannel} onChange={setAddChannel} allowNone />
+            {!addService ? (
+              <p className="flex items-start gap-1.5 text-[12px] text-faint">
+                <Icon name="lock" size={13} className="mt-0.5 shrink-0" />
+                Tick the service-message consent above to unlock sending.
+              </p>
+            ) : null}
+          </div>
+
           {addError ? (
             <p className="flex items-center gap-1.5 text-[13px] text-danger" role="alert">
               <Icon name="alert" size={13} className="shrink-0" /> {addError}
             </p>
           ) : null}
         </div>
+        )}
       </Drawer>
 
       {/* Detail drawer */}
       <Drawer
         open={openCustomer !== null}
-        onClose={() => setOpenId(null)}
+        onClose={() => {
+          if (waHandoff) return; // finish or skip the WhatsApp hand-off first
+          closeDetail();
+        }}
         title="Customer"
         wide
         footer={
-          openCustomer ? (
-            <div className="flex items-center gap-2">
-              <Button
-                onClick={() => sendRequest(openCustomer)}
-                loading={pending}
-                disabled={!canSendService(openCustomer)}
-                icon="send"
-                fullWidth
-              >
-                Send review request
-              </Button>
-              <Button variant="secondary" icon="download" onClick={() => exportOne(openCustomer)}>
-                Export
-              </Button>
+          openCustomer && !waHandoff ? (
+            <div className="space-y-3">
+              <div>
+                <div className="mb-1.5 text-[12px] font-bold text-sub">Send a review request by</div>
+                <ChannelPicker options={detailOptions} value={detailChannel} onChange={setDetailChannel} />
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => detailChannel && sendRequest(openCustomer, detailChannel)}
+                  loading={pending}
+                  disabled={!detailChannel}
+                  icon={detailChannel === "whatsapp" ? "chat" : "send"}
+                  fullWidth
+                >
+                  {detailChannel === "whatsapp"
+                    ? "Open WhatsApp with the request"
+                    : detailChannel === "sms"
+                      ? "Send by SMS"
+                      : detailChannel === "email"
+                        ? "Send by email"
+                        : "Send review request"}
+                </Button>
+                <Button variant="secondary" icon="download" onClick={() => exportOne(openCustomer)}>
+                  Export
+                </Button>
+              </div>
             </div>
           ) : undefined
         }
       >
-        {openCustomer ? (
+        {openCustomer && waHandoff ? (
+          <WhatsAppHandoff recipient={waHandoff} business={business} onSent={confirmWhatsAppSent} onSkip={skipWhatsApp} />
+        ) : openCustomer ? (
           <div className="space-y-5">
             {/* Identity header */}
             <div className="flex items-start gap-3">

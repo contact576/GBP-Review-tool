@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { registerAccount, uniqueEmail, PASSWORD } from "./helpers";
+import { registerAccount, uniqueEmail, PASSWORD, dismissTour } from "./helpers";
 
 /**
  * Real registration: a fresh account gets an EMPTY workspace (no demo data
@@ -26,8 +26,23 @@ test("register → skip onboarding → truthful empty dashboard → sign out/in 
   await page.getByRole("link", { name: "Do this later" }).click();
   await page.waitForURL("**/app");
 
+  // First dashboard visit: the product tour introduces the console, then gets
+  // out of the way. It must not come back on later visits in this browser.
+  await dismissTour(page, true);
+
+  // …and the Getting-started card names the real setup state (nothing is
+  // assumed done because the wizard was skipped).
+  const gettingStarted = page.locator('section[aria-labelledby="getting-started-title"]');
+  await expect(gettingStarted).toBeVisible();
+  await expect(gettingStarted.getByText(/\d+\/8 set up/)).toBeVisible();
+
   // The dashboard belongs to the registered business…
-  await expect(page.getByRole("heading", { name: "Good morning, Taylor" })).toBeVisible();
+  // <Greeting> picks the salutation from the *browser's* clock, so pinning one
+  // greeting made this pass only before noon local. Assert the name and that a
+  // real time-of-day greeting resolved — which is what the heading promises.
+  await expect(
+    page.getByRole("heading", { name: /^Good (morning|afternoon|evening), Taylor$/ }),
+  ).toBeVisible();
   await expect(page.getByText(business, { exact: true }).first()).toBeVisible();
   const growthCard = page.locator('section[aria-labelledby="growth-title"]');
   // …with a truthful unavailable score and nothing waiting for a reply…
@@ -56,4 +71,6 @@ test("register → skip onboarding → truthful empty dashboard → sign out/in 
   await page.waitForURL("**/app");
   await expect(page.getByText(business, { exact: true }).first()).toBeVisible();
   await expect(page.getByTestId("demo-banner")).toHaveCount(0);
+  // Seen once, not nagging: the tour stays closed on the second visit.
+  await expect(page.getByRole("dialog", { name: /Your dashboard/ })).toHaveCount(0);
 });

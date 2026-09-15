@@ -33,7 +33,11 @@ export async function GET(req: NextRequest) {
     res.cookies.delete(OAUTH_STATE_COOKIE);
     return res;
   }
-  if (session.role !== "owner" && session.role !== "manager") return done("?error=forbidden");
+  // Same admission as the connect route: an acting agency/platform admin may
+  // finish the connection for the workspace they opened.
+  const acting =
+    (session.role === "agency_admin" || session.role === "platform_admin") && Boolean(session.homeWorkspaceId);
+  if (session.role !== "owner" && session.role !== "manager" && !acting) return done("?error=forbidden");
   if (!googleSignInEnabled()) return done("?error=google_not_configured");
 
   const provider = await getProviderFor(session);
@@ -107,12 +111,11 @@ export async function GET(req: NextRequest) {
       );
     }
   } else if (probe.reason === "not_approved") {
-    await provider.setIntegrationStatus(
-      ws,
-      "google",
-      "needs_attention",
-      "Connected — Google Business Profile API approval pending (Google approves per-project; typically 1–2 weeks)",
-    );
+    // Report what Google actually said. This used to assert "approval pending,
+    // typically 1–2 weeks" for every 403, which is wrong — and expensively so —
+    // when the real cause is simply that the My Business APIs were never
+    // enabled on the project, a change that takes effect immediately.
+    await provider.setIntegrationStatus(ws, "google", "needs_attention", `Connected — ${probe.detail}`);
   } else if (probe.reason === "unauthorized") {
     await provider.setIntegrationStatus(
       ws,
@@ -121,13 +124,32 @@ export async function GET(req: NextRequest) {
       "Google authorized, but the granted access couldn't read your Business Profile — try reconnecting.",
     );
   } else {
+    // Carry Google's own message through. This used to report a bare "the
+    // Business Profile check failed", which is unactionable — the status code
+    // and error body that would say *why* were already in `probe.detail` and
+    // were being discarded at the last step.
     await provider.setIntegrationStatus(
       ws,
       "google",
       "needs_attention",
-      "Google connected, but the Business Profile check failed — we'll retry on next sync.",
+      `Google connected, but the Business Profile check failed — we'll retry on next sync. ${probe.detail}`,
     );
   }
+
+  // Search Console is requested in the same consent screen but is a separate
+  // tile, and Google grants scopes individually — the user can approve Business
+  // Profile and decline Search Console. Read what was actually granted rather
+  // than assuming the request succeeded.
+  const grantedScopes = tokens.scope ?? existingCredential?.scopes ?? "";
+  const searchConsoleGranted = grantedScopes.includes("auth/webmasters");
+  await provider.setIntegrationStatus(
+    ws,
+    "search_console",
+    searchConsoleGranted ? "connected" : "disconnected",
+    searchConsoleGranted
+      ? "Read-only Search Console access granted — website queries and landing pages will sync"
+      : "Reconnect Google with read-only Search Console access",
+  );
 
   return done();
 }

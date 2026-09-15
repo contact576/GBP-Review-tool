@@ -32,7 +32,7 @@ export default function AgenciesPage() {
       <Band tone="paper">
         <Container size="md" className="text-center">
           <Eyebrow className="justify-center">For agencies &amp; resellers</Eyebrow>
-          <h1 className="mx-auto mt-4 max-w-3xl text-[34px] font-extrabold leading-[1.08] tracking-tight text-ink sm:text-[50px]">
+          <h1 className="mx-auto mt-4 max-w-3xl mk-display text-[38px] text-ink sm:text-[60px]">
             Resell local growth under your own brand
           </h1>
           <p className="mx-auto mt-5 max-w-xl text-[16px] leading-relaxed text-sub sm:text-[18px]">
@@ -57,7 +57,7 @@ export default function AgenciesPage() {
             lede="Illustrative economics — you set your own retail price. The point: the spread is yours, and it compounds as your book grows."
             align="center"
           />
-          <div className="mt-10 grid grid-cols-1 divide-y divide-hairline rounded-card border border-hairline bg-paper sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+          <div className="mt-10 grid grid-cols-1 divide-y divide-soft glass mk-card sm:grid-cols-3 sm:divide-x sm:divide-y-0">
             <EconCell value="CA$49" label="Your wholesale rate" sub="per client location / month" />
             <EconCell value="CA$149" label="Typical retail price" sub="what clients happily pay" highlight />
             <EconCell value="CA$100" label="Margin per client" sub="× every location you run" />
@@ -75,7 +75,7 @@ export default function AgenciesPage() {
           <SectionHead eyebrow="The white-label ladder" title="Four steps to a resell-ready business" align="center" />
           <div className="mt-10 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {LADDER.map((l) => (
-              <div key={l.step} className="flex flex-col rounded-card border border-hairline bg-card p-6">
+              <div key={l.step} className="flex flex-col glass mk-card p-6">
                 <div className="data-chip text-primary-dark">{l.step}</div>
                 <h3 className="mt-2 text-[17px] font-bold text-ink">{l.title}</h3>
                 <p className="mt-2 text-[13px] leading-relaxed text-sub">{l.body}</p>
@@ -91,7 +91,7 @@ export default function AgenciesPage() {
           <SectionHead eyebrow="What you get" title="A platform your clients think you built" />
           <div className="mt-10 grid grid-cols-1 gap-5 sm:grid-cols-2">
             {CAPABILITIES.map((c) => (
-              <div key={c.title} className="flex gap-4 rounded-card border border-hairline bg-paper p-6">
+              <div key={c.title} className="flex gap-4 glass mk-card p-6">
                 <div className="grid size-12 shrink-0 place-items-center rounded-btn bg-primary-tint text-primary-dark">
                   <Icon name={c.icon} size={24} />
                 </div>

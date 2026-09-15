@@ -33,33 +33,34 @@ export function TaskCard({ task }: { task: GbpTask }) {
   return (
     <div
       className={cn(
-        "flex items-center gap-3 rounded-[10px] border px-3 py-2.5 transition-all sm:px-3.5",
-        done ? "border-primary/25 bg-primary-wash/70" : "border-hairline bg-card hover:border-primary/20 hover:shadow-sm",
+        "tile-row flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5 sm:flex-nowrap",
+        done && "border-primary/25 bg-primary-wash/70",
       )}
     >
       <span
         className={cn(
-          "grid size-9 shrink-0 place-items-center rounded-full",
-          done ? "bg-primary text-white" : "bg-primary-wash text-primary-dark",
+          "icon-plate icon-plate-sm",
+          done && "bg-primary text-white",
         )}
       >
-        <Icon name={done ? "check" : KIND_ICON[task.kind]} size={16} />
+        <Icon name={done ? "check" : KIND_ICON[task.kind]} size={15} />
       </span>
 
       <div className="min-w-0 flex-1">
-        <h3 className={cn("truncate text-[13px] font-bold text-ink sm:text-[14px]", done && "text-sub line-through")}>
+        <h3 className={cn("truncate text-[13px] font-semibold text-ink", done && "text-sub line-through")}>
           {task.title}
         </h3>
-        <p className="mt-0.5 line-clamp-1 text-[11px] leading-relaxed text-sub sm:text-[12px]">{task.rationale}</p>
-      </div>
-
-      <div className="hidden min-w-[94px] items-center gap-1.5 text-[10px] font-bold text-sub sm:flex">
-        <span className="flex items-end gap-0.5 text-gold" aria-hidden="true">
-          <span className="h-1.5 w-1 rounded-sm bg-current" />
-          <span className="h-2.5 w-1 rounded-sm bg-current" />
-          <span className="h-3.5 w-1 rounded-sm bg-current" />
-        </span>
-        {impact}
+        <p className="mt-1 flex min-w-0 items-center gap-2 text-[12px] leading-none text-sub">
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-gold-tint px-2 py-1 text-[11px] font-bold text-gold-deep">
+            <span className="flex items-end gap-0.5" aria-hidden="true">
+              <span className="h-1.5 w-0.5 rounded-sm bg-current" />
+              <span className="h-2 w-0.5 rounded-sm bg-current" />
+              <span className="h-2.5 w-0.5 rounded-sm bg-current" />
+            </span>
+            {impact}
+          </span>
+          <span className="hidden min-w-0 truncate text-[13px] leading-none text-sub md:inline">{task.rationale}</span>
+        </p>
       </div>
 
       <button
@@ -67,10 +68,10 @@ export function TaskCard({ task }: { task: GbpTask }) {
         onClick={approve}
         disabled={pending || done}
         className={cn(
-          "inline-flex h-8 min-w-[72px] shrink-0 items-center justify-center rounded-[8px] px-3 text-[11px] font-bold transition-colors focus-visible:ring-2 focus-visible:ring-primary",
+          "inline-flex h-7 w-full min-w-[72px] shrink-0 items-center justify-center rounded-md px-2.5 text-[12px] font-semibold transition-colors focus-visible:ring-2 focus-visible:ring-primary sm:w-auto",
           done
             ? "bg-primary-wash text-primary"
-            : "bg-primary-dark text-white hover:bg-primary disabled:opacity-60",
+            : "bg-primary text-white hover:bg-primary-dark disabled:opacity-60",
         )}
       >
         {pending ? "Saving…" : done ? "Done" : "Approve"}

@@ -6,6 +6,7 @@ import { ScoreDial } from "@/components/charts/ScoreDial";
 import { SubDial } from "@/components/charts/SubDial";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
 import { Band, Container, Eyebrow, SectionHead, TrustRow, CtaBand, heroSecondaryBtn } from "./_components/primitives";
+import { Reveal } from "./_components/Reveal";
 
 const LOOP: { icon: IconName; label: string; caption: string }[] = [
   { icon: "send", label: "Ask", caption: "A staff tap or QR sends a request the moment goodwill is highest." },
@@ -46,13 +47,13 @@ export default function HomePage() {
       {/* ── Hero — paper ─────────────────────────────────── */}
       <Band tone="paper">
         <Container className="grid items-center gap-12 lg:grid-cols-2 lg:gap-14">
-          <div>
+          <Reveal>
             <Eyebrow>Local growth, on autopilot</Eyebrow>
-            <h1 className="mt-5 text-[40px] font-extrabold leading-[1.03] tracking-tight text-ink sm:text-[54px]">
+            <h1 className="mk-display mt-6 text-[44px] text-ink sm:text-[68px]">
               Get found and
               <br className="hidden sm:block" /> get chosen
             </h1>
-            <p className="mt-5 max-w-lg text-[16px] leading-relaxed text-sub sm:text-[18px]">
+            <p className="mt-6 max-w-lg text-[17px] leading-relaxed text-sub sm:text-[19px]">
               Foundly builds you a steady, durable stream of Google reviews, keeps your Business
               Profile optimized, and shows honest proof it&apos;s working — one score, three numbers,
               three tasks a week.
@@ -64,13 +65,13 @@ export default function HomePage() {
               </LinkButton>
             </div>
             <p className="mt-4 text-[13px] text-faint">
-              14 days of Growth free · no credit card · keep a free plan forever.
+              30 days of every tool free · no credit card · keep a free plan forever.
             </p>
-          </div>
+          </Reveal>
 
           {/* Product preview — real chart components, labeled Sample data */}
-          <div className="lg:pl-6">
-            <div className="relative mx-auto max-w-md rounded-card border border-hairline bg-card p-5 shadow-lg sm:p-6">
+          <Reveal delay={120} className="lg:pl-6">
+            <div className="relative mx-auto max-w-md glass-strong mk-card p-5 shadow-halo sm:p-6">
               <div className="flex items-center justify-between">
                 <Eyebrow>Local Growth Score</Eyebrow>
                 <Badge tone="neutral" icon="eye">Sample data</Badge>
@@ -82,14 +83,14 @@ export default function HomePage() {
                   <SubDial value={82} label="Profile" />
                 </div>
               </div>
-              <div className="mt-5 grid grid-cols-3 gap-2 border-t border-hairline pt-4 text-center">
+              <div className="mt-5 grid grid-cols-3 gap-2 border-t border-soft pt-4 text-center">
                 <Stat n="+18" label="Found you" />
                 <Stat n="+11" label="Contacted" />
                 <Stat n="+9" label="New reviews" />
               </div>
               <p className="mt-3 text-center text-[12px] text-faint">{MICROCOPY.detectedMatch}</p>
             </div>
-          </div>
+          </Reveal>
         </Container>
       </Band>
 
@@ -110,9 +111,11 @@ export default function HomePage() {
           />
           <ol className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {LOOP.map((step, i) => (
-              <li
+              <Reveal
+                as="li"
                 key={step.label}
-                className="group relative flex flex-col rounded-card border border-hairline bg-card p-5 transition-colors hover:border-primary/40"
+                delay={i * 60}
+                className="group relative flex flex-col glass mk-card mk-card-lift p-5"
               >
                 <div className="flex items-center gap-3">
                   <div className="grid size-11 place-items-center rounded-btn bg-primary-tint text-primary-dark">
@@ -129,7 +132,7 @@ export default function HomePage() {
                     className="absolute -right-3 top-1/2 hidden -translate-y-1/2 text-hairline lg:block"
                   />
                 ) : null}
-              </li>
+              </Reveal>
             ))}
           </ol>
         </Container>
@@ -144,15 +147,15 @@ export default function HomePage() {
             lede="Anyone can text a review link. Three things make Foundly hard to leave — and hard to copy."
           />
           <div className="mt-10 grid grid-cols-1 gap-5 lg:grid-cols-3">
-            {MOAT.map((m) => (
-              <div key={m.title} className="flex flex-col rounded-card border border-hairline bg-paper p-6">
+            {MOAT.map((m, i) => (
+              <Reveal as="div" key={m.title} delay={i * 80} className="flex flex-col glass mk-card mk-card-lift p-6">
                 <div className="grid size-12 place-items-center rounded-btn bg-hero text-white">
                   <Icon name={m.icon} size={24} />
                 </div>
                 <div className="kicker mt-4 text-primary-dark">{m.kicker}</div>
                 <h3 className="mt-1 text-[18px] font-bold text-ink">{m.title}</h3>
                 <p className="mt-2 text-[13px] leading-relaxed text-sub">{m.body}</p>
-              </div>
+              </Reveal>
             ))}
           </div>
         </Container>
@@ -160,24 +163,27 @@ export default function HomePage() {
 
       {/* ── Honesty stance — paper ───────────────────────── */}
       <Band tone="paper">
-        <Container size="md" className="flex flex-col items-center text-center">
+        <Container size="md">
+          <Reveal className="flex flex-col items-center text-center">
           <div className="grid size-12 place-items-center rounded-btn bg-primary text-white">
             <Icon name="shield" size={24} />
           </div>
-          <p className="mt-5 max-w-2xl text-[24px] font-bold leading-snug tracking-tight text-ink sm:text-[30px]">
+          <p className="mk-h2 mt-6 max-w-2xl text-[26px] text-ink sm:text-[34px]">
             {MICROCOPY.actionsNotCustomers}
           </p>
           <p className="mt-4 max-w-xl text-[15px] leading-relaxed text-sub">
             We report people who found you, contacted you, and left reviews — never invented revenue
             or fake customer counts. {MICROCOPY.noIncentive}
           </p>
+          </Reveal>
         </Container>
       </Band>
 
       {/* ── Testimonial — white ──────────────────────────── */}
       <Band tone="white">
         <Container size="md">
-          <figure className="rounded-card border border-hairline bg-paper p-8 sm:p-12">
+          <Reveal>
+          <figure className="glass-strong mk-card p-8 sm:p-12">
             <div className="flex gap-1 text-star" aria-label="Five stars">
               {Array.from({ length: 5 }).map((_, i) => (
                 <Icon key={i} name="star-fill" size={20} />
@@ -197,6 +203,7 @@ export default function HomePage() {
               </div>
             </figcaption>
           </figure>
+          </Reveal>
         </Container>
       </Band>
 
@@ -209,7 +216,7 @@ export default function HomePage() {
           <>
             <LinkButton href="/score" size="lg" icon="sparkles">Get my free Growth Score</LinkButton>
             <LinkButton href="/sign-up" size="lg" variant="secondary" className={heroSecondaryBtn}>
-              Start 14-day trial
+              Start 30-day trial
             </LinkButton>
           </>
         }

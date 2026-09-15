@@ -53,9 +53,9 @@ export function Field({
 // hover across every field; 44px min target; 12px radius. Invalid swaps both
 // the border and the ring to danger so the two signals never disagree.
 const inputBase =
-  "w-full rounded-input border bg-card px-3.5 text-[15px] text-ink placeholder:text-faint transition-colors min-h-[44px] h-11 " +
-  "focus-visible:outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
-const inputRest = "border-hairline hover:border-primary/40";
+  "glass-input w-full rounded-input px-4 text-[15px] text-ink placeholder:text-faint transition-colors min-h-[44px] h-11 " +
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25";
+const inputRest = "";
 const inputInvalid = "border-danger focus-visible:border-danger focus-visible:ring-danger/25";
 
 export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean; iconLeft?: IconName }>(
@@ -79,8 +79,8 @@ export const Textarea = forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttrib
         ref={ref}
         aria-invalid={invalid || undefined}
         className={cn(
-          "w-full rounded-input border bg-card px-3.5 py-3 text-[15px] text-ink placeholder:text-faint transition-colors min-h-[96px] resize-y",
-          "focus-visible:outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25",
+          "glass-input w-full rounded-input px-4 py-3 text-[15px] text-ink placeholder:text-faint transition-colors min-h-[96px] resize-y",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25",
           invalid ? inputInvalid : inputRest,
           className,
         )}
@@ -122,11 +122,11 @@ export function Toggle({
       onClick={() => onChange(!checked)}
       className={cn(
         "relative inline-flex h-6 w-11 shrink-0 items-center rounded-chip transition-colors",
-        checked ? "bg-primary" : "bg-hairline",
+        checked ? "bg-primary shadow-[inset_0_1px_2px_rgba(0,0,0,0.15)]" : "bg-ink/[.14] shadow-[inset_0_1px_2px_rgba(0,0,0,0.12)]",
         disabled && "opacity-50 pointer-events-none",
       )}
     >
-      <span className={cn("inline-block size-5 rounded-full bg-white shadow-sm transition-transform", checked ? "translate-x-[22px]" : "translate-x-0.5")} />
+      <span className={cn("inline-block size-5 rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.25)] transition-transform", checked ? "translate-x-[22px]" : "translate-x-0.5")} />
     </button>
   );
 }
@@ -149,7 +149,7 @@ export function Checkbox({
         onClick={() => onChange(!checked)}
         className={cn(
           "mt-0.5 grid size-5 shrink-0 place-items-center rounded-md border transition-colors",
-          checked ? "bg-primary border-primary text-white" : "bg-card border-hairline",
+          checked ? "bg-primary border-primary text-white" : "glass-input",
         )}
       >
         {checked ? <Icon name="check" size={14} /> : null}

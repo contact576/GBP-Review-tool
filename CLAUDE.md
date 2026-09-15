@@ -87,6 +87,13 @@ Stripe, Resend, Twilio, OpenAI/Anthropic, Google, Upstash are all coded end-to-e
 - **Design system** — `DESIGN.md` is the binding contract. Semantic tokens only (never raw hex), gold is rationed to earned celebration, two shadow levels, light-first (no dark mode).
 - `awesome-design-md/` is a vendored third-party reference library, not application code.
 
+### Services and the customer review flow (2026-09)
+- **Services are read, never typed.** `lib/industries` `resolveServiceOptions` tiers: Google profile `serviceItems` → `location.websiteEvidence.facts.services` (crawl from onboarding → Website / Settings → Business "Rescan", via `connectWebsiteAction` / `rescanWebsiteAction`) → legacy `customServices` → industry catalog **only when nothing real exists** (never mixed in). The owner's one control is `industryConfig.excludedServices` (`setExcludedServicesAction`). The customer page, `/api/ai/review-draft` and `lib/aeo/context.ts` must all resolve through this function.
+- **Experience chips are service-aware** (`lib/industries/service-attributes.ts`): the draft API allowlists with `allAllowedChips` over the same resolved services, so a chip the page can render is never filtered out server-side.
+- **Customer flow** (`app/(customer)/r/[token]/ReviewFlow.tsx`): welcome → service → rate → write → thanks. The welcome shows when the customer has not yet rated (a QR mint sets `opened` immediately, so status alone is not "fresh"). `PostingSteps` / `HowToPostSheet` are information only and must never wrap or delay `PublicGoogleReviewLink`. The thanks page reads the chosen wording back from `sessionStorage` (`reviewHandoffKey`).
+- **Widget** `/w/[slug]?layout=card|carousel|badge`; its "Leave a review" goes to `/q/{slug}` (guided flow), not straight to Google.
+- **Tour** (`components/app/ProductTour.tsx`) auto-runs on the first `/app` visit per browser (localStorage `foundly.tour.v1:<ws>`), replay via `/app?tour=1`; e2e specs that land on a fresh dashboard call `dismissTour`. `GettingStartedCard` on the dashboard reuses `buildSetupChecklist` (now 8 steps incl. Website).
+
 ## Known staged-but-inert work
 
 Do not assume these are active:

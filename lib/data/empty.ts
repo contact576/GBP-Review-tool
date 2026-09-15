@@ -1,3 +1,4 @@
+import { trialEndsFrom } from "@/lib/billing/plans";
 import type { FoundlyData, Region } from "./types";
 
 /**
@@ -110,7 +111,7 @@ export function emptyFoundlyData(input: NewWorkspaceInput): FoundlyData {
       tier: "growth",
       interval: "monthly",
       status: "trialing",
-      trialEndsAt: new Date(Date.now() + 14 * 86_400_000).toISOString(),
+      trialEndsAt: trialEndsFrom(),
       currency: input.region === "CA" ? "CAD" : "USD",
       usage: {
         aiDraftsUsed: 0,
@@ -154,7 +155,7 @@ export function emptyFoundlyData(input: NewWorkspaceInput): FoundlyData {
       { id: `int_search_console_${locationId}`, locationId, provider: "search_console", label: "Google Search Console", status: "disconnected", detail: "Reconnect Google with read-only Search Console access" },
       { id: `int_instagram_${locationId}`, locationId, provider: "instagram", label: "Instagram professional account", status: "disconnected", detail: "Connect an authorized Business or Creator account" },
       { id: `int_resend_${locationId}`, locationId, provider: "resend", label: "Email delivery", status: "pending", detail: "Email sending activates once the platform email service is configured" },
-      { id: `int_twilio_${locationId}`, locationId, provider: "twilio", label: "SMS (A2P 10DLC)", status: "disconnected", detail: "SMS requires carrier registration (1–5 days)" },
+      { id: `int_twilio_${locationId}`, locationId, provider: "twilio", label: "SMS (Twilio)", status: "disconnected", detail: "SMS not configured — review requests fall back to email" },
       { id: `int_stripe_${locationId}`, locationId, provider: "stripe", label: "Billing", status: "pending", detail: "Trial active — payment method not required yet" },
     ],
     auditLog: [],
@@ -192,21 +193,7 @@ export function emptyFoundlyData(input: NewWorkspaceInput): FoundlyData {
     // Nothing in this deployment aggregates platform-wide numbers: this blob is
     // written once, at workspace creation, and never recomputed. The zeros are
     // "we have not measured", not "we measured and it is zero".
-    platform: {
-      tenants: [],
-      deliveryIncidents: [],
-      fraudFlags: [],
-      durability: [],
-      kpis: {
-        totalTenants: 0,
-        activeLocations: 0,
-        mrr: 0,
-        trialConversion: 0,
-        logoChurn: 0,
-        nrr: 0,
-        weeklyDetectedReviews: 0,
-      },
-    },
+    platform: emptyPlatform(),
   };
 }
 
@@ -226,7 +213,28 @@ export function emptyFoundlyData(input: NewWorkspaceInput): FoundlyData {
  * measured values, including honest zeros for the sub-signals that are
  * genuinely clear.
  */
+/** The never-measured platform blob: zeros that mean "not measured", not "zero". */
+export function emptyPlatform(): FoundlyData["platform"] {
+  return {
+    tenants: [],
+    deliveryIncidents: [],
+    fraudFlags: [],
+    durability: [],
+    kpis: {
+      totalTenants: 0,
+      activeLocations: 0,
+      mrr: 0,
+      trialConversion: 0,
+      logoChurn: 0,
+      nrr: 0,
+      weeklyDetectedReviews: 0,
+    },
+  };
+}
+
 export function hasNoPlatformTelemetry(platform: FoundlyData["platform"]): boolean {
+  // A snapshot computed live is measured even when every count is zero.
+  if (platform.measuredAt) return false;
   const rosterEmpty =
     platform.tenants.length === 0 &&
     platform.deliveryIncidents.length === 0 &&

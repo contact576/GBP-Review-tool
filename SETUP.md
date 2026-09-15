@@ -91,7 +91,15 @@ Foundly supplies its signed status-callback URL on every outbound message. The i
 
 ## 5. Stripe billing
 
-Create recurring monthly and annual Prices for each plan you intend to sell, then set:
+The fastest route is the bootstrap script, which creates the Products, the monthly + annual Prices (lookup keys `foundly_<tier>_<interval>`) and the webhook endpoint idempotently, then prints every line below ready to paste (run it once with a test key and once with a live key):
+
+```bash
+npm run stripe:bootstrap -- --key sk_test_... --app-url https://your-domain.example
+# after the env vars are set in Vercel and redeployed:
+npm run stripe:verify -- --key sk_test_... --app-url https://your-domain.example
+```
+
+Or create recurring monthly and annual Prices for each plan by hand, then set:
 
 ```text
 STRIPE_SECRET_KEY=sk_...
@@ -100,8 +108,6 @@ STRIPE_PRICE_STARTER_MONTHLY=price_...
 STRIPE_PRICE_STARTER_ANNUAL=price_...
 STRIPE_PRICE_GROWTH_MONTHLY=price_...
 STRIPE_PRICE_GROWTH_ANNUAL=price_...
-STRIPE_PRICE_PRO_MONTHLY=price_...
-STRIPE_PRICE_PRO_ANNUAL=price_...
 STRIPE_PRICE_MULTI_MONTHLY=price_...
 STRIPE_PRICE_MULTI_ANNUAL=price_...
 STRIPE_PRICE_AGENCY_MONTHLY=price_...
@@ -146,6 +152,19 @@ FOUNDLY_OPENAI_IMAGE_MODEL=gpt-image-2
 ```
 
 OpenAI API billing is separate from ChatGPT subscriptions. The selected API project must have available billing or credits. Generated text and images remain private until the owner reviews the exact proposal; approval creates an idempotent Google publishing job and read-after-write verification.
+
+### AI Visibility engines
+
+AI Visibility puts the same buying questions to every answer engine that has a key, and shows the answers side by side:
+
+```text
+OPENAI_API_KEY=sk-proj-...        # ChatGPT (model knowledge, via the API)
+ANTHROPIC_API_KEY=sk-ant-...      # Claude (model knowledge)
+GOOGLE_AI_API_KEY=AIza...         # Gemini API (model knowledge — not AI Overviews)
+PERPLEXITY_API_KEY=pplx-...       # Perplexity (searches the live web)
+```
+
+Optional per-engine model overrides: `FOUNDLY_AEO_OPENAI_MODEL`, `FOUNDLY_AEO_ANTHROPIC_MODEL`, `FOUNDLY_AEO_GEMINI_MODEL`, `FOUNDLY_AEO_PERPLEXITY_MODEL`. An engine with no key appears in the report as "not connected" and is never counted as a miss. One question on one engine is one paid API call; runs are metered per month by plan.
 
 ## 7. Continuous monitoring
 

@@ -33,9 +33,11 @@
  * ─────────────────────────────────────────────────────────────────────────
  */
 
-import type { AeoQueryResult, AeoSnapshot, AuditLog, LocationId } from "@/lib/data/types";
+import type { AeoEngineSnapshot, AeoQueryResult, AeoSnapshot, AuditLog, LocationId } from "@/lib/data/types";
 import type { AeoNotCheckedReason, AeoQueryOutcome, AeoRunRecord } from "./types";
 import { NOT_CHECKED_COPY } from "./types";
+import { AEO_ENGINE_IDS, AEO_ENGINES, type AeoEngineId } from "./engines";
+import { aggregateMultiRun, type AeoEngineInput, type AeoMultiRunRecord } from "./multi";
 
 export const AEO_RUN_ACTION = "aeo.check_run";
 export const AEO_RUN_TARGET_TYPE = "aeo_snapshot";
@@ -211,6 +213,172 @@ export function buildAeoRunAuditEntry(input: {
       checked: record.checked,
       notChecked: record.notChecked,
       named: record.named,
+    },
+  };
+}
+
+// ── Multi-engine runs ────────────────────────────────────────────────────────
+
+/**
+ * The durable shape of a multi-engine run.
+ *
+ * `engines` carries every engine's slice, connected or not. The legacy
+ * top-level fields are filled from the FIRST engine that answered, so a reader
+ * written for single-assistant snapshots keeps seeing one coherent assistant's
+ * numbers rather than a blend it cannot attribute. When no engine answered,
+ * those fields say so honestly: zero over zero, provider "none".
+ */
+export function toMultiAeoSnapshot(multi: AeoMultiRunRecord, locationId: LocationId): AeoSnapshot {
+  const engines: AeoEngineSnapshot[] = multi.engines.map((engine) => ({
+    engineId: engine.engineId,
+    productName: engine.productName,
+    vendor: engine.vendor,
+    grounding: engine.grounding,
+    model: engine.model,
+    state: engine.state,
+    missing: engine.missing,
+    queries:
+      engine.state === "answered"
+        ? boundRunRecord(engineRecord(multi, engine.engineId, engine.results)).results.map(toStoredQuery)
+        : [],
+  }));
+
+  const primary = multi.engines.find((engine) => engine.state === "answered");
+  const legacy = primary
+    ? toAeoSnapshot(engineRecord(multi, primary.engineId, primary.results), locationId)
+    : {
+        locationId,
+        date: multi.ranAt,
+        namedFraction: { named: 0, total: 0 },
+        queries: [] as AeoQueryResult[],
+        provider: "none",
+        model: "none",
+      };
+
+  return { ...legacy, locationId, date: multi.ranAt, engines };
+}
+
+/** A single-engine record view of one engine's slice, for the existing helpers. */
+function engineRecord(
+  multi: AeoMultiRunRecord,
+  engineId: AeoEngineId,
+  results: AeoQueryOutcome[],
+): AeoRunRecord {
+  const engine = multi.engines.find((entry) => entry.engineId === engineId);
+  const checked = results.filter((result) => result.status === "checked");
+  return {
+    schemaVersion: 1,
+    runId: `${multi.runId}_${engineId}`,
+    ranAt: multi.ranAt,
+    provider: engineId,
+    model: engine?.model ?? "none",
+    assistantLabel: engine?.model ? `${engine.productName} (${engine.model})` : engine?.productName ?? engineId,
+    results,
+    checked: checked.length,
+    notChecked: results.length - checked.length,
+    named: checked.filter((result) => result.status === "checked" && result.named).length,
+  };
+}
+
+const ENGINE_IDS = new Set<string>(AEO_ENGINE_IDS);
+
+function isEngineId(value: string): value is AeoEngineId {
+  return ENGINE_IDS.has(value);
+}
+
+/**
+ * Rebuild the multi-engine record from storage, or null when the snapshot
+ * predates engines. Stored rows are re-validated on the way in exactly as the
+ * single-engine path does; an engine id this version does not know is dropped
+ * rather than rendered as a column nothing can explain.
+ */
+export function multiFromSnapshot(
+  snapshot: AeoSnapshot | null | undefined,
+  context: { businessName: string },
+): AeoMultiRunRecord | null {
+  if (!snapshot || !Array.isArray(snapshot.engines) || snapshot.engines.length === 0) return null;
+
+  const engines: AeoEngineInput[] = [];
+  const queryOrder: string[] = [];
+  const seen = new Set<string>();
+  for (const stored of snapshot.engines) {
+    if (typeof stored.engineId !== "string" || !isEngineId(stored.engineId)) continue;
+    if (stored.state !== "answered") {
+      engines.push({
+        engineId: stored.engineId,
+        record: null,
+        missing: typeof stored.missing === "string" ? stored.missing : null,
+      });
+      continue;
+    }
+    const results = (Array.isArray(stored.queries) ? stored.queries : [])
+      .map(outcomeFromStored)
+      .filter((outcome) => outcome.query.length > 0);
+    for (const outcome of results) {
+      const key = outcome.query.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        queryOrder.push(outcome.query);
+      }
+    }
+    const checked = results.filter((result) => result.status === "checked");
+    const descriptor = AEO_ENGINES[stored.engineId];
+    const model = typeof stored.model === "string" && stored.model ? stored.model : "none";
+    engines.push({
+      engineId: stored.engineId,
+      record: {
+        schemaVersion: 1,
+        runId: `stored_${stored.engineId}`,
+        ranAt: snapshot.date,
+        provider: stored.engineId,
+        model,
+        assistantLabel: model !== "none" ? `${descriptor.productName} (${model})` : descriptor.productName,
+        results,
+        checked: checked.length,
+        notChecked: results.length - checked.length,
+        named: checked.filter((result) => result.status === "checked" && result.named).length,
+      },
+    });
+  }
+  if (engines.length === 0) return null;
+
+  return aggregateMultiRun({
+    runId: "stored",
+    ranAt: snapshot.date,
+    queries: queryOrder,
+    context,
+    engines,
+  });
+}
+
+/**
+ * The audit row for a multi-engine run — still one row per run (it is the
+ * quota counter), with the engines that answered listed in `meta` so an admin
+ * can see which columns a run actually filled.
+ */
+export function buildMultiAeoRunAuditEntry(input: {
+  id: string;
+  workspaceId: string;
+  actor: string;
+  multi: AeoMultiRunRecord;
+}): AuditLog {
+  const { multi } = input;
+  const answered = multi.engines.filter((engine) => engine.state === "answered");
+  return {
+    id: input.id,
+    workspaceId: input.workspaceId,
+    actor: input.actor,
+    action: AEO_RUN_ACTION,
+    targetType: AEO_RUN_TARGET_TYPE,
+    targetId: multi.runId,
+    at: multi.ranAt,
+    meta: {
+      engines: answered.map((engine) => `${engine.engineId}:${engine.model ?? "none"}`).join(","),
+      enginesConnected: multi.summary.enginesConnected,
+      enginesTotal: multi.summary.enginesTotal,
+      answersChecked: multi.summary.answersChecked,
+      answersNamed: multi.summary.answersNamed,
+      questions: multi.queries.length,
     },
   };
 }

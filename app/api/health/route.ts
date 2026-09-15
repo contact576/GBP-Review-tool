@@ -128,11 +128,11 @@ async function probeDb(): Promise<{
 
     // Confirm the account table has every column registration/login write —
     // proves the auth fix works against the live schema (column names only).
-    const { neon } = await import("@neondatabase/serverless");
-    const sql = neon(process.env.DATABASE_URL);
+    const { getSql } = await import("@/lib/db/client");
+    const sql = getSql();
     const rows = (await sql`
       SELECT column_name FROM information_schema.columns
-      WHERE table_name = 'app_user'`) as Array<{ column_name: string }>;
+      WHERE table_name = 'app_user'`) as unknown as Array<{ column_name: string }>;
     const have = new Set(rows.map((r) => r.column_name));
     const required = ["password_hash", "email_verified", "google_sub", "created_at"];
     const missing = required.filter((c) => !have.has(c));

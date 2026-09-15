@@ -33,7 +33,7 @@ export default function ScorePage() {
         <Container className="grid items-start gap-10 lg:grid-cols-[1.15fr_0.85fr] lg:gap-14">
           <div>
             <Eyebrow>Free · no account needed</Eyebrow>
-            <h1 className="mt-4 text-[34px] font-extrabold leading-[1.06] tracking-tight text-ink sm:text-[44px]">
+            <h1 className="mt-4 mk-display text-[38px] text-ink sm:text-[56px]">
               Your free Local Growth Score
             </h1>
             <p className="mt-4 max-w-xl text-[16px] leading-relaxed text-sub">
@@ -65,7 +65,7 @@ export default function ScorePage() {
           />
           <div className="mt-10 grid gap-5 sm:grid-cols-3">
             {PILLARS.map((p, i) => (
-              <div key={p.title} className="rounded-card border border-hairline bg-paper p-6">
+              <div key={p.title} className="glass mk-card p-6">
                 <div className="data-chip text-faint">{String(i + 1).padStart(2, "0")}</div>
                 <div className="mt-2 text-[16px] font-bold text-ink">{p.title}</div>
                 <p className="mt-2 text-[13px] leading-relaxed text-sub">{p.body}</p>
@@ -86,16 +86,16 @@ export default function ScorePage() {
       <CtaBand
         eyebrow="Start free"
         title="Get reviews like this every week"
-        lede="Start free and Foundly runs the whole loop — asks at the right moment, drafts the first version, and keeps your profile climbing. No card for 14 days."
+        lede="Start free and Foundly runs the whole loop — asks at the right moment, drafts the first version, and keeps your profile climbing. No card for 30 days."
         actions={
           <>
-            <LinkButton href="/sign-up" size="lg" icon="sparkles">Start 14-day trial</LinkButton>
+            <LinkButton href="/sign-up" size="lg" icon="sparkles">Start 30-day trial</LinkButton>
             <LinkButton href="/pricing" size="lg" variant="secondary" className={heroSecondaryBtn}>
               See pricing
             </LinkButton>
           </>
         }
-        footnote="14 days of Growth · no credit card · keep a free plan forever."
+        footnote="30 days of every tool · no credit card · keep a free plan forever."
       />
     </div>
   );

@@ -37,6 +37,8 @@ export interface AeoView {
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: "Claude",
   openai: "ChatGPT",
+  google: "Google Gemini",
+  perplexity: "Perplexity",
 };
 
 /** Product name for a recorded provider id; the raw id if we don't know it. */

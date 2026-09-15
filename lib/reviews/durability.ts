@@ -213,7 +213,7 @@ export function reconcileReviewImport(input: ReviewImportInput): ReviewImportPla
     if (seen.has(fresh.id)) continue; // defensive: never process an id twice
     seen.add(fresh.id);
     const prior = priorById.get(fresh.id);
-    const next = withDurability(prior, fresh, diffed);
+    const next = withDurability(prior, fresh, diffed, mode);
     merged.push(next);
     if (!prior) inserts.push(next);
     else if (!sameStoredReview(prior, next)) updates.push(next);
@@ -271,6 +271,7 @@ function withDurability(
   prior: Review | undefined,
   fresh: Review,
   diffed: boolean,
+  mode: ReviewImportMode,
 ): Review {
   const durability = nextDurability(prior, true, diffed);
   const next: Review = {
@@ -283,6 +284,13 @@ function withDurability(
     ...(typeof prior?.matchConfidence === "number"
       ? { matchConfidence: prior.matchConfidence }
       : {}),
+    // A sample import cannot see owner replies at all — the public Places
+    // payload carries none, so it reports every review as answered. Letting
+    // that overwrite a stored value would turn "nobody has replied to this"
+    // into "handled" the first time a public sync ran after a GBP import, and
+    // the owner would simply stop being shown reviews that need them. Reply
+    // state therefore only ever changes on an import that could observe it.
+    ...(mode === "sample" && prior ? { needsReply: prior.needsReply } : {}),
   };
   const reply = fresh.reply ?? prior?.reply;
   return reply ? { ...next, reply } : next;

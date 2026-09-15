@@ -269,7 +269,11 @@ function unavailableCopy(reason: Unavailable, typed: string): { title: string; b
 
 export function ScoreTool() {
   const [name, setName] = useState("");
-  const [category, setCategory] = useState(CATEGORIES[0] as string);
+  // Deliberately unset. This used to default to CATEGORIES[0] ("Physiotherapy"),
+  // which was then appended to the Places query for everyone who never opened
+  // the select — so a plumber's lookup searched "…Toronto Physiotherapy" and
+  // came back with a physiotherapy clinic's real rating.
+  const [category, setCategory] = useState("");
   const [err, setErr] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
   /** Index of the step currently in flight (equals STEPS.length when finished). */
@@ -471,6 +475,7 @@ export function ScoreTool() {
               </Field>
               <Field label="Category">
                 <Select value={category} onChange={(e) => setCategory(e.target.value)}>
+                  <option value="">Choose a category (optional)</option>
                   {CATEGORIES.map((c) => (
                     <option key={c} value={c}>{c}</option>
                   ))}
@@ -621,7 +626,7 @@ export function ScoreTool() {
                   <Kicker>Compare another business</Kicker>
                   <h3 className="mt-1 text-[17px] font-bold text-ink">See how you stack up</h3>
                   <p className="mt-1 text-[13px] text-sub">
-                    Enter any nearby {outcome.category.toLowerCase()} to run the same real-data Score on them.
+                    Enter any nearby {categoryLabel(outcome.category)} to run the same real-data Score on them.
                   </p>
                 </div>
                 <form onSubmit={handleCompare} className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
@@ -640,7 +645,7 @@ export function ScoreTool() {
                 </form>
 
                 {competitor ? (
-                  <div className={reduceMotion ? "mt-6 border-t border-hairline pt-6" : "mt-6 border-t border-hairline pt-6 animate-fade-in"}>
+                  <div className={reduceMotion ? "mt-6 border-t border-soft pt-6" : "mt-6 border-t border-soft pt-6 animate-fade-in"}>
                     {competitor.kind === "scored" ? (
                       <>
                         <div className="flex items-center justify-center gap-6 sm:gap-10">
@@ -693,7 +698,7 @@ export function ScoreTool() {
               </div>
               <Kicker>Authentic reviews, safely requested</Kicker>
             </div>
-            <div className="mt-4 rounded-card border border-hairline bg-card p-5">
+            <div className="mt-4 glass mk-card p-5">
               <ul className="space-y-3 text-[13px] leading-relaxed text-sub">
                 <li className="flex items-start gap-2"><Icon name="check-circle" size={16} className="mt-0.5 shrink-0 text-primary" />The same Google review option appears for every rating.</li>
                 <li className="flex items-start gap-2"><Icon name="check-circle" size={16} className="mt-0.5 shrink-0 text-primary" />Customers write about their genuine experience in their own words.</li>
@@ -710,7 +715,7 @@ export function ScoreTool() {
             </h3>
             <p className="mx-auto mt-2 max-w-md text-[14px] text-white/75">
               Start free and Foundly handles consent-aware requests, reminders, review monitoring,
-              and owner-reply suggestions. No card for 14 days.
+              and owner-reply suggestions. No card for 30 days.
             </p>
             <div className="mt-5">
               <LinkButton
@@ -823,7 +828,7 @@ function VerifiedCard({ place, signals }: { place: PlaceFacts; signals: ProfileS
         />
       </div>
 
-      <div className="mt-4 rounded-card border border-hairline bg-paper p-4">
+      <div className="mt-4 glass mk-card p-4">
         <div className="flex items-center justify-between gap-3">
           <span className="text-[13px] font-semibold text-ink">Profile completeness</span>
           <span className="data-chip text-primary-dark">{signals.profileCompleteness} / 100</span>
@@ -856,7 +861,7 @@ function Fact({
   icon: "star" | "chat" | "clock" | "camera"; label: string; value: string; note: string;
 }) {
   return (
-    <div className="rounded-card border border-hairline bg-paper p-4">
+    <div className="glass mk-card p-4">
       <div className="flex items-center gap-2">
         <Icon name={icon} size={15} className="shrink-0 text-primary" />
         <span className="text-[12px] font-semibold text-sub">{label}</span>
@@ -865,6 +870,11 @@ function Fact({
       <p className="mt-1 text-[12px] leading-relaxed text-faint">{note}</p>
     </div>
   );
+}
+
+/** Reads naturally in a sentence whether or not a category was chosen. */
+function categoryLabel(category: string): string {
+  return category ? category.toLowerCase() : "local business";
 }
 
 function bandLabel(score: number): string {

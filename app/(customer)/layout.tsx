@@ -1,4 +1,4 @@
-import { Icon } from "@/components/icons";
+import { FoundlyMark } from "@/components/icons/FoundlyMark";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
 
 /** Small, restrained trust badge shown on every customer surface. */
@@ -6,9 +6,7 @@ function FoundlyBadge() {
   return (
     <footer className="flex justify-center py-5">
       <span className="inline-flex items-center gap-1.5 rounded-chip border border-hairline bg-card/70 px-3 py-1.5 text-[11px] font-semibold text-faint shadow-sm">
-        <span className="grid size-4 place-items-center rounded-[5px] bg-hero text-gold">
-          <Icon name="sparkles" size={10} />
-        </span>
+        <FoundlyMark size={16} />
         {MICROCOPY.poweredByFoundly}
       </span>
     </footer>

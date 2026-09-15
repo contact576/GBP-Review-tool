@@ -72,9 +72,33 @@ export interface ReviewDraftInput {
   rating: number;
   attributes: string[];
   staffName?: string;
+  /** Single service — kept for callers that only know one; `services` wins. */
   service?: string;
+  /** Every service the customer said the visit covered, in the order picked. */
+  services?: string[];
   /** Catalog industry key (preferred over category). */
   industryKey?: string;
+  /**
+   * Per-request uniqueness token (see `makeDraftNonce`). Without it two
+   * customers who tap the same chips at the same business get byte-identical
+   * template text — the repetition bug this field exists to kill.
+   */
+  nonce?: string;
+}
+
+/** The services a draft may mention: the list when given, else the single one. */
+export function draftServices(input: Pick<ReviewDraftInput, "service" | "services">): string[] {
+  const list = (input.services ?? []).map((item) => item.trim()).filter(Boolean);
+  if (list.length > 0) return list;
+  const single = input.service?.trim();
+  return single ? [single] : [];
+}
+
+/** "google ads", "google ads and seo", "google ads, seo and web design". */
+export function joinServices(services: readonly string[]): string {
+  const items = services.map(lc);
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
 interface Slots {
@@ -140,10 +164,17 @@ function composeWarm(s: Slots, rating: number): string {
   return `${opener} ${cap(s.exp)}${staffClause}.${winner} ${cap(s.closer)}.`;
 }
 
+/** "appointment" -> "an appointment", "visit" -> "a visit". */
+function article(noun: string): string {
+  return /^[aeiou]/i.test(noun.trim()) ? "an" : "a";
+}
+
 /** ≤3★ never gets promotional copy — one neutral, factual sentence. */
 function composeNeutral(input: ReviewDraftInput, industry: Industry): DraftVariant[] {
-  const svcTail = input.service ? ` for ${lc(input.service)}` : "";
-  const text = `I had a ${industry.terminology.visit} at ${input.business}${svcTail}.`;
+  const services = draftServices(input);
+  const svcTail = services.length > 0 ? ` for ${joinServices(services)}` : "";
+  const visit = industry.terminology.visit;
+  const text = `I had ${article(visit)} ${visit} at ${input.business}${svcTail}.`;
   return [
     { text, tone: "Short & natural" },
     { text: `I visited ${input.business}${svcTail}.`, tone: "Detailed & specific" },
@@ -160,7 +191,13 @@ export function fallbackReviewDrafts(input: ReviewDraftInput): DraftVariant[] {
   const rating = input.rating >= 5 ? 5 : 4;
   const expBank = rating === 5 ? industry.phrases.experience5 : industry.phrases.experience4;
   const closerBank = rating === 5 ? industry.phrases.closer5 : industry.phrases.closer4;
-  const seed = hashSeed(`${input.business}|${input.attributes.join(",")}|${rating}`);
+  // The nonce is what makes two customers with identical picks read differently.
+  // Each phrase slot hashes its own key as well, so the experience clause and
+  // the closer rotate independently instead of moving in lockstep.
+  const services = draftServices(input);
+  const seedBase = `${input.business}|${input.attributes.join(",")}|${rating}|${input.nonce ?? ""}`;
+  const slotSeed = (slot: string, variantIndex: number): number =>
+    hashSeed(`${seedBase}|${slot}|${variantIndex}`);
 
   const base: Omit<Slots, "exp" | "closer"> = {
     biz: input.business,
@@ -168,27 +205,30 @@ export function fallbackReviewDrafts(input: ReviewDraftInput): DraftVariant[] {
     role: industry.terminology.staff,
     attr1: input.attributes[0] ? lc(input.attributes[0]) : undefined,
     attr2: input.attributes[1] ? lc(input.attributes[1]) : undefined,
-    svc: input.service ? lc(input.service) : undefined,
+    svc: services.length > 0 ? joinServices(services) : undefined,
     staff: input.staffName?.trim().split(/\s+/)[0],
   };
 
   const composers = [composeShort, composeDetailed, composeWarm];
   return composers.map((compose, i) => {
-    // Structures use offset phrase picks so the three variants differ; a
-    // retry loop guarantees the lint invariant even for adversarial names.
+    // Structures use independently seeded phrase picks so the three variants
+    // differ; a retry loop guarantees the lint invariant even for adversarial
+    // names.
     let text = "";
+    const expSeed = slotSeed("experience", i);
+    const closerSeed = slotSeed("closer", i);
     for (let attempt = 0; attempt < expBank.length; attempt++) {
       const slots: Slots = {
         ...base,
-        exp: pick(expBank, seed + i * 7 + attempt),
-        closer: pick(closerBank, (seed >> 3) + i * 5 + attempt),
+        exp: pick(expBank, expSeed + attempt),
+        closer: pick(closerBank, closerSeed + attempt),
       };
       text = compose(slots, rating);
       const res = runLints(text, {
         kind: "review",
         businessName: input.business,
         rating,
-        allowedFacts: [...input.attributes, input.service ?? "", input.staffName ?? ""],
+        allowedFacts: [...input.attributes, ...services, input.staffName ?? ""],
       });
       if (res.ok) break;
       // Last resort: a minimal draft that cannot trip any lint.

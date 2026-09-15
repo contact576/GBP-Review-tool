@@ -10,9 +10,46 @@
 > "trust-forward with celebratory energy," never casino theatrics.
 
 ## Theme & atmosphere
-- **Light-first**, warm-paper canvas (never stark white, never dark mode).
-- White cards float on paper with **two-layer soft shadows**; the single
-  deep-green **hero card** is the one emotional focal point per screen.
+- **Desktop glass edition (2026-09-14).** The console is laid out like a
+  desktop: a living **wallpaper**, a floating **menu bar** with a live clock,
+  a **sidebar** with a clock widget and app-icon navigation, and a **Dock** of
+  app icons along the bottom. Every piece of chrome is frosted glass that lets
+  the wallpaper through (the Apple Liquid Glass idiom) — translucent white
+  (`--glass-alpha` 0.40 panels / 0.50 chrome), heavy `backdrop-filter:
+  blur() saturate()`, a diagonal specular gradient, a bright 1px rim on top,
+  a faint ink hairline outside, one long soft drop. Depth comes from
+  translucency first, shadow second. Every glass class carries a solid
+  fallback under `@supports not`.
+  Classes (`app/globals.css`): `.glass` (cards, stat tiles, tables, popovers),
+  `.glass-strong` (chrome: sidebar, menu bar, Dock, drawers), `.glass-dark`
+  (deep-green glass: referral tile, toasts), `.glass-ink` (graphite glass:
+  the internal ops console's chrome), `.glass-input`.
+- **Wallpaper** (`components/app/desktop/Wallpaper`): `.ambient-bg` base wash
+  + two slowly drifting blob layers (46s / 58s, alternate) + `.wallpaper-grain`
+  (SVG noise, soft-light). Reduced motion freezes the drift. An agency's shell
+  tints it with the agency's primary.
+- **App icons** (`components/app/desktop/AppIcon`, `.app-icon .ai-*`): a
+  squircle with a vertical two-stop fill, top-half gloss and tight drop, white
+  Icon glyph. Tones are few on purpose — `green`/`mint` = the product, `sky`
+  and `ink`/`slate` = neutral tools, `plum`/`rose` = studio and campaigns,
+  `gold` ONLY for earned celebration (Milestones), `brand` = the agency's own
+  colour. Sizes `sm` (sidebar 28), `md` (phone dock 36), `lg` (More sheet 52),
+  dock (44).
+- **Dock** (`components/app/desktop/Dock`, `.dock`): a glass capsule of app
+  icons fixed to the bottom, centred on the content area. Desktop: hover lifts
+  and magnifies (1.16×), tooltip names the app, a dot marks the open section.
+  Phone: the Dock is the tab bar (labels under icons, no magnification).
+  Content gets `pb-[calc(var(--dock-h)+40px)]` so nothing hides under it.
+- **No clock.** The desktop metaphor stops short of a clock. The viewer's own
+  OS already shows the time, and a second one is noise on a console whose job
+  is business figures. (Both clocks were built and removed on 2026-09-14 at
+  the owner's request — do not reintroduce one.)
+- **Floating chrome.** Sidebar, menu bar and Dock are glass panels inset 12px
+  from the viewport (`rounded-sheet` 28 / `20px` / Dock 26px), so page content
+  scrolls *under* them and shows through. Light-first, never dark mode.
+- Structure stays conventional (stat row, data tables, small-caps labels —
+  the GoHighLevel admin idiom); only the *material* is glass. No gradients on
+  panels, no glow charts, no entrance motion.
 - **One hero number per screen.** Generous whitespace. Quiet charts. Zero jargon
   ("people who found you", never "impressions/CTR").
 - **Two-accent discipline:** green = trust/go; gold = earned celebration, rationed.
@@ -68,11 +105,11 @@ page background. Status colors (primary/gold/danger) are non-themeable. On the
 ## Spacing, radii, elevation
 - **Spacing:** 4px base (`space-1..10`); card padding 16 mobile / 20–24 desktop;
   32 between sections. No arbitrary values.
-- **Radii:** card 16 · button 12 · input 12 · chip/pill 999.
-- **Elevation — two levels only.** `shadow-sm` (resting cards/inputs) and
-  `shadow-lg` (hero, popovers, modals, hover lift). Prefer a hairline + subtle
-  shadow over hard borders. (Linear discipline: hierarchy via surface + hairline,
-  not heavy drop shadows.)
+- **Radii:** card/panel 20 · sheet 28 · button 999 (capsule) · input 14 · chip 999.
+- **Elevation comes from translucency + blur first.** `.glass` carries its own
+  rim + drop; `shadow-glass-lg` for popovers/drawers. Dividers inside glass use
+  `border-soft` / `divide-soft` (ink at 7%), never the opaque `hairline`.
+  Primary buttons carry an inset top highlight + a tinted green drop.
 
 ## Layout & grid
 - Desktop-first here (owner requested); still responsive to phone.
@@ -85,7 +122,10 @@ page background. Status colors (primary/gold/danger) are non-themeable. On the
 - **Button** (`components/ds/Button`): primary/secondary/ghost/danger/gold;
   sizes sm/md/lg (h-9/11/12, 44px min). **One primary CTA per section**
   (restraint from both references). Buttons are 12px-radius, not fully-pill.
-- **Card** (`components/ds/Card` + `CardHeader`): 16 radius, `p-4 sm:p-5`, shadow-sm.
+- **Card** (`components/ds/Card` + `CardHeader`): `.glass` on `rounded-card` (20),
+  `p-4 sm:p-5`. `StatTile` boxes are the same glass. Nothing in an authed
+  surface uses an opaque `bg-card` panel any more — the wallpaper must show
+  through every tile; `NotMeasured*` tiles keep the dashed edge on glass.
 - **PageHeader** (`components/app/PageHeader`): the ONLY page-title pattern
   (H1 26/30 + subtitle). Use on every authed surface.
 - **EmptyState** (`components/ds/misc`): icon + one sentence + one action —

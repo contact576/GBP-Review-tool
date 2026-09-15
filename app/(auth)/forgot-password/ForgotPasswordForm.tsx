@@ -47,7 +47,10 @@ export function ForgotPasswordForm() {
         onSubmit={(event) => {
           event.preventDefault();
           setResult(null);
-          startTransition(async () => setResult(await requestPasswordResetAction(email)));
+          // The DOM holds what was typed; state is empty until hydration. See
+          // the note in SignInForm — same controlled-input trap, same fix.
+          const typed = String(new FormData(event.currentTarget).get("email") ?? "").trim() || email;
+          startTransition(async () => setResult(await requestPasswordResetAction(typed)));
         }}
       >
         <Field label="Email">

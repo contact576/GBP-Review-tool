@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { getRealProvider } from "@/lib/data";
 import { validateTwilioSignature } from "@/lib/sms/twilio";
 import { appUrl } from "@/lib/utils/app-url";
+import { notifyDeliveryFailure } from "@/lib/notifications/delivery";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,12 +33,14 @@ export async function POST(req: NextRequest): Promise<Response> {
           : null;
   if (status) {
     const provider = await getRealProvider();
-    await provider.setRequestDeliveryStatus(
-      workspaceId,
-      requestId,
-      status,
-      status === "failed" ? `Twilio delivery failed (${params.get("ErrorCode") ?? "unknown"}).` : undefined,
-    );
+    const detail =
+      status === "failed" ? `Twilio delivery failed (${params.get("ErrorCode") ?? "unknown"}).` : undefined;
+    await provider.setRequestDeliveryStatus(workspaceId, requestId, status, detail);
+    // A carrier rejection arrives here long after the owner saw "sent", so it
+    // is the one delivery outcome nobody would otherwise notice.
+    if (status === "failed") {
+      await notifyDeliveryFailure({ provider, workspaceId, at: new Date(), detail });
+    }
   }
   return new Response(null, { status: 204 });
 }

@@ -66,7 +66,7 @@ export function Chip({
         "inline-flex items-center gap-1.5 rounded-chip border px-3 py-2 text-[13px] font-medium transition-colors min-h-[40px]",
         selected
           ? "border-primary bg-primary-tint text-primary-dark"
-          : "border-hairline bg-card text-sub hover:border-primary/40 hover:text-ink",
+          : "glass-input text-sub hover:text-ink",
         disabled && "opacity-50 pointer-events-none",
         className,
       )}
@@ -79,7 +79,7 @@ export function Chip({
 
 // ── Divider ─────────────────────────────────────────────────
 export function Divider({ className }: { className?: string }) {
-  return <div className={cn("h-px bg-hairline", className)} />;
+  return <div className={cn("h-px bg-ink/[.07]", className)} />;
 }
 
 // ── Skeleton ────────────────────────────────────────────────
@@ -95,7 +95,7 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center text-center py-12 px-6">
-      <div className="size-14 rounded-card bg-primary-wash grid place-items-center text-primary mb-4">
+      <div className="size-14 rounded-[18px] bg-primary/10 grid place-items-center text-primary mb-4">
         <Icon name={icon} size={26} />
       </div>
       <h3 className="text-[16px] font-bold text-ink">{title}</h3>

@@ -32,8 +32,20 @@ function fakeRedis(ttlMs = 60_000): { fetch: ReturnType<typeof vi.fn>; counts: M
   return { fetch: fetchMock, counts };
 }
 
+/**
+ * A same-origin POST. The Origin header is required, not incidental:
+ * `guardPublicApi` rejects a cross-origin state-changing request with 403
+ * before it ever reaches the rate limiter, so a request without one would
+ * exercise the CSRF guard rather than the limits these tests are about.
+ */
 function request(url = "https://app.foundly.test/api/score/lookup"): Request {
-  return new Request(url, { method: "POST", headers: { "x-real-ip": "203.0.113.9" } });
+  return new Request(url, {
+    method: "POST",
+    headers: {
+      "x-real-ip": "203.0.113.9",
+      origin: new URL(url).origin,
+    },
+  });
 }
 
 beforeEach(() => {
@@ -194,7 +206,7 @@ describe("guardPublicApi", () => {
   it("scopes by caller IP", () => {
     const other = new Request("https://app.foundly.test/api/score/lookup", {
       method: "POST",
-      headers: { "x-real-ip": "198.51.100.4" },
+      headers: { origin: "https://app.foundly.test", "x-real-ip": "198.51.100.4" },
     });
     expect(guardPublicApi(request(), "score-lookup", 1, 60_000)).toBeNull();
     expect(guardPublicApi(request(), "score-lookup", 1, 60_000)?.status).toBe(429);

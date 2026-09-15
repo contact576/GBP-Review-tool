@@ -44,9 +44,11 @@ const config: Config = {
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
       borderRadius: {
-        card: "16px",
-        btn: "12px",
-        input: "12px",
+        card: "20px", // glass panels
+        panel: "20px",
+        sheet: "28px",
+        btn: "12px", // boxes, menus, inputs-as-buttons; Button itself is a capsule (rounded-full)
+        input: "14px",
         chip: "999px",
       },
       boxShadow: {
@@ -56,6 +58,11 @@ const config: Config = {
         sm: "0 1px 2px rgba(23,32,29,.05)",
         lg: "0 10px 28px rgba(23,32,29,.07)",
         halo: "0 24px 48px rgba(23,32,29,.10)",
+        // Glass elevation: rim (white inner + faint ink outer) and a soft, long drop.
+        glass:
+          "inset 0 1px 0 rgba(255,255,255,.9), 0 0 0 1px rgba(23,32,29,.06), 0 12px 32px -14px rgba(23,32,29,.16)",
+        "glass-lg":
+          "inset 0 1px 0 rgba(255,255,255,.9), 0 0 0 1px rgba(23,32,29,.07), 0 24px 60px -20px rgba(23,32,29,.28)",
       },
       transitionDuration: {
         "150": "150ms",
@@ -78,11 +85,16 @@ const config: Config = {
         shimmer: {
           "100%": { transform: "translateX(100%)" },
         },
+        rise: {
+          from: { opacity: "0", transform: "translateY(10px) scale(0.992)" },
+          to: { opacity: "1", transform: "translateY(0) scale(1)" },
+        },
       },
       animation: {
         "fade-in": "fade-in 250ms ease-out",
         "slide-up": "slide-up 250ms ease-out",
         "slide-in-right": "slide-in-right 250ms ease-out",
+        rise: "rise 480ms cubic-bezier(0.2,0.7,0.2,1) both",
       },
     },
   },

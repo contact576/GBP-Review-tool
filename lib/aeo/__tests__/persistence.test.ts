@@ -301,7 +301,7 @@ describe("AEO metering", () => {
     ];
     expect(countRunsInMonth(entries, "2026-03")).toBe(2);
 
-    const quota = aeoQuota(entries, "pro", now);
+    const quota = aeoQuota(entries, "growth", now);
     expect(quota.used).toBe(2);
     expect(quota.limit).toBe(4);
     expect(quota.remaining).toBe(2);
@@ -312,11 +312,11 @@ describe("AEO metering", () => {
     const entries = Array.from({ length: 9 }, (_, index) =>
       entry({ id: `a${index}`, at: "2026-03-02T00:00:00.000Z" }),
     );
-    expect(aeoQuota(entries, "pro", now).remaining).toBe(0);
+    expect(aeoQuota(entries, "growth", now).remaining).toBe(0);
   });
 
   it("gives multi-location and agency plans a higher ceiling", () => {
-    expect(monthlyRunLimit("pro")).toBe(4);
+    expect(monthlyRunLimit("growth")).toBe(4);
     expect(monthlyRunLimit("multi")).toBe(12);
     expect(monthlyRunLimit("agency")).toBe(12);
   });

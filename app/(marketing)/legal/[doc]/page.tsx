@@ -168,7 +168,7 @@ export default async function LegalPage({ params }: { params: Promise<{ doc: str
             className={
               key === doc
                 ? "rounded-chip bg-primary px-3 py-1.5 text-[13px] font-semibold text-white"
-                : "rounded-chip border border-hairline bg-card px-3 py-1.5 text-[13px] font-medium text-sub hover:text-ink"
+                : "rounded-chip glass px-3 py-1.5 text-[13px] font-medium text-sub hover:text-ink"
             }
           >
             {LABELS[key]}
@@ -178,7 +178,7 @@ export default async function LegalPage({ params }: { params: Promise<{ doc: str
 
       <header className="mt-8">
         <Badge tone="neutral" icon="lock">Legal</Badge>
-        <h1 className="mt-4 text-[32px] font-extrabold tracking-tight text-ink sm:text-[40px]">{content.title}</h1>
+        <h1 className="mt-4 mk-display text-[34px] text-ink sm:text-[46px]">{content.title}</h1>
         <p className="mt-3 text-[15px] leading-relaxed text-sub">{content.summary}</p>
         <p className="mt-2 text-[12px] text-faint">Last updated {new Date().getFullYear()} · Version 1.0</p>
       </header>
@@ -209,7 +209,7 @@ export default async function LegalPage({ params }: { params: Promise<{ doc: str
         ))}
       </div>
 
-      <p className="mt-12 border-t border-hairline pt-6 text-[13px] text-faint">
+      <p className="mt-12 border-t border-soft pt-6 text-[13px] text-faint">
         Questions about this document? Reach us through your account or at the contact listed in your
         agreement.
       </p>

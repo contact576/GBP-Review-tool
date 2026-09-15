@@ -23,8 +23,9 @@ export function Tabs({
   return (
     <div
       className={cn(
-        "flex overflow-x-auto no-scrollbar",
-        underline ? "gap-1 border-b border-hairline" : "gap-1",
+        underline
+          ? "flex gap-1 overflow-x-auto no-scrollbar border-b border-soft"
+          : "glass inline-flex max-w-full gap-0.5 overflow-x-auto no-scrollbar rounded-full p-[3px]",
         className,
       )}
       role="tablist"
@@ -47,10 +48,10 @@ export function Tabs({
                       : "border-transparent text-sub hover:text-ink",
                   )
                 : cn(
-                    "rounded-chip px-3.5 py-2",
+                    "rounded-chip px-3.5 py-2 min-h-[36px]",
                     isActive
-                      ? "bg-ink text-white"
-                      : "bg-card text-sub border border-hairline hover:text-ink",
+                      ? "bg-white text-ink shadow-[0_1px_2px_rgba(23,32,29,0.1),0_0_0_1px_rgba(23,32,29,0.05)]"
+                      : "text-sub hover:text-ink",
                   ),
             )}
           >
@@ -62,7 +63,7 @@ export function Tabs({
                   isActive
                     ? underline
                       ? "bg-primary-tint text-primary-dark"
-                      : "bg-white/20"
+                      : "bg-primary-tint text-primary-dark"
                     : "bg-primary-wash text-primary-dark",
                 )}
               >

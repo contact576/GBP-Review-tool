@@ -3,23 +3,38 @@
 @tailwind utilities;
 
 /*
- * Foundly surface ladder & elevation (authoritative note — see DESIGN.md).
- * Depth comes from the SURFACE LADDER + HAIRLINE first, not shadow.
- *   1. paper   #F7F6F2  — warm app canvas (never pure white)
- *   2. card    #FFFFFF  — surface floating on paper (hairline border)
- *   3. wash    #F0F6F3  — recessed/hover rows, section tints, chart fills
- *   4. hero    #0C4A3E  — the single dark polarity flip per screen
- * Elevation is HAIRLINE-FIRST: a 1px `hairline` rule + surface contrast does
- * most of the lifting. Only two shadow levels exist on top of that —
- *   Level-1  `shadow-sm`   resting cards / inputs (soft interactive lift)
- *   Level-2  `shadow-lg`   hover lift, popovers
- *   Level-2+ `shadow-halo` drawers / modals / toasts / hero (layered halo)
- * Never reach for a shadow where a surface change + hairline will read.
+ * Foundly surface system — "desktop glass" edition.
+ *
+ * The console is laid out like a desktop: a living wallpaper, a floating
+ * menu bar with a live clock, a sidebar with app-icon plates, and a Dock of
+ * app icons along the bottom. Every piece of chrome is frosted glass that
+ * lets the wallpaper through (the Apple Liquid Glass idiom): translucent
+ * white, heavy blur + saturation, a bright specular rim on top, a faint ink
+ * hairline outside, and one long soft drop. Depth comes from translucency
+ * first, shadow second. Structure (tables, stat rows, small-caps labels)
+ * stays conventional.
+ *
+ *   wallpaper     fixed, slowly drifting mesh of brand-tinted light + grain
+ *   glass         default panel (cards, stat tiles, tables, popovers)
+ *   glass-strong  chrome (sidebar, menu bar, dock, drawers) — denser
+ *   glass-dark    deep-green / ink glass (referral tile, toasts, ops chrome)
+ *   glass-input   translucent field
+ *   app-icon      squircle icon plate, the way an app icon reads in a Dock
+ *   dock          the floating Dock capsule and its magnifying items
+ *
+ * Every glass class has a solid fallback when backdrop-filter is unsupported.
  */
 
 @layer base {
   :root {
     color-scheme: light;
+    --glass-alpha: 0.4;
+    --glass-blur: 28px;
+    --glass-sat: 190%;
+    --glass-rim: rgba(255, 255, 255, 0.92);
+    --glass-edge: rgba(23, 32, 29, 0.07);
+    --hairline-soft: rgba(23, 32, 29, 0.07);
+    --dock-h: 88px;
   }
 
   html {
@@ -55,6 +70,281 @@
 }
 
 @layer components {
+  /* ── Wallpaper ───────────────────────────────────────────────
+     A fixed, slowly drifting mesh of soft brand-tinted light — what the glass
+     refracts. Three layers: the base wash with static radials, two drifting
+     blob fields (::before / ::after, offset phases), and a grain veil the
+     <Wallpaper> component adds on top. Reduced motion freezes the drift. */
+  .ambient-bg {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    pointer-events: none;
+    background:
+      radial-gradient(60% 48% at 4% 0%, rgba(143, 227, 206, 0.7) 0%, rgba(143, 227, 206, 0) 66%),
+      radial-gradient(44% 40% at 98% 2%, rgba(240, 185, 91, 0.32) 0%, rgba(240, 185, 91, 0) 66%),
+      radial-gradient(52% 46% at 74% 100%, rgba(12, 122, 99, 0.26) 0%, rgba(12, 122, 99, 0) 66%),
+      radial-gradient(42% 44% at 12% 94%, rgba(160, 200, 245, 0.7) 0%, rgba(160, 200, 245, 0) 66%),
+      linear-gradient(180deg, #f6f7f3 0%, #eef2ec 55%, #f1f0ea 100%);
+  }
+  .ambient-bg::before,
+  .ambient-bg::after {
+    content: "";
+    position: absolute;
+    inset: -20%;
+    pointer-events: none;
+    will-change: transform;
+  }
+  .ambient-bg::before {
+    background:
+      radial-gradient(34% 30% at 28% 34%, rgba(93, 214, 178, 0.5) 0%, rgba(93, 214, 178, 0) 70%),
+      radial-gradient(30% 28% at 78% 30%, rgba(245, 205, 130, 0.36) 0%, rgba(245, 205, 130, 0) 70%),
+      radial-gradient(38% 34% at 60% 78%, rgba(120, 180, 235, 0.42) 0%, rgba(120, 180, 235, 0) 70%);
+    animation: wallpaper-drift-a 46s ease-in-out infinite alternate;
+  }
+  .ambient-bg::after {
+    background:
+      radial-gradient(30% 26% at 70% 60%, rgba(12, 122, 99, 0.2) 0%, rgba(12, 122, 99, 0) 70%),
+      radial-gradient(26% 24% at 18% 68%, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 70%),
+      radial-gradient(28% 26% at 44% 18%, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0) 70%);
+    animation: wallpaper-drift-b 58s ease-in-out infinite alternate;
+  }
+  .wallpaper-grain {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.35;
+    mix-blend-mode: soft-light;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.2 0 0 0 0 0.24 0 0 0 0 0.22 0 0 0 0.6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    background-size: 180px 180px;
+  }
+  @keyframes wallpaper-drift-a {
+    from { transform: translate3d(-3%, -2%, 0) scale(1); }
+    to { transform: translate3d(3%, 4%, 0) scale(1.08); }
+  }
+  @keyframes wallpaper-drift-b {
+    from { transform: translate3d(3%, 2%, 0) scale(1.04) rotate(0.001deg); }
+    to { transform: translate3d(-4%, -3%, 0) scale(1); }
+  }
+
+  /* ── Glass materials ─────────────────────────────────────── */
+  .glass,
+  .glass-strong,
+  .premium-card,
+  .tile-row,
+  .tab-strip {
+    position: relative;
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0.08) 38%, rgba(255, 255, 255, 0.22) 100%),
+      rgba(255, 255, 255, var(--glass-alpha));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+    border: 1px solid rgba(255, 255, 255, 0.62);
+    box-shadow:
+      inset 0 1px 0 var(--glass-rim),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.28),
+      0 0 0 1px var(--glass-edge),
+      0 14px 36px -16px rgba(23, 32, 29, 0.2);
+  }
+  .glass-strong {
+    --glass-alpha: 0.5;
+    --glass-blur: 40px;
+    --glass-sat: 200%;
+    box-shadow:
+      inset 0 1px 0 var(--glass-rim),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.3),
+      0 0 0 1px rgba(23, 32, 29, 0.08),
+      0 24px 60px -24px rgba(23, 32, 29, 0.32);
+  }
+  .glass-interactive,
+  .premium-card-interactive {
+    transition: background-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+  }
+  .glass-interactive:hover,
+  .premium-card-interactive:hover {
+    --glass-alpha: 0.6;
+    box-shadow:
+      inset 0 1px 0 var(--glass-rim),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.3),
+      0 0 0 1px rgba(23, 32, 29, 0.1),
+      0 22px 48px -18px rgba(23, 32, 29, 0.26);
+  }
+
+  .glass-dark {
+    position: relative;
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0) 45%),
+      rgba(12, 74, 62, 0.72);
+    -webkit-backdrop-filter: blur(32px) saturate(170%);
+    backdrop-filter: blur(32px) saturate(170%);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.26),
+      0 0 0 1px rgba(6, 45, 37, 0.35),
+      0 22px 48px -18px rgba(6, 45, 37, 0.5);
+    color: #fff;
+  }
+  /* Ink glass — the internal ops console's chrome. Same recipe, graphite tint. */
+  .glass-ink {
+    position: relative;
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0) 45%),
+      rgba(23, 32, 29, 0.72);
+    -webkit-backdrop-filter: blur(36px) saturate(170%);
+    backdrop-filter: blur(36px) saturate(170%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.18),
+      0 0 0 1px rgba(23, 32, 29, 0.45),
+      0 24px 60px -24px rgba(23, 32, 29, 0.6);
+    color: #fff;
+  }
+
+  .glass-input {
+    background: rgba(255, 255, 255, 0.5);
+    -webkit-backdrop-filter: blur(14px) saturate(160%);
+    backdrop-filter: blur(14px) saturate(160%);
+    border: 1px solid rgba(23, 32, 29, 0.1);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  }
+  .glass-input:hover { border-color: rgba(12, 122, 99, 0.4); }
+  .glass-input:focus-visible,
+  .glass-input:focus-within {
+    background: rgba(255, 255, 255, 0.85);
+    border-color: theme("colors.primary.DEFAULT");
+  }
+
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .glass, .glass-strong, .premium-card, .tile-row, .tab-strip { background: rgba(255, 255, 255, 0.94); }
+    .glass-dark { background: #0E5446; }
+    .glass-ink { background: #1B2523; }
+    .glass-input { background: #fff; }
+    .ambient-bg::before, .ambient-bg::after { animation: none; }
+  }
+
+  /* ── App icon plates ─────────────────────────────────────────
+     A squircle with a vertical two-stop fill, a gloss on the top half and a
+     tight drop — the way an app icon sits in a Dock. Glyphs are the Icon set,
+     white. Tones are deliberately few: green family for the product, sky and
+     graphite for neutral tools, gold only where celebration is earned. */
+  .app-icon {
+    position: relative;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    border-radius: 30%;
+    color: #fff;
+    background-image: linear-gradient(180deg, var(--ai-from) 0%, var(--ai-to) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.42),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.12),
+      0 1px 2px rgba(23, 32, 29, 0.18),
+      0 6px 14px -6px var(--ai-shadow);
+    overflow: hidden;
+  }
+  .app-icon::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.32) 0%, rgba(255, 255, 255, 0.06) 48%, rgba(255, 255, 255, 0) 52%);
+    pointer-events: none;
+  }
+  .app-icon > * { position: relative; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.2)); }
+  .app-icon-sm { width: 28px; height: 28px; border-radius: 9px; }
+  .app-icon-md { width: 36px; height: 36px; border-radius: 11px; }
+  .app-icon-lg { width: 52px; height: 52px; border-radius: 30%; }
+
+  .ai-green  { --ai-from: #159A7C; --ai-to: #085546; --ai-shadow: rgba(8, 85, 70, 0.55); }
+  .ai-mint   { --ai-from: #7BE2C7; --ai-to: #1E9C7E; --ai-shadow: rgba(30, 156, 126, 0.5); }
+  .ai-sky    { --ai-from: #6DB5F0; --ai-to: #2264B3; --ai-shadow: rgba(34, 100, 179, 0.5); }
+  .ai-gold   { --ai-from: #F5C56B; --ai-to: #C77E1B; --ai-shadow: rgba(199, 126, 27, 0.5); }
+  .ai-ink    { --ai-from: #4A5653; --ai-to: #17201D; --ai-shadow: rgba(23, 32, 29, 0.55); }
+  .ai-slate  { --ai-from: #9DB0AC; --ai-to: #5C6663; --ai-shadow: rgba(92, 102, 99, 0.5); }
+  .ai-plum   { --ai-from: #A88BDA; --ai-to: #5C3AA8; --ai-shadow: rgba(92, 58, 168, 0.5); }
+  .ai-rose   { --ai-from: #E8899A; --ai-to: #B23A2E; --ai-shadow: rgba(178, 58, 46, 0.5); }
+  .ai-brand  { --ai-from: var(--brand-from, #159A7C); --ai-to: var(--brand-to, #085546); --ai-shadow: var(--brand-shadow, rgba(8, 85, 70, 0.55)); }
+
+  /* ── Dock ───────────────────────────────────────────────────
+     A floating glass capsule of app icons. Items lift and magnify on hover,
+     show their name in a tooltip above, and carry a small dot beneath when
+     that app is the current section (the running-app indicator). */
+  .dock {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    padding: 8px 10px;
+    border-radius: 26px;
+  }
+  .dock-item {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 2px 8px;
+    border-radius: 16px;
+    transform-origin: 50% 100%;
+    transition: transform 200ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+  .dock-item:hover,
+  .dock-item:focus-visible { transform: translateY(-8px) scale(1.16); z-index: 1; }
+  .dock-item:focus-visible { outline: none; }
+  .dock-item:focus-visible .app-icon { box-shadow: 0 0 0 2px #fff, 0 0 0 4px theme("colors.primary.DEFAULT"); }
+  .dock-item:active { transform: translateY(-4px) scale(1.08); }
+  .dock-label {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%) translateY(4px);
+    padding: 5px 10px;
+    border-radius: 10px;
+    background: rgba(23, 32, 29, 0.86);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease, transform 160ms ease;
+  }
+  .dock-item:hover .dock-label,
+  .dock-item:focus-visible .dock-label { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .dock-dot {
+    position: absolute;
+    bottom: 1px;
+    left: 50%;
+    width: 4px;
+    height: 4px;
+    margin-left: -2px;
+    border-radius: 999px;
+    background: rgba(23, 32, 29, 0.55);
+    opacity: 0;
+    transition: opacity 150ms ease;
+  }
+  .dock-item[aria-current="page"] .dock-dot { opacity: 1; }
+  .dock-divider { align-self: stretch; width: 1px; margin: 6px 4px 12px; background: rgba(23, 32, 29, 0.12); }
+
+  /* Phone dock: labels under the icons, no magnification (touch). */
+  .dock-phone { gap: 0; padding: 6px 6px 4px; border-radius: 28px; }
+  .dock-phone .dock-item { flex: 1; gap: 3px; padding: 4px 2px 6px; }
+  .dock-phone .dock-item:hover, .dock-phone .dock-item:active { transform: none; }
+  .dock-phone .dock-label {
+    position: static;
+    transform: none;
+    opacity: 1;
+    padding: 0;
+    background: transparent;
+    color: theme("colors.sub");
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .dock-phone .dock-item[aria-current="page"] .dock-label { color: theme("colors.ink"); font-weight: 600; }
+  .dock-phone .dock-dot { bottom: -1px; }
+
   /* Mono kicker — Spline Sans Mono, caps, tracked. Tabular so any coords /
      counts embedded in a kicker (e.g. rank-grid labels) never jitter. */
   .kicker {
@@ -90,32 +380,154 @@
     border: 1px solid theme("colors.hairline");
     border-radius: theme("borderRadius.btn");
   }
-}
 
-@layer utilities {
-  /* Tabular numerals — apply to every data figure (Hanken display numbers,
-     scores, prices, ratings, review counts, table cells) so numbers read as
-     trustworthy financial infrastructure and never reflow while animating. */
-  .tnum {
-    font-variant-numeric: tabular-nums;
+  /* ── Panels (dashboard + admin surfaces) ─────────────────────
+     Same structure as a conventional admin panel — head / body / foot — on
+     the glass material. Hierarchy still comes from weight and spacing. */
+  .premium-card { border-radius: theme("borderRadius.panel"); }
+  .premium-card-hero { --glass-alpha: 0.52; }
+
+  .panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--hairline-soft);
   }
-
-  .premium-card {
-    border: 1px solid rgba(23, 32, 29, 0.095);
-    border-radius: 12px;
-    background: theme("colors.card");
-    box-shadow: 0 1px 2px rgba(23, 32, 29, 0.035), 0 10px 24px rgba(23, 32, 29, 0.025);
+  .panel-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: theme("colors.ink");
+    letter-spacing: -0.005em;
+  }
+  .panel-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 18px;
+    border-top: 1px solid var(--hairline-soft);
+    background: rgba(255, 255, 255, 0.22);
+    border-radius: 0 0 theme("borderRadius.panel") theme("borderRadius.panel");
   }
 
   .premium-card-link {
     color: theme("colors.primary.dark");
-    font-size: 12px;
-    font-weight: 700;
+    font-size: 13px;
+    font-weight: 600;
     transition: color 150ms ease;
   }
+  .premium-card-link:hover { text-decoration: underline; }
 
-  .premium-card-link:hover {
-    color: theme("colors.gold.deep");
+  /* Stat card label + value. Numbers are plain Hanken, tabular, 700. */
+  .stat-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: theme("colors.sub");
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .display-num {
+    font-family: theme("fontFamily.sans");
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    color: theme("colors.ink");
+  }
+
+  .icon-plate {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: 11px;
+    background: rgba(12, 122, 99, 0.1);
+    color: theme("colors.primary.dark");
+  }
+  .icon-plate-sm { width: 30px; height: 30px; border-radius: 9px; }
+
+  .delta-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .delta-pill-up { color: theme("colors.primary.dark"); }
+  .delta-pill-down { color: theme("colors.danger.DEFAULT"); }
+  .delta-pill-neutral { color: theme("colors.sub"); }
+
+  .dash-enter { animation: none; }
+
+  .tile-row { border-radius: 14px; --glass-alpha: 0.3; --glass-blur: 16px; }
+  .tile-row:hover { --glass-alpha: 0.55; }
+
+  /* Plain data table used inside dashboard panels. */
+  .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .tbl th {
+    padding: 8px 18px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: theme("colors.faint");
+    border-bottom: 1px solid var(--hairline-soft);
+    background: rgba(255, 255, 255, 0.2);
+    white-space: nowrap;
+  }
+  .tbl td {
+    padding: 11px 18px;
+    border-bottom: 1px solid var(--hairline-soft);
+    color: theme("colors.ink");
+    vertical-align: middle;
+  }
+  .tbl tr:last-child td { border-bottom: 0; }
+  .tbl tbody tr:hover td { background: rgba(255, 255, 255, 0.4); }
+  .tbl .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* Segmented control (section navigation) — a glass capsule with a solid
+     white "thumb" on the current section, the way Apple segments views. */
+  .tab-strip {
+    display: inline-flex;
+    max-width: 100%;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 999px;
+    overflow-x: auto;
+    --glass-alpha: 0.34;
+  }
+  .tab-strip a {
+    padding: 7px 14px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    color: theme("colors.sub");
+    white-space: nowrap;
+    transition: color 150ms ease, background-color 150ms ease;
+  }
+  .tab-strip a:hover { color: theme("colors.ink"); }
+  .tab-strip a[aria-current="page"] {
+    color: theme("colors.ink");
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 1px 2px rgba(23, 32, 29, 0.1), 0 0 0 1px rgba(23, 32, 29, 0.05);
+  }
+
+  /* Status pill: soft tint + same-hue text, 11px, never colour alone. */
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
   }
 
   .dashboard-map-texture {
@@ -128,6 +540,85 @@
     background-size: 170px 150px, 190px 170px, 44px 44px, 44px 44px;
   }
 
+  /* ── Marketing surfaces (public static pages) ─────────────
+     The public site now sits on the same wallpaper as the app, so its chrome
+     and cards are the same glass. Bands stopped painting a solid colour: a
+     `paper` band lets the wallpaper through, a `white` band lays a frosted
+     veil over it. The veil is what keeps the ~96px vertical rhythm readable
+     without breaking the material. */
+  .mk-veil {
+    background: rgba(255, 255, 255, 0.52);
+    -webkit-backdrop-filter: blur(26px) saturate(180%);
+    backdrop-filter: blur(26px) saturate(180%);
+    border-top: 1px solid rgba(255, 255, 255, 0.7);
+    border-bottom: 1px solid var(--hairline-soft);
+  }
+
+  /* A marketing card: the glass panel, with an optional lift on hover. */
+  .mk-card {
+    border-radius: theme("borderRadius.card");
+  }
+  .mk-card-lift {
+    transition:
+      transform 360ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 360ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .mk-card-lift:hover {
+    transform: translateY(-4px);
+    box-shadow:
+      inset 0 1px 0 var(--glass-rim),
+      0 22px 44px -18px rgba(23, 32, 29, 0.24),
+      0 0 0 1px var(--glass-edge);
+  }
+
+  /* Display type at the scale the marketing pages ask for: large, tight, and
+     optically balanced — hierarchy from size and weight, never from colour. */
+  .mk-display {
+    letter-spacing: -0.038em;
+    line-height: 1.015;
+    font-weight: 800;
+  }
+  .mk-h2 {
+    letter-spacing: -0.03em;
+    line-height: 1.07;
+    font-weight: 800;
+  }
+
+  /* Scroll reveal. The initial state is applied by <Reveal> after mount, so
+     content stays visible when JS never runs; `is-in` plays it. */
+  .mk-reveal {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  .mk-reveal.is-in {
+    opacity: 1;
+    transform: none;
+    transition:
+      opacity 760ms cubic-bezier(0.22, 1, 0.36, 1),
+      transform 760ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mk-card-lift:hover { transform: none; }
+    .mk-reveal,
+    .mk-reveal.is-in { opacity: 1; transform: none; transition: none; }
+  }
+
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .mk-veil { background: rgba(255, 255, 255, 0.93); }
+  }
+}
+
+@layer utilities {
+  /* Tabular numerals — apply to every data figure so numbers never reflow. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Translucent hairline for dividers inside glass. */
+  .border-soft { border-color: var(--hairline-soft); }
+  .divide-soft > :not([hidden]) ~ :not([hidden]) { border-color: var(--hairline-soft); }
+
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
@@ -139,7 +630,7 @@
   .shimmer {
     position: relative;
     overflow: hidden;
-    background: theme("colors.hairline");
+    background: rgba(23, 32, 29, 0.06);
   }
   .shimmer::after {
     content: "";
@@ -149,14 +640,14 @@
     background: linear-gradient(
       90deg,
       transparent,
-      rgba(255, 255, 255, 0.55),
+      rgba(255, 255, 255, 0.65),
       transparent
     );
     animation: shimmer 1.5s infinite;
   }
 }
 
-/* Respect reduced motion everywhere — no sweeps, count-ups, confetti. */
+/* Respect reduced motion everywhere — no sweeps, count-ups, confetti, drift. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -167,3 +658,9 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* Ink-chrome Dock (ops console): divider and phone labels need to read on graphite. */
+.dock.glass-ink .dock-divider { background: rgba(255, 255, 255, 0.16); }
+.dock.dock-inverse .dock-label { color: rgba(255, 255, 255, 0.66); }
+.dock.dock-inverse .dock-item[aria-current="page"] .dock-label { color: #fff; }
+.dock.glass-ink .dock-dot { background: rgba(255, 255, 255, 0.7); }

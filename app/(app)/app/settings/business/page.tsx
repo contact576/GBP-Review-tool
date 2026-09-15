@@ -5,10 +5,18 @@ import { Badge } from "@/components/ds/misc";
 import { LinkButton } from "@/components/ds/Button";
 import { ProgressMeter } from "@/components/charts";
 import { Icon } from "@/components/icons";
+import { BrandLogo } from "@/components/icons/brands";
 import { formatRelative } from "@/lib/utils/format";
 import { SettingsShell } from "../SettingsShell";
 import { Callout, SettingsSection, SpecList, SpecRow } from "../SettingsUI";
 import { SyncGoogleButton } from "@/components/app/SyncGoogleButton";
+import { gbpServiceLabels, getIndustry, resolveServiceOptions } from "@/lib/industries";
+import {
+  AEO_QUESTION_LIMIT,
+  REVIEW_PICKER_LIMIT,
+} from "@/components/app/business-services";
+import { BusinessDetailsForm } from "./BusinessDetailsForm";
+import { DetectedServicesPanel, type DetectedService } from "./DetectedServicesPanel";
 
 export default async function BusinessSettingsPage() {
   const data = await getData();
@@ -17,6 +25,35 @@ export default async function BusinessSettingsPage() {
   const googleInt = (data.integrations ?? []).find((i) => i.provider === "google");
   const snapshot = loc.gbpSnapshot;
   const audit = loc.gbpAudit;
+
+  // Services are read, never typed: the synced Google profile first, then the
+  // website crawl. Both feed the customer review picker and the AI-Visibility
+  // question set through `resolveServiceOptions`; the owner's only control is
+  // switching a detected service off.
+  const industry = getIndustry(data.workspace.vertical || loc.vertical);
+  const excludedServices = data.workspace.industryConfig?.excludedServices ?? [];
+  const websiteEvidence = loc.websiteEvidence;
+  const detectedServices: DetectedService[] = (() => {
+    const seen = new Set<string>();
+    const out: DetectedService[] = [];
+    const push = (label: string, source: DetectedService["source"]) => {
+      const key = label.trim().toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      out.push({ label: label.trim(), source });
+    };
+    for (const label of gbpServiceLabels(snapshot?.location.serviceItems)) push(label, "google_profile");
+    for (const label of websiteEvidence?.facts.services ?? []) push(label, "website");
+    return out;
+  })();
+  const resolvedServices = resolveServiceOptions({
+    gbpServiceItems: snapshot?.location.serviceItems,
+    websiteServices: websiteEvidence?.facts.services,
+    ownerServices: data.workspace.industryConfig?.customServices,
+    catalogServices: industry.services,
+    excluded: excludedServices,
+  });
+  const websiteOnFile = snapshot?.location.websiteUri || loc.website || null;
 
   const rows: { label: string; value: string }[] = [
     { label: "Business name", value: loc.name },
@@ -27,8 +64,11 @@ export default async function BusinessSettingsPage() {
     ...(snapshot?.location.phoneNumbers?.primaryPhone
       ? [{ label: "Primary phone", value: snapshot.location.phoneNumbers.primaryPhone }]
       : []),
-    ...(snapshot?.location.websiteUri
-      ? [{ label: "Website", value: snapshot.location.websiteUri }]
+    ...(snapshot?.location.websiteUri || loc.website
+      ? [{
+          label: "Website",
+          value: snapshot?.location.websiteUri ?? `${loc.website} (entered by you)`,
+        }]
       : []),
     ...(snapshot
       ? [{ label: "Google resource", value: snapshot.locationResource }]
@@ -41,8 +81,8 @@ export default async function BusinessSettingsPage() {
       <SettingsSection title="Google Business Profile">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
-            <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-primary-tint text-primary-dark">
-              <Icon name="google" size={20} />
+            <div className="grid size-10 shrink-0 place-items-center rounded-btn border border-hairline bg-card">
+              <BrandLogo name="google" size={22} title="" />
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-2">
@@ -89,6 +129,77 @@ export default async function BusinessSettingsPage() {
         </SpecList>
         <Callout tone="info" icon="lock" className="mt-4">
           Foundly never adds ranking keywords to your business name. A genuine real-world name correction requires confirmed evidence and explicit approval.
+        </Callout>
+      </SettingsSection>
+
+      {/* Owner-entered facts — the only editable details until Google is connected */}
+      <SettingsSection
+        kicker="Entered by you"
+        title="Details Google hasn't supplied"
+        action={<Badge tone="neutral">Saved in Foundly</Badge>}
+      >
+        <BusinessDetailsForm
+          website={loc.website ?? ""}
+          ownerDescription={loc.ownerDescription ?? ""}
+          googleWebsite={snapshot?.location.websiteUri}
+        />
+      </SettingsSection>
+
+      {/* Detected services — read from Google and the website, never typed */}
+      <SettingsSection
+        kicker="Read from your Google profile and website"
+        title="Services customers can pick"
+        action={
+          <Badge tone={detectedServices.length ? "primary" : "neutral"}>
+            {detectedServices.length
+              ? `${detectedServices.length} detected · ${resolvedServices.source === "catalog" ? 0 : resolvedServices.services.length} showing`
+              : "Using industry examples"}
+          </Badge>
+        }
+      >
+        <p className="text-[14px] leading-relaxed text-sub">
+          When a customer opens their review link, the first question is what they came in
+          for. Those options are read from what you already publish — your Google Business
+          Profile first, then your website — so they are real, in your words, and never typed
+          in twice. Switch off anything that isn&apos;t a service.
+        </p>
+
+        <ul className="mt-4 space-y-2">
+          <UsedInRow
+            icon="chat"
+            title="Review page service picker"
+            detail={
+              resolvedServices.source === "catalog"
+                ? `Showing ${industry.label} examples until a real list is detected. Up to ${REVIEW_PICKER_LIMIT} options.`
+                : `Showing ${Math.min(resolvedServices.services.length, REVIEW_PICKER_LIMIT)} real ${resolvedServices.services.length === 1 ? "option" : "options"} (${resolvedServices.fromGoogleProfile ? "Google profile" : "website"} first). The experience chips a customer sees are tuned to the one they pick.`
+            }
+          />
+          <UsedInRow
+            icon="sparkles"
+            title="AI Visibility questions"
+            detail={
+              resolvedServices.source === "catalog"
+                ? `Built from ${industry.label} examples until a real list is detected — the first ${AEO_QUESTION_LIMIT}.`
+                : `Built from the first ${AEO_QUESTION_LIMIT} of the same list, same exclusions.`
+            }
+          />
+        </ul>
+
+        <div className="mt-4 border-t border-hairline pt-4">
+          <DetectedServicesPanel
+            detected={detectedServices}
+            initialExcluded={excludedServices}
+            websiteUrl={websiteOnFile}
+            websiteScannedAt={websiteEvidence?.status === "synced" ? websiteEvidence.observedAt : null}
+            websiteError={websiteEvidence && websiteEvidence.status !== "synced" ? websiteEvidence.error ?? "Could not read the site." : null}
+            catalogExamples={[...industry.services]}
+            industryLabel={industry.label}
+          />
+        </div>
+
+        <Callout tone="info" icon="lock" className="mt-4">
+          Read-only evidence. Nothing here is written to your Google Business Profile or your
+          website; hiding a service only changes what Foundly shows.
         </Callout>
       </SettingsSection>
 
@@ -159,10 +270,10 @@ export default async function BusinessSettingsPage() {
       {snapshot?.externalEvidence ? (
         <SettingsSection
           kicker="Cross-source evidence"
-          title="Website, search, and social facts"
+          title="Website and search facts"
           action={<Badge tone="neutral">Read-only evidence</Badge>}
         >
-          <div className="grid gap-3 lg:grid-cols-3">
+          <div className="grid gap-3 lg:grid-cols-2">
             <EvidenceSourceCard
               icon="external"
               title="Business website"
@@ -178,14 +289,6 @@ export default async function BusinessSettingsPage() {
               metric={`${snapshot.externalEvidence.searchConsole.rows.length} query rows`}
               detail={snapshot.externalEvidence.searchConsole.error ?? `Verified property ${snapshot.externalEvidence.searchConsole.siteUrl ?? "connected"}.`}
               items={snapshot.externalEvidence.searchConsole.rows.slice(0, 3).map((row) => `${row.query} · ${row.impressions} impressions`)}
-            />
-            <EvidenceSourceCard
-              icon="camera"
-              title="Instagram"
-              status={snapshot.externalEvidence.instagram.status}
-              metric={`${snapshot.externalEvidence.instagram.media.length} posts read`}
-              detail={snapshot.externalEvidence.instagram.error ?? (snapshot.externalEvidence.instagram.username ? `Authorized @${snapshot.externalEvidence.instagram.username}.` : "Authorized professional account.")}
-              items={snapshot.externalEvidence.instagram.media.slice(0, 3).flatMap((post) => post.caption ? [post.caption.slice(0, 90)] : [])}
             />
           </div>
           <Callout tone="info" icon="shield" className="mt-4">
@@ -266,6 +369,29 @@ function severityTone(severity: "low" | "medium" | "high" | "critical") {
   if (severity === "high") return "gold" as const;
   if (severity === "medium") return "primary" as const;
   return "neutral" as const;
+}
+
+/** One "this list is read here" row, with the real rule that surface applies. */
+function UsedInRow({
+  icon,
+  title,
+  detail,
+}: {
+  icon: "chat" | "sparkles";
+  title: string;
+  detail: string;
+}) {
+  return (
+    <li className="flex items-start gap-3 rounded-card border border-hairline bg-card p-3">
+      <div className="grid size-8 shrink-0 place-items-center rounded-btn bg-primary-wash text-primary-dark">
+        <Icon name={icon} size={16} />
+      </div>
+      <div className="min-w-0">
+        <div className="text-[13px] font-bold text-ink">{title}</div>
+        <p className="mt-0.5 text-[12px] leading-relaxed text-sub">{detail}</p>
+      </div>
+    </li>
+  );
 }
 
 function Stat({ label, value }: { label: string; value: number | string }) {

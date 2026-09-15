@@ -10,7 +10,7 @@ type Size = "sm" | "md" | "lg";
 // (The global :focus-visible outline is intentionally replaced here with a
 // ring so filled buttons get a crisp, on-brand halo rather than a stray outline.)
 const base =
-  "inline-flex items-center justify-center gap-2 font-semibold rounded-btn transition-all duration-150 whitespace-nowrap select-none " +
+  "inline-flex items-center justify-center gap-2 font-semibold rounded-full transition-all duration-150 whitespace-nowrap select-none " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-paper " +
   "disabled:opacity-50 disabled:pointer-events-none disabled:shadow-none";
 
@@ -20,21 +20,21 @@ const variants: Record<Variant, string> = {
   // Filled green with a subtle Lovable-style inset top highlight for depth.
   primary:
     "bg-primary text-white hover:bg-primary-dark active:bg-primary-dark " +
-    "shadow-[0_1px_2px_rgba(23,32,29,0.12),inset_0_1px_0_rgba(255,255,255,0.16)]",
+    "shadow-[inset_0_1px_0_rgba(255,255,255,0.24),0_1px_2px_rgba(8,85,70,0.25),0_10px_24px_-10px_rgba(12,122,99,0.6)]",
   // Hairline secondary — reads as a quiet card, greens on hover.
   secondary:
-    "bg-card text-ink border border-hairline hover:bg-primary-wash hover:border-primary/30 active:bg-primary-wash",
+    "glass glass-interactive text-ink hover:text-primary-dark",
   // Text ghost — no fill at rest.
-  ghost: "bg-transparent text-sub hover:bg-primary-wash hover:text-ink active:bg-primary-tint/60",
+  ghost: "bg-transparent text-sub hover:bg-ink/[.05] hover:text-ink active:bg-ink/[.08]",
   danger:
-    "bg-danger text-white hover:brightness-95 active:brightness-90 shadow-sm focus-visible:ring-danger",
-  gold: "bg-gold text-ink hover:bg-gold-deep hover:text-white active:brightness-95 shadow-sm",
+    "bg-danger text-white hover:brightness-95 active:brightness-90 shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_8px_20px_-10px_rgba(196,69,47,0.6)] focus-visible:ring-danger",
+  gold: "bg-gold text-ink hover:bg-gold-deep hover:text-white active:brightness-95 shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_8px_20px_-10px_rgba(232,163,61,0.7)]",
 };
 
 const sizes: Record<Size, string> = {
-  sm: "h-9 px-3 text-[13px] min-h-[36px]",
-  md: "h-11 px-4 text-[14px] min-h-[44px]",
-  lg: "h-12 px-6 text-[15px] min-h-[48px]",
+  sm: "h-9 px-3.5 text-[13px] min-h-[36px]",
+  md: "h-11 px-5 text-[14px] min-h-[44px]",
+  lg: "h-12 px-7 text-[15px] min-h-[48px]",
 };
 
 interface CommonProps {

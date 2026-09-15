@@ -21,6 +21,10 @@ if (process.env.NODE_ENV === "production") {
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // The Postgres driver opens raw TCP/TLS sockets and resolves parts of itself
+  // at require-time. Bundling it breaks prerendering; keep it a real Node
+  // require resolved on the server at runtime.
+  serverExternalPackages: ["postgres"],
   eslint: { ignoreDuringBuilds: false },
   typescript: { ignoreBuildErrors: false },
   images: {

@@ -33,9 +33,10 @@ test.describe("failure modes", () => {
   });
 
   test("sign-up rejects weak passwords (length, then composition)", async ({ page }) => {
+    // The server rule is 10 characters (lib/auth/password.ts), not 8.
     await fillSignUp(page, { email: uniqueEmail("weakpw"), password: "short1A" });
     await expect(
-      page.getByText("Password must be at least 8 characters."),
+      page.getByText("Password must be at least 10 characters."),
     ).toBeVisible();
 
     // Long enough but no number -> composition rule.

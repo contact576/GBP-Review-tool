@@ -16,6 +16,9 @@ const outcomeRef: { current: ProfileSyncOutcome } = { current: { ok: true } };
 
 vi.mock("@/lib/google/profile-sync", () => ({
   fetchGoogleProfile: async () => outcomeRef.current,
+  // These cases all exercise an approved sync, so the public-data fallback must
+  // stay out of the way. Reporting it unconfigured keeps that branch inert.
+  fetchApifyProfile: async () => ({ ok: false, error: "Apify is not configured." }),
   locationFromProfileSnapshot: (location: unknown) => location,
 }));
 

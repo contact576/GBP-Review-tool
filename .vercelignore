@@ -1,0 +1,15 @@
+# Local environment must never reach the build: NEXT_PUBLIC_* values are inlined
+# into client bundles at build time, and a local NEXT_PUBLIC_APP_URL of
+# http://localhost:3000 would be baked into the deployed app. Real values come
+# from the project's environment variables in Vercel.
+.env
+.env.local
+.env*.local
+.env.local.bak
+
+# Never upload local build output or test artifacts.
+.next
+node_modules
+playwright-report
+test-results
+tsconfig.tsbuildinfo

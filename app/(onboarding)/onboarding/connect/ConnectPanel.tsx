@@ -1,5 +1,6 @@
 import { Badge, Card } from "@/components/ds";
 import { Icon, type IconName } from "@/components/icons";
+import { BrandLogo } from "@/components/icons/brands";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
 import type { Integration } from "@/lib/data/types";
 
@@ -98,7 +99,7 @@ export function ConnectPanel({
           href="/api/google/connect"
           className="inline-flex h-12 min-h-[48px] w-full items-center justify-center gap-2 whitespace-nowrap rounded-btn border border-hairline bg-card px-6 text-[15px] font-semibold text-ink shadow-sm transition-all hover:bg-primary-wash"
         >
-          <Icon name="google" size={18} />
+          <BrandLogo name="google" size={18} title="" />
           Connect Google
         </a>
       ) : (

@@ -4,10 +4,11 @@ import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge, Delta, EmptyState } from "@/components/ds/misc";
 import { PageHeader } from "@/components/app/PageHeader";
 import { Icon, type IconName } from "@/components/icons";
-import { StatTile, LineArea, Donut, type LinePoint } from "@/components/charts";
+import { StatTile, Donut, type LinePoint } from "@/components/charts";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
-import { formatDate, formatNumber, formatShortDate } from "@/lib/utils/format";
+import { formatDate, formatNumber } from "@/lib/utils/format";
 import { ReportActions } from "./ReportActions";
+import { ScoreTrendChart } from "./ScoreTrendChart";
 
 export default async function ReportPage() {
   const data = await getData();
@@ -128,13 +129,7 @@ export default async function ReportPage() {
             {scoreStart} → {scoreEnd} over 30 days
           </span>
         </div>
-        <LineArea
-          data={scoreTrend}
-          height={200}
-          title="Local Growth Score, last 30 days"
-          formatLabel={(s) => formatShortDate(s)}
-          formatValue={(n) => String(Math.round(n))}
-        />
+        <ScoreTrendChart data={scoreTrend} />
       </Card>
 
       {/* Review mix — genuine part-of-whole by rating + the standout review */}

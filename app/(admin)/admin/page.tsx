@@ -1,5 +1,8 @@
 import Link from "next/link";
-import { getSessionAndData } from "@/lib/data";
+import { getPlatformSnapshot, getProviderFor, getSessionAndData, homeWorkspaceIdFor } from "@/lib/data";
+import { recordPlatformHistory } from "@/lib/platform/history-runner";
+import { RETENTION_REQUIRED_DAYS, utcDay } from "@/lib/platform/retention";
+import { formatDate } from "@/lib/utils/format";
 import { PageHeader } from "@/components/app/PageHeader";
 import { Icon, type IconName } from "@/components/icons";
 import { StatTile } from "@/components/charts/StatTile";
@@ -11,6 +14,7 @@ import {
   NotMeasuredTile,
   TelemetrySourceBadge,
   readPlatformTelemetry,
+  sectionMeasured,
   NOT_MEASURED_CAPTION,
 } from "../_components/telemetry";
 
@@ -20,7 +24,7 @@ function maxSev(list: Sev[], fallback: Sev = "low"): Sev {
 
 const KPI_LABELS = [
   "Total tenants",
-  "Active locations",
+  "Workspaces",
   "Platform MRR",
   "Trial conversion",
   "Logo churn",
@@ -28,6 +32,23 @@ const KPI_LABELS = [
   "Detected reviews · wk",
   "Past-due accounts",
 ] as const;
+
+const DAY_MS = 86_400_000;
+
+/**
+ * When retention becomes measurable: the oldest stored snapshot must be
+ * RETENTION_REQUIRED_DAYS old. Counted from that snapshot's date, not from
+ * how many days happen to be stored — a cron that skipped days does not
+ * push the date out.
+ */
+function retentionEta(firstAt: string | undefined, now: Date): { on: string; daysLeft: number } | null {
+  if (!firstAt) return null;
+  const first = new Date(`${firstAt}T00:00:00Z`).getTime();
+  if (Number.isNaN(first)) return null;
+  const on = new Date(first + RETENTION_REQUIRED_DAYS * DAY_MS);
+  const daysLeft = Math.max(0, Math.ceil((on.getTime() - now.getTime()) / DAY_MS));
+  return { on: on.toISOString(), daysLeft };
+}
 
 function AlertShell({
   icon,
@@ -51,8 +72,8 @@ function AlertShell({
       href={href}
       className={
         dashed
-          ? "block rounded-card border border-dashed border-hairline bg-card p-4 shadow-sm transition-colors hover:border-primary/40"
-          : "block rounded-card border border-hairline bg-card p-4 shadow-sm transition-colors hover:border-primary/40"
+          ? "glass glass-interactive block rounded-card border-dashed p-4"
+          : "glass glass-interactive block rounded-card p-4"
       }
     >
       <div className="flex items-start justify-between gap-2">
@@ -113,14 +134,39 @@ function UnmeasuredAlertCard({ icon, label, href }: { icon: IconName; label: str
 }
 
 export default async function AdminOverviewPage() {
-  const { session, data } = await getSessionAndData();
-  const { deliveryIncidents, fraudFlags, tenants, kpis } = data.platform;
-  const telemetry = readPlatformTelemetry(data.platform, session.isDemo);
+  const [{ session }, platform] = await Promise.all([getSessionAndData(), getPlatformSnapshot()]);
+  const { deliveryIncidents, tenants, kpis } = platform;
+  const telemetry = readPlatformTelemetry(platform, session.isDemo);
+  const fraudMeasured = sectionMeasured(platform, telemetry, "fraud");
+  const retentionMeasured = sectionMeasured(platform, telemetry, "retention");
+  // Flags an operator has already dismissed or confirmed are off the queue.
+  const fraudFlags = platform.fraudFlags.filter((flag) => !flag.triage);
 
   const backlog = deliveryIncidents.reduce((a, i) => a + i.count, 0);
   const deliverySev = maxSev(deliveryIncidents.map((i) => i.severity));
   const fraudSev = maxSev(fraudFlags.map((f) => f.severity));
   const pastDue = tenants.filter((t) => t.status === "past_due");
+  const billed = tenants.reduce((sum, t) => sum + (t.billedLocations ?? 0), 0);
+  const agencies = tenants.filter((t) => t.orgType === "agency").length;
+
+  // History starts the first time an operator looks, not a day later: if
+  // today's snapshot is not stored yet, store it now. Idempotent per day, so
+  // racing the cron is harmless. Deliberately awaited INLINE rather than in
+  // `after()`: post-response database work on Vercel left a connection open
+  // while the lambda froze, and every later request on that instance hung on
+  // the poisoned pool (2026-09-04). One small upsert is cheaper than that.
+  const now = new Date();
+  if (telemetry.source === "live_aggregate" && platform.history?.latestAt !== utcDay(now)) {
+    try {
+      const provider = await getProviderFor(session);
+      const home = homeWorkspaceIdFor(session);
+      await recordPlatformHistory({ provider, snapshot: platform, homeWorkspaceId: home, onlyIfMissing: true });
+    } catch (error) {
+      console.error("[admin] history write failed:", error instanceof Error ? error.message : error);
+    }
+  }
+  const history = platform.history;
+  const eta = retentionEta(history?.firstAt, now);
 
   return (
     <div className="space-y-6">
@@ -150,11 +196,15 @@ export default async function AdminOverviewPage() {
                 count={deliveryIncidents.length} sev={deliverySev}
                 detail={deliveryIncidents.length === 0 ? "no active incidents" : "active incidents"} href="/admin/delivery"
               />
-              <AlertCard
-                icon="shield" label="Fraud flags" value={formatNumber(fraudFlags.length)}
-                count={fraudFlags.length} sev={fraudSev}
-                detail={fraudFlags.length === 0 ? "nothing awaiting triage" : "in the review queue"} href="/admin/fraud"
-              />
+              {fraudMeasured ? (
+                <AlertCard
+                  icon="shield" label="Fraud flags" value={formatNumber(fraudFlags.length)}
+                  count={fraudFlags.length} sev={fraudSev}
+                  detail={fraudFlags.length === 0 ? "nothing awaiting triage" : "in the review queue"} href="/admin/fraud"
+                />
+              ) : (
+                <UnmeasuredAlertCard icon="shield" label="Fraud flags" href="/admin/fraud" />
+              )}
               <AlertCard
                 icon="credit-card" label="Payment issues" value={formatNumber(pastDue.length)}
                 count={pastDue.length} sev="high"
@@ -178,13 +228,62 @@ export default async function AdminOverviewPage() {
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {telemetry.measured ? (
             <>
-              <StatTile label="Total tenants" value={formatNumber(kpis.totalTenants)} deltaCaption="Orgs on the platform" />
-              <StatTile label="Active locations" value={formatNumber(kpis.activeLocations)} deltaCaption="Billable GBP profiles" />
-              <StatTile label="Platform MRR" value={formatMoney(kpis.mrr)} deltaCaption="Recurring revenue" />
-              <StatTile label="Trial conversion" value={`${Math.round(kpis.trialConversion * 100)}%`} deltaCaption="Trial → paid" />
-              <StatTile label="Logo churn" value={`${(kpis.logoChurn * 100).toFixed(1)}%`} deltaCaption="Monthly, by account" />
-              <StatTile label="Net revenue retention" value={`${Math.round(kpis.nrr * 100)}%`} deltaCaption="Expansion vs churn" />
-              <StatTile label="Detected reviews · wk" value={formatNumber(kpis.weeklyDetectedReviews)} deltaCaption="Across all tenants" />
+              <StatTile
+                label="Total tenants"
+                value={formatNumber(kpis.totalTenants)}
+                deltaCaption={agencies ? `${agencies} agenc${agencies === 1 ? "y" : "ies"} · ${kpis.totalTenants - agencies} direct` : "Organizations on the platform"}
+              />
+              <StatTile
+                label="Workspaces"
+                value={formatNumber(kpis.activeLocations)}
+                deltaCaption={billed ? `${billed} billed · ${kpis.activeLocations - billed} on a parent plan` : "Locations under management"}
+              />
+              <StatTile label="Platform MRR" value={formatMoney(kpis.mrr)} deltaCaption="One subscription per organization" />
+              <StatTile label="Trial conversion" value={`${Math.round(kpis.trialConversion * 100)}%`} deltaCaption="Paying ÷ (paying + in trial), today" />
+              {retentionMeasured && platform.retention ? (
+                platform.retention.priorPaying === 0 ? (
+                  <>
+                    <NotMeasuredTile label="Logo churn" caption={`No paying tenants on ${formatDate(platform.retention.priorAt)}`} />
+                    <NotMeasuredTile label="Net revenue retention" caption={`No paying tenants on ${formatDate(platform.retention.priorAt)}`} />
+                  </>
+                ) : (
+                  <>
+                    <StatTile
+                      label="Logo churn"
+                      value={`${(kpis.logoChurn * 100).toFixed(1)}%`}
+                      favorableWhenUp={false}
+                      deltaCaption={`${platform.retention.churned} of ${platform.retention.priorPaying} paying on ${formatDate(platform.retention.priorAt)} lapsed`}
+                    />
+                    <StatTile
+                      label="Net revenue retention"
+                      value={`${Math.round(kpis.nrr * 100)}%`}
+                      deltaCaption={`${formatMoney(platform.retention.retainedMrr)} today from a ${formatMoney(platform.retention.priorMrr)} cohort`}
+                    />
+                  </>
+                )
+              ) : (
+                <>
+                  <NotMeasuredTile
+                    label="Logo churn"
+                    caption={
+                      eta
+                        ? eta.daysLeft
+                          ? `Measurable ${formatDate(eta.on)} · ${eta.daysLeft} day${eta.daysLeft === 1 ? "" : "s"} to go`
+                          : "Measurable from the next snapshot"
+                        : "Needs a month of daily snapshots"
+                    }
+                  />
+                  <NotMeasuredTile
+                    label="Net revenue retention"
+                    caption={
+                      history?.days
+                        ? `${history.days} daily snapshot${history.days === 1 ? "" : "s"} since ${history.firstAt ? formatDate(history.firstAt) : "today"}`
+                        : "First daily snapshot is being recorded now"
+                    }
+                  />
+                </>
+              )}
+              <StatTile label="Detected reviews · wk" value={formatNumber(kpis.weeklyDetectedReviews)} deltaCaption="Across roster tenants" />
               <StatTile label="Past-due accounts" value={formatNumber(pastDue.length)} deltaCaption="Need dunning" />
             </>
           ) : (

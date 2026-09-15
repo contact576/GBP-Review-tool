@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Icon } from "@/components/icons";
+import { BrandLogo } from "@/components/icons/brands";
 import { Button } from "@/components/ds/Button";
 import { Card } from "@/components/ds/Card";
 import { Field, Input } from "@/components/ds/form";
@@ -46,13 +47,31 @@ export function SignInForm({
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
+    // Read the DOM, not React state.
+    //
+    // These inputs are controlled off state that starts empty, so anything the
+    // visitor types before hydration finishes is discarded the moment React
+    // takes over — on a throttled phone this silently submitted blank or
+    // half-captured credentials and came back "Invalid email or password" for a
+    // correct password, burning a rate-limit slot each time. The form element
+    // holds what the visitor actually typed; state is only the fallback.
+    const data = new FormData(e.currentTarget);
+    const typedEmail = String(data.get("email") ?? "").trim() || email;
+    const typedPassword = String(data.get("password") ?? "") || password;
     startTransition(async () => {
-      const result = await loginAction({ email, password });
+      const result = await loginAction({ email: typedEmail, password: typedPassword });
       if (!result.ok) {
         setError(result.error ?? "Something went wrong. Please try again.");
         return;
       }
-      router.push(next && next.startsWith("/") ? next : "/app");
+      // Go straight to this account's console. An admin pushed to "/app" is
+      // redirected by the middleware, and the client router never committed
+      // that redirect — the session was set but the page stayed here.
+      const home = result.home ?? "/app";
+      const wanted = next && next.startsWith("/") ? next : home;
+      const allowed =
+        home === "/app" ? !wanted.startsWith("/admin") && !wanted.startsWith("/agency") : wanted.startsWith(home);
+      router.push(allowed ? wanted : home);
       router.refresh();
     });
   }
@@ -83,7 +102,9 @@ export function SignInForm({
         </div>
       ) : null}
 
-      <form className="mt-6 space-y-4" onSubmit={submit}>
+      {/* method="post" so a pre-hydration submit cannot fall back to a GET that
+          places the password in the URL (history, logs, Referer). */}
+      <form className="mt-6 space-y-4" method="post" onSubmit={submit}>
         <Field label="Email">
           <Input
             type="email"
@@ -131,13 +152,13 @@ export function SignInForm({
 
       {googleEnabled ? (
         <a href="/api/auth/google" className={googleLinkClass}>
-          <Icon name="google" size={18} />
+          <BrandLogo name="google" size={18} title="" />
           Continue with Google
         </a>
       ) : (
         <div>
           <span aria-disabled="true" className={`${googleLinkClass} pointer-events-none opacity-50`}>
-            <Icon name="google" size={18} />
+            <BrandLogo name="google" size={18} title="" />
             Continue with Google
           </span>
           <p className="mt-1.5 text-center text-[12px] text-faint">

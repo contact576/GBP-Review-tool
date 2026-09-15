@@ -1,9 +1,9 @@
-import { getData } from "@/lib/data";
+import { getAgencyData } from "@/lib/data";
 import { PageHeader } from "@/components/app/PageHeader";
 import { WhiteLabelStudio, type SampleClient } from "./WhiteLabelStudio";
 
 export default async function WhiteLabelPage() {
-  const data = await getData();
+  const data = await getAgencyData();
   const wl = data.agency.whiteLabel;
   const first = data.agency.clients[0];
 

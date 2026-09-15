@@ -4,7 +4,7 @@ import { SignUpForm } from "./SignUpForm";
 
 export const metadata: Metadata = {
   title: "Start your free trial",
-  description: "Start a 14-day Foundly Growth trial — no credit card. Keep a free plan forever when it ends.",
+  description: "Start a 30-day Foundly trial — no credit card. Keep a free plan forever when it ends.",
 };
 
 export default async function SignUpPage({

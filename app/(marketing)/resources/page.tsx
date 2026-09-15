@@ -23,7 +23,7 @@ export default function ResourcesPage() {
         <Container>
           <div className="max-w-2xl">
             <Eyebrow>Resources</Eyebrow>
-            <h1 className="mt-3 text-[32px] font-extrabold leading-tight tracking-tight text-ink sm:text-[42px]">
+            <h1 className="mt-3 mk-display text-[36px] text-ink sm:text-[52px]">
               Guides to getting found and chosen
             </h1>
             <p className="mt-4 text-[16px] leading-relaxed text-sub">
@@ -35,7 +35,7 @@ export default function ResourcesPage() {
           {featured ? (
             <Link
               href={`/resources/${featured.slug}`}
-              className="mt-10 block overflow-hidden rounded-card border border-hairline bg-card shadow-sm transition-colors hover:border-primary/40"
+              className="mt-10 block overflow-hidden glass mk-card mk-card-lift"
             >
               <div className="grid gap-6 p-6 sm:grid-cols-2 sm:items-center sm:p-8">
                 <div className="order-2 sm:order-1">
@@ -71,7 +71,7 @@ export default function ResourcesPage() {
               <Link
                 key={a.slug}
                 href={`/resources/${a.slug}`}
-                className="flex flex-col rounded-card border border-hairline bg-paper p-6 transition-colors hover:border-primary/40"
+                className="flex flex-col glass mk-card p-6 mk-card-lift"
               >
                 <Badge tone="primary">{a.category}</Badge>
                 <h3 className="mt-3 text-[18px] font-bold leading-snug text-ink">{a.title}</h3>

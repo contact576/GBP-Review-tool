@@ -9,7 +9,7 @@ export default async function BusinessTypePage() {
 
   return (
     <Step
-      current={2}
+      current={3}
       title="What kind of business are you?"
       subtitle="This tailors your review prompts and the attribute catalog customers pick from."
       continueHref="/onboarding/connect"

@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { memoryProvider } from "../memory-provider";
 
+/**
+ * These cases run real bcrypt work — one registration plus three hash/verify
+ * round trips each — which is deliberately expensive and lands within a second
+ * or two of vitest's 5s default. Under the full parallel suite that tipped over
+ * into a spurious timeout, so the budget is stated explicitly here. It is a
+ * correctness test, not a performance one.
+ */
+const BCRYPT_TEST_TIMEOUT_MS = 30_000;
+
 describe("password reset token lifecycle", () => {
-  it("consumes a valid token once and replaces the password", async () => {
+  it("consumes a valid token once and replaces the password", { timeout: BCRYPT_TEST_TIMEOUT_MS }, async () => {
     const email = `reset-${Date.now()}@example.com`;
     const registered = await memoryProvider.registerUser({
       name: "Reset Owner",
@@ -40,7 +49,7 @@ describe("password reset token lifecycle", () => {
     ).toBe(false);
   });
 
-  it("rejects an expired token", async () => {
+  it("rejects an expired token", { timeout: BCRYPT_TEST_TIMEOUT_MS }, async () => {
     const email = `expired-${Date.now()}@example.com`;
     const registered = await memoryProvider.registerUser({
       name: "Expired Owner",

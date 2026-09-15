@@ -1,35 +1,35 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ds/Button";
+import { openTenantWorkspaceAction } from "@/lib/actions";
 import { Badge } from "@/components/ds/misc";
 import { Input } from "@/components/ds/form";
 import { Table, type Column, type SortDirection } from "@/components/ds/Table";
 import { Icon } from "@/components/icons";
 import { formatMoney } from "@/lib/utils/format";
+import { PLANS, normalizePlan } from "@/lib/billing/plans";
 import type { PlatformTenant } from "@/lib/data/types";
 import { TenantStatusBadge } from "../../_components/TenantStatus";
 
 type SortKey = "name" | "vertical" | "plan" | "mrr" | "locations" | "region";
 
 /**
- * Impersonation is a permanently-disabled placeholder, not a feature that is
- * merely "loading". The reason and the audit promise are stated in the UI —
- * a greyed-out button with no explanation is not an honest gate.
+ * Opening a tenant is a real support session, not read-only. Say exactly what
+ * it is and where it is recorded, before the button — not after.
  */
-const IMPERSONATION_REASON =
-  "Support impersonation is not enabled in this deployment. It requires the database-backed support role and the audit writer, neither of which is wired here.";
-
 export function ImpersonationNotice() {
   return (
-    <div className="flex items-start gap-2.5 rounded-card border border-dashed border-hairline bg-card p-4">
-      <Icon name="lock" size={18} className="mt-px shrink-0 text-faint" aria-hidden />
+    <div className="glass flex items-start gap-2.5 rounded-card p-4">
+      <Icon name="shield" size={18} className="mt-px shrink-0 text-primary" aria-hidden />
       <div className="text-[13px] leading-relaxed text-sub">
-        <p className="text-[14px] font-semibold text-ink">Impersonation is not enabled</p>
+        <p className="text-[14px] font-semibold text-ink">Open a tenant as Foundly support</p>
         <p className="mt-1">
-          {IMPERSONATION_REASON} The per-row <span className="font-semibold text-ink">Impersonate</span> control is a
-          disabled placeholder and does nothing. When it is enabled, every session opens read-only and is written to the
-          append-only audit log with the operator, the tenant, and the reason — before the session starts, not after.
+          <span className="font-semibold text-ink">Open tenant</span> enters that account&rsquo;s owner console with
+          full owner access — every button works, and every change is theirs. The session is written to the
+          tenant&rsquo;s own audit log (operator, time) before it starts. A banner on every page names the tenant and
+          the way back.
         </p>
       </div>
     </div>
@@ -41,7 +41,43 @@ function sortValue(t: PlatformTenant, key: SortKey): number | string {
   return typeof v === "number" ? v : String(v).toLowerCase();
 }
 
-export function TenantsTable({ tenants }: { tenants: PlatformTenant[] }) {
+function OpenTenantButton({ tenant, enabled }: { tenant: PlatformTenant; enabled: boolean }) {
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const target = tenant.primaryWorkspaceId;
+  if (!target) {
+    return (
+      <span title="This row is a seeded fixture with no workspace behind it." className="inline-block">
+        <Button variant="secondary" size="sm" icon="lock" disabled aria-disabled="true">
+          Open tenant
+        </Button>
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex flex-col items-end gap-1">
+      <Button
+        variant="secondary"
+        size="sm"
+        icon="external"
+        loading={pending}
+        disabled={!enabled}
+        aria-label={`Open ${tenant.name} as Foundly support`}
+        onClick={() =>
+          start(async () => {
+            const result = await openTenantWorkspaceAction(target);
+            if (result && !result.ok) setError(result.error);
+          })
+        }
+      >
+        Open tenant
+      </Button>
+      {error ? <span role="status" className="text-[11px] text-danger">{error}</span> : null}
+    </span>
+  );
+}
+
+export function TenantsTable({ tenants, canOpen = true }: { tenants: PlatformTenant[]; canOpen?: boolean }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
     key: "mrr",
@@ -54,6 +90,8 @@ export function TenantsTable({ tenants }: { tenants: PlatformTenant[] }) {
       ? tenants.filter(
           (t) =>
             t.name.toLowerCase().includes(q) ||
+            (t.organizationName ?? "").toLowerCase().includes(q) ||
+            (t.ownerEmail ?? "").toLowerCase().includes(q) ||
             t.vertical.toLowerCase().includes(q) ||
             t.region.toLowerCase().includes(q),
         )
@@ -75,21 +113,40 @@ export function TenantsTable({ tenants }: { tenants: PlatformTenant[] }) {
       header: "Tenant",
       sortable: true,
       ariaLabel: "Sort by tenant",
-      render: (t) => <span className="text-[14px] font-semibold text-ink">{t.name}</span>,
+      render: (t) => (
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {t.primaryWorkspaceId ? (
+              <Link
+                href={`/admin/tenants/${encodeURIComponent(t.id)}`}
+                className="text-[14px] font-semibold text-ink hover:underline focus-visible:underline focus-visible:outline-none"
+              >
+                {t.name}
+              </Link>
+            ) : (
+              <span className="text-[14px] font-semibold text-ink">{t.name}</span>
+            )}
+            {t.orgType === "agency" ? <Badge tone="primary" icon="grid">Agency</Badge> : null}
+          </div>
+          <div className="truncate text-[12px] text-faint">
+            {[t.ownerEmail, t.organizationName ? `org “${t.organizationName}”` : null].filter(Boolean).join(" · ")}
+          </div>
+        </div>
+      ),
     },
     {
       key: "vertical",
       header: "Vertical",
       sortable: true,
       ariaLabel: "Sort by vertical",
-      render: (t) => <span className="text-[14px] capitalize text-sub">{t.vertical}</span>,
+      render: (t) => <span className="text-[14px] capitalize text-sub">{t.vertical.replace(/_/g, " ")}</span>,
     },
     {
       key: "plan",
       header: "Plan",
       sortable: true,
       ariaLabel: "Sort by plan",
-      render: (t) => <span className="text-[14px] capitalize text-sub">{t.plan}</span>,
+      render: (t) => <span className="text-[14px] text-sub">{PLANS[normalizePlan(t.plan)].name}</span>,
     },
     {
       key: "mrr",
@@ -105,6 +162,14 @@ export function TenantsTable({ tenants }: { tenants: PlatformTenant[] }) {
       numeric: true,
       sortable: true,
       ariaLabel: "Sort by locations",
+      render: (t) => (
+        <span className="tabular-nums">
+          {t.locations}
+          {typeof t.billedLocations === "number" && t.billedLocations !== t.locations ? (
+            <span className="text-[12px] text-faint"> · {t.billedLocations} billed</span>
+          ) : null}
+        </span>
+      ),
     },
     {
       key: "status",
@@ -120,33 +185,10 @@ export function TenantsTable({ tenants }: { tenants: PlatformTenant[] }) {
     },
     {
       key: "impersonate",
-      header: (
-        <span className="inline-flex items-center gap-1.5">
-          Impersonate
-          <Badge tone="sub" icon="lock" className="font-sans normal-case tracking-normal">
-            Not enabled
-          </Badge>
-        </span>
-      ),
-      ariaLabel: "Impersonate — not enabled",
+      header: "Support",
+      ariaLabel: "Open tenant as Foundly support",
       align: "right",
-      render: (t) => (
-        // Permanently gated placeholder. The wrapper carries the tooltip because
-        // a disabled button has no pointer events, and the aria-label spells the
-        // whole state out for assistive tech.
-        <span title={IMPERSONATION_REASON} className="inline-block">
-          <Button
-            variant="secondary"
-            size="sm"
-            icon="lock"
-            disabled
-            aria-disabled="true"
-            aria-label={`Impersonate ${t.name} — not enabled. ${IMPERSONATION_REASON} When enabled, the session is audit-logged.`}
-          >
-            Impersonate
-          </Button>
-        </span>
-      ),
+      render: (t) => <OpenTenantButton tenant={t} enabled={canOpen} />,
     },
   ];
 
@@ -155,7 +197,7 @@ export function TenantsTable({ tenants }: { tenants: PlatformTenant[] }) {
       <div className="max-w-sm">
         <Input
           iconLeft="search"
-          placeholder="Search tenant, vertical or region…"
+          placeholder="Search tenant, owner, vertical or region…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           aria-label="Search tenants"
@@ -172,12 +214,14 @@ export function TenantsTable({ tenants }: { tenants: PlatformTenant[] }) {
         caption="Platform tenants"
         emptyIcon="search"
         emptyTitle="No tenants found"
-        emptyDescription={`No tenants match “${query}”. Try a different name, vertical, or region.`}
+        emptyDescription={`No tenants match “${query}”. Try a different name, owner, vertical, or region.`}
       />
 
       <p className="text-[12px] tabular-nums text-faint">
-        {rows.length} of {tenants.length} tenants shown · impersonation is disabled in this deployment and audit-logged
-        when enabled.
+        {rows.length} of {tenants.length} tenants shown · a direct tenant is named after its business, an agency after
+        its organization · MRR is one subscription per organization; locations on a parent plan bill nothing of their
+        own · open a tenant&rsquo;s name for its plan, trial, users and deletion · Open tenant starts an audited support
+        session.
       </p>
     </div>
   );

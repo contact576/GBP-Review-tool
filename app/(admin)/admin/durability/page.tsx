@@ -1,4 +1,4 @@
-import { getSessionAndData } from "@/lib/data";
+import { getPlatformSnapshot, getSessionAndData } from "@/lib/data";
 import { PageHeader } from "@/components/app/PageHeader";
 import { Card, CardHeader } from "@/components/ds/Card";
 import { Badge } from "@/components/ds/misc";
@@ -22,9 +22,9 @@ function filterTone(rate: number): { tone: "primary" | "gold" | "danger"; label:
 const KPI_LABELS = ["Posted", "Survived 60d", "Vanished", "Survival rate"] as const;
 
 export default async function AdminDurabilityPage() {
-  const { session, data } = await getSessionAndData();
-  const telemetry = readPlatformTelemetry(data.platform, session.isDemo);
-  const records = [...data.platform.durability].sort((a, b) => b.filteredRate - a.filteredRate);
+  const [{ session }, platform] = await Promise.all([getSessionAndData(), getPlatformSnapshot()]);
+  const telemetry = readPlatformTelemetry(platform, session.isDemo);
+  const records = [...platform.durability].sort((a, b) => b.filteredRate - a.filteredRate);
 
   const totalPosted = records.reduce((a, r) => a + r.posted, 0);
   const totalSurvived = records.reduce((a, r) => a + r.survived60d, 0);

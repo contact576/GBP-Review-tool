@@ -305,6 +305,63 @@ describe("public sample mode", () => {
     });
     expect(plan.merged[0]?.durability).toBe("at_risk");
   });
+
+  /**
+   * The public Places payload carries no owner replies, so every review in it
+   * arrives flagged as answered. That must never overwrite what a GBP import
+   * actually read, or an unanswered review silently disappears from the
+   * owner's reply queue on the next public sync.
+   */
+  it("does not let a sample import mark an unanswered review as answered", () => {
+    const stored = review("rev_gpub_1", { needsReply: true });
+    const plan = reconcileReviewImport({
+      existing: [stored],
+      imported: [review("rev_gpub_1", { needsReply: false })],
+      nowIso: NOW,
+      mode: "sample",
+    });
+    expect(plan.merged[0]?.needsReply).toBe(true);
+    // Nothing changed, so nothing is written.
+    expect(plan.updates).toEqual([]);
+  });
+
+  it("leaves a genuinely answered review answered across a sample refresh", () => {
+    const plan = reconcileReviewImport({
+      existing: [review("rev_gpub_1", { needsReply: false })],
+      imported: [review("rev_gpub_1", { needsReply: false })],
+      nowIso: NOW,
+      mode: "sample",
+    });
+    expect(plan.merged[0]?.needsReply).toBe(false);
+  });
+
+  it("still records reply state for a review the sample is showing for the first time", () => {
+    const plan = reconcileReviewImport({
+      existing: [],
+      imported: [review("rev_gpub_new", { needsReply: true })],
+      nowIso: NOW,
+      mode: "sample",
+    });
+    expect(plan.inserts[0]?.needsReply).toBe(true);
+  });
+
+  it("lets an authoritative import correct reply state in both directions", () => {
+    const answered = reconcileReviewImport({
+      existing: [review("rev_1", { needsReply: true })],
+      imported: [review("rev_1", { needsReply: false })],
+      nowIso: NOW,
+      mode: "authoritative",
+    });
+    expect(answered.merged[0]?.needsReply).toBe(false);
+
+    const unanswered = reconcileReviewImport({
+      existing: [review("rev_1", { needsReply: false })],
+      imported: [review("rev_1", { needsReply: true })],
+      nowIso: NOW,
+      mode: "authoritative",
+    });
+    expect(unanswered.merged[0]?.needsReply).toBe(true);
+  });
 });
 
 describe("isPlausibleFullImport", () => {

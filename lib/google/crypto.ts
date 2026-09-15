@@ -1,5 +1,6 @@
 import "server-only";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { resolveSecret } from "@/lib/security/secret";
 
 /**
  * At-rest encryption for OAuth refresh tokens (AES-256-GCM).
@@ -15,11 +16,11 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 const FALLBACK_SECRET = "foundly-dev-encryption-set-ENCRYPTION_SECRET-in-production";
 
 function encryptionKey(): Buffer {
-  const configured = process.env.ENCRYPTION_SECRET || process.env.AUTH_SECRET;
-  if (process.env.NODE_ENV === "production" && !configured) {
-    throw new Error("ENCRYPTION_SECRET or AUTH_SECRET is required in production");
-  }
-  const secret = configured || FALLBACK_SECRET;
+  const secret = resolveSecret({
+    value: process.env.ENCRYPTION_SECRET || process.env.AUTH_SECRET,
+    name: "ENCRYPTION_SECRET (or AUTH_SECRET)",
+    devFallback: FALLBACK_SECRET,
+  });
   return createHash("sha256").update(secret).digest();
 }
 

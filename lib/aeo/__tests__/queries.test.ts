@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDefaultQueries } from "../queries";
+import { blockerSentence, buildDefaultQueries } from "../queries";
 import { buildAeoContext, type AeoContextSource } from "../context";
 import type { AeoBusinessContext } from "../types";
 
@@ -110,7 +110,7 @@ function source(overrides: {
       vertical: overrides.vertical ?? "bakery",
       region: "CA",
       timezone: "America/Halifax",
-      plan: "pro",
+      plan: "growth",
       createdAt: "2026-01-01T00:00:00.000Z",
       ...(overrides.customServices ? { industryConfig: { customServices: overrides.customServices } } : {}),
     },
@@ -157,20 +157,51 @@ describe("AEO query-set generation", () => {
   it("falls back to 'near me' and flags the gap when no city is known", () => {
     const plan = buildDefaultQueries(context({ city: "" }), 4);
     expect(plan.queries[0]).toBe("best bakery near me");
-    expect(plan.blockers.join(" ")).toMatch(/city/i);
+    const city = plan.blockers.find((blocker) => blocker.id === "city");
+    expect(city?.blocking).toBe(false);
+    expect(city?.fix).toMatch(/city/i);
+    expect(city?.href).toBe("/app/settings/locations");
   });
 
   it("refuses to write questions with no category, rather than inventing one", () => {
     const plan = buildDefaultQueries(context({ category: "" }), 4);
     expect(plan.queries).toEqual([]);
-    expect(plan.blockers.join(" ")).toMatch(/primary category/i);
+    const category = plan.blockers.find((blocker) => blocker.id === "category");
+    expect(category?.blocking).toBe(true);
+    expect(category?.fix).toMatch(/primary category/i);
+    expect(category?.href).toBe("/app/settings/business");
   });
 
   it("flags a missing service list but still produces general questions", () => {
     const plan = buildDefaultQueries(context({ services: [] }), 6);
     expect(plan.queries.length).toBeGreaterThan(0);
     expect(plan.queries.every((query) => !query.includes("where can I get"))).toBe(true);
-    expect(plan.blockers.join(" ")).toMatch(/services/i);
+    const services = plan.blockers.find((blocker) => blocker.id === "services");
+    expect(services?.blocking).toBe(false);
+    expect(services?.fix).toMatch(/services/i);
+  });
+
+  it("states every blocker as a fix, a destination and an effect on this check", () => {
+    const plan = buildDefaultQueries(
+      context({ category: "", city: "", services: [] }),
+      6,
+    );
+    expect(plan.blockers.map((blocker) => blocker.id)).toEqual([
+      "category",
+      "city",
+      "services",
+    ]);
+    for (const blocker of plan.blockers) {
+      expect(blocker.fix.length).toBeGreaterThan(0);
+      expect(blocker.whereLabel.length).toBeGreaterThan(0);
+      expect(blocker.href.startsWith("/app/")).toBe(true);
+      expect(blocker.effect.length).toBeGreaterThan(0);
+      // Never a causation claim: a gap explains this check, not an outcome.
+      const sentence = blockerSentence(blocker).toLowerCase();
+      expect(sentence.includes("rank")).toBe(false);
+      expect(sentence.includes("guarantee")).toBe(false);
+      expect(sentence.includes("customers gained")).toBe(false);
+    }
   });
 
   it("honours the requested size and the hard per-run ceiling", () => {

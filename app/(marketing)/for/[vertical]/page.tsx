@@ -175,7 +175,7 @@ export default async function VerticalPage({ params }: { params: Promise<{ verti
       <Band tone="paper">
         <Container size="md" className="text-center">
           <Eyebrow className="justify-center">{content.eyebrow}</Eyebrow>
-          <h1 className="mx-auto mt-4 max-w-3xl text-[34px] font-extrabold leading-[1.08] tracking-tight text-ink sm:text-[48px]">
+          <h1 className="mx-auto mt-4 max-w-3xl mk-display text-[38px] text-ink sm:text-[58px]">
             {content.headline}
           </h1>
           <p className="mx-auto mt-5 max-w-xl text-[16px] leading-relaxed text-sub sm:text-[18px]">
@@ -191,7 +191,7 @@ export default async function VerticalPage({ params }: { params: Promise<{ verti
       {/* ── Proof stats — white spec cells ───────────────── */}
       <Band tone="white" className="py-12 sm:py-16">
         <Container size="md">
-          <div className="grid grid-cols-1 divide-y divide-hairline rounded-card border border-hairline bg-paper sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+          <div className="grid grid-cols-1 divide-y divide-soft glass mk-card sm:grid-cols-3 sm:divide-x sm:divide-y-0">
             {content.proof.map((p) => (
               <div key={p.label} className="px-4 py-6 text-center">
                 <div className="text-[34px] font-extrabold tabular-nums tracking-tight text-primary-dark">{p.stat}</div>
@@ -212,7 +212,7 @@ export default async function VerticalPage({ params }: { params: Promise<{ verti
           />
           <div className="mt-10 grid grid-cols-1 gap-5 lg:grid-cols-3">
             {content.moments.map((m) => (
-              <div key={m.title} className="flex flex-col rounded-card border border-hairline bg-card p-6">
+              <div key={m.title} className="flex flex-col glass mk-card p-6">
                 <div className="grid size-12 place-items-center rounded-btn bg-primary-tint text-primary-dark">
                   <Icon name={m.icon} size={24} />
                 </div>
@@ -227,7 +227,7 @@ export default async function VerticalPage({ params }: { params: Promise<{ verti
       {/* ── Quote — white ────────────────────────────────── */}
       <Band tone="white">
         <Container size="sm">
-          <figure className="rounded-card border border-hairline bg-paper p-8">
+          <figure className="glass mk-card p-8">
             <div className="flex gap-1 text-star" aria-label="Five stars">
               {Array.from({ length: 5 }).map((_, i) => (
                 <Icon key={i} name="star-fill" size={18} />
@@ -247,7 +247,7 @@ export default async function VerticalPage({ params }: { params: Promise<{ verti
       <CtaBand
         eyebrow="No card required"
         title="Ready to be the obvious choice?"
-        lede="Run your free Growth Score, or start a 14-day Growth trial — no card required."
+        lede="Run your free Growth Score, or start a 30-day full-access trial — no card required."
         actions={
           <>
             <LinkButton href="/score" size="lg" icon="sparkles">Get my free Growth Score</LinkButton>

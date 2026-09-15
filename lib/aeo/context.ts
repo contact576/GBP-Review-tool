@@ -7,7 +7,7 @@
  * saying which source was used so the UI can explain the query set.
  */
 
-import { getIndustry } from "@/lib/industries";
+import { getIndustry, INDUSTRIES } from "@/lib/industries";
 import type { FoundlyData } from "@/lib/data/types";
 import type { AeoBusinessContext, AeoServicesSource } from "./types";
 
@@ -17,11 +17,21 @@ export type AeoContextSource = Pick<FoundlyData, "location" | "workspace">;
 
 export function buildAeoContext(data: AeoContextSource): AeoBusinessContext {
   const { location, workspace } = data;
-  const industry = getIndustry(location.vertical || workspace.vertical);
+  const industryKey = location.vertical || workspace.vertical;
+  const industry = getIndustry(industryKey);
+  /*
+   * The industry label is only a usable category when it came from the catalog.
+   * For an unmatched key `getIndustry` humanises the key itself, so a workspace
+   * keyed "services" yielded the category "services" and the run asked "best
+   * services in Toronto" — a question no buyer types, whose answer says nothing
+   * about the business. A guessed category is worse than none: it burns one of
+   * a handful of paid monthly checks to learn nothing. Prefer a real category,
+   * and otherwise report the gap rather than inventing a stand-in.
+   */
   const category = firstNonEmpty([
     location.profile.primaryCategory,
     location.category,
-    industry.label,
+    isCatalogIndustry(industryKey) ? industry.label : "",
   ]);
   const services = resolveServices(data, industry.services);
 
@@ -39,20 +49,35 @@ function resolveServices(
   data: AeoContextSource,
   industryServices: readonly string[],
 ): { values: string[]; source: AeoServicesSource } {
-  const fromProfile = clean(
+  const excluded = new Set(
+    (data.workspace.industryConfig?.excludedServices ?? []).map((value) => value.trim().toLowerCase()),
+  );
+  const keep = (values: string[]) => values.filter((value) => !excluded.has(value.toLowerCase()));
+
+  const fromProfile = keep(clean(
     (data.location.gbpSnapshot?.location.serviceItems ?? []).map(
       (item) => item.name ?? item.categoryName ?? "",
     ),
-  );
+  ));
   if (fromProfile.length > 0) return { values: fromProfile, source: "google_profile" };
 
-  const fromSettings = clean(data.workspace.industryConfig?.customServices ?? []);
+  // The owner's own website, crawled when they connected it. Same exclusions
+  // apply, so a mis-detected heading they switched off never becomes a query.
+  const fromWebsite = keep(clean(data.location.websiteEvidence?.facts.services ?? []));
+  if (fromWebsite.length > 0) return { values: fromWebsite, source: "website" };
+
+  const fromSettings = keep(clean(data.workspace.industryConfig?.customServices ?? []));
   if (fromSettings.length > 0) return { values: fromSettings, source: "workspace_settings" };
 
   const fromCatalog = clean([...industryServices]);
   if (fromCatalog.length > 0) return { values: fromCatalog, source: "industry_catalog" };
 
   return { values: [], source: "none" };
+}
+
+/** True only when the key names a real catalog industry, not a humanised guess. */
+function isCatalogIndustry(key: string): boolean {
+  return INDUSTRIES.some((industry) => industry.key === key);
 }
 
 function clean(values: string[]): string[] {
@@ -81,6 +106,7 @@ function firstNonEmpty(values: (string | undefined)[]): string {
 /** Human label for where the service list came from — shown in the UI. */
 export const SERVICES_SOURCE_COPY: Record<AeoServicesSource, string> = {
   google_profile: "services listed on your Google profile",
+  website: "services read from your website",
   workspace_settings: "services saved in your workspace settings",
   industry_catalog: "typical services for the industry you selected",
   none: "no service list yet",

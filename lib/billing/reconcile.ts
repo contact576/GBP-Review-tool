@@ -25,7 +25,7 @@ type PriceResolver = (
 
 type JsonRecord = Record<string, unknown>;
 
-const PAID_TIERS = new Set<PlanTier>(["starter", "growth", "pro", "multi", "agency"]);
+const PAID_TIERS = new Set<PlanTier>(["starter", "growth", "multi", "agency"]);
 
 function record(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value)

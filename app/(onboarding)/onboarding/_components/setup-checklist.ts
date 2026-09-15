@@ -10,7 +10,7 @@ import type { FoundlyData } from "@/lib/data/types";
  *
  * Nothing here is assumed from "the user reached this screen" — every item
  * reads a signal the data layer genuinely exposes, so a visitor who skipped
- * every step sees an honest 0/7, and the finish screen's celebration is only
+ * every step sees an honest 0/8, and the finish screen's celebration is only
  * ever shown when it has actually been earned.
  *
  * Server-only: reads the platform delivery adapters (`emailEnabled` /
@@ -86,6 +86,9 @@ export function buildSetupChecklist(data: FoundlyData): SetupChecklist {
   const smsLive = smsIntegration?.status === "connected" || smsEnabled();
   const locationQr = qrAssets.find((q) => q.scope === "location" && !q.degraded);
   const pendingInvites = invites.filter((i) => i.status === "pending");
+  const website = location.websiteEvidence;
+  const websiteScanned = website?.status === "synced";
+  const websiteServices = websiteScanned ? website.facts.services.length : 0;
 
   // A request only counts as "sent" once it reached the customer — queued,
   // suppressed and failed requests never left the building.
@@ -122,8 +125,24 @@ export function buildSetupChecklist(data: FoundlyData): SetupChecklist {
       priority: 1,
     },
     {
-      key: "business-type",
+      key: "website",
       step: 2,
+      icon: "external",
+      done: websiteScanned,
+      label: websiteScanned ? "Website connected" : "Connect your website",
+      detail: websiteScanned
+        ? websiteServices > 0
+          ? `${plural(websiteServices, "service", "services")} read from your site feed the review page.`
+          : "Your site was read, but no service list was found on it."
+        : website?.status === "error"
+          ? `Last scan failed${website.error ? ` — ${website.error}` : ""}.`
+          : "Reading your site gives customers real services to pick from and tunes review wording to your work.",
+      href: "/onboarding/website",
+      priority: 3,
+    },
+    {
+      key: "business-type",
+      step: 3,
       icon: "grid",
       done: industryKey.length > 0,
       label: industryKey.length > 0 ? "Business type set" : "Choose your business type",
@@ -132,11 +151,11 @@ export function buildSetupChecklist(data: FoundlyData): SetupChecklist {
           ? `Review prompts and the attribute catalog are tuned for ${industryLabel}.`
           : "Pick an industry so review prompts and customer attributes match your work.",
       href: "/onboarding/business-type",
-      priority: 6,
+      priority: 7,
     },
     {
       key: "google",
-      step: 3,
+      step: 4,
       icon: "google",
       done: gbpConnected,
       label: gbpConnected
@@ -147,11 +166,11 @@ export function buildSetupChecklist(data: FoundlyData): SetupChecklist {
         : googleIntegration?.detail ||
           "Connect to import your reviews, photos and profile performance.",
       href: "/onboarding/connect",
-      priority: 4,
+      priority: 5,
     },
     {
       key: "channels",
-      step: 4,
+      step: 5,
       icon: "send",
       done: emailLive || smsLive,
       label: emailLive || smsLive ? "Invites can send" : "No delivery channel is live yet",
@@ -165,11 +184,11 @@ export function buildSetupChecklist(data: FoundlyData): SetupChecklist {
               : emailIntegration?.detail ||
                 "Requests will queue until the email service is configured.",
       href: "/onboarding/channels",
-      priority: 7,
+      priority: 8,
     },
     {
       key: "qr-kit",
-      step: 5,
+      step: 6,
       icon: "qr",
       done: Boolean(locationQr),
       label: locationQr ? "QR kit ready to print" : "No QR code for this location yet",
@@ -181,7 +200,7 @@ export function buildSetupChecklist(data: FoundlyData): SetupChecklist {
     },
     {
       key: "test-invite",
-      step: 6,
+      step: 7,
       icon: "eye",
       done: requests.length > 0,
       label: requests.length > 0 ? "Review page tested" : "Try your review page",
@@ -190,11 +209,11 @@ export function buildSetupChecklist(data: FoundlyData): SetupChecklist {
           ? `${plural(requests.length, "review request", "review requests")} created in this workspace so far.`
           : "No review request exists yet — preview the page your customers land on.",
       href: "/onboarding/test-invite",
-      priority: 3,
+      priority: 4,
     },
     {
       key: "team",
-      step: 7,
+      step: 8,
       icon: "users",
       done: staff.length > 0 || pendingInvites.length > 0,
       label: staff.length > 0 || pendingInvites.length > 0 ? "Team invited" : "Invite your team",
@@ -210,7 +229,7 @@ export function buildSetupChecklist(data: FoundlyData): SetupChecklist {
               .join(" · ") + "."
           : "It's just you so far — teammates get their own QR code and leaderboard spot.",
       href: "/onboarding/team",
-      priority: 5,
+      priority: 6,
     },
   ];
 

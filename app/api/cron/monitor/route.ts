@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getRealProvider, isDbBacked } from "@/lib/data";
 import { isMonitoringCronAuthorized } from "@/lib/monitoring/cron-auth";
 import { runContinuousMonitoringBatch } from "@/lib/monitoring/runner";
+import { runTrialEmailBatch, type TrialEmailBatchResult } from "@/lib/billing/trial-emails";
+import { recordPlatformHistory, type HistoryRecordResult } from "@/lib/platform/history-runner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,9 +16,35 @@ export async function GET(request: Request) {
   if (!isDbBacked()) {
     return NextResponse.json({ error: "database_required" }, { status: 503 });
   }
+  const provider = await getRealProvider();
   const result = await runContinuousMonitoringBatch({
-    provider: await getRealProvider(),
+    provider,
     trigger: "scheduled",
   });
-  return NextResponse.json({ ok: true, ...result });
+
+  // Trial notices ride the same daily schedule. They are best-effort: a
+  // failure here is logged and reported, never allowed to fail the cron —
+  // the monitoring result above has already been earned.
+  let trialEmails: TrialEmailBatchResult | { error: string };
+  try {
+    trialEmails = await runTrialEmailBatch({ provider });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "trial email batch failed";
+    console.error("[cron/monitor] trial emails failed:", message);
+    trialEmails = { error: message.slice(0, 300) };
+  }
+
+  // Platform history for the ops console (logo churn / NRR need a month of
+  // daily snapshots). Best-effort like the trial batch. The Postgres
+  // aggregate is platform-wide, so the workspace key is not consulted.
+  let platformHistory: HistoryRecordResult | { error: string };
+  try {
+    platformHistory = await recordPlatformHistory({ provider, homeWorkspaceId: "cron" });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "platform history failed";
+    console.error("[cron/monitor] platform history failed:", message);
+    platformHistory = { error: message.slice(0, 300) };
+  }
+
+  return NextResponse.json({ ok: true, ...result, trialEmails, platformHistory });
 }

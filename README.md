@@ -49,6 +49,7 @@ Copy `.env.example` to `.env.local` for local development. See `SETUP.md` for pr
 | Security | `AUTH_SECRET`, `ENCRYPTION_SECRET`, `HEALTH_CHECK_SECRET`, `CONTENT_ASSET_SIGNING_SECRET`, `CRON_SECRET` |
 | Public origin | `NEXT_PUBLIC_APP_URL` |
 | AI | `ANTHROPIC_API_KEY`; `OPENAI_API_KEY` plus optional content/image model overrides |
+| AI Visibility engines | `OPENAI_API_KEY` (ChatGPT), `ANTHROPIC_API_KEY` (Claude), `GOOGLE_AI_API_KEY` (Gemini), `PERPLEXITY_API_KEY` (Perplexity, web-grounded); optional `FOUNDLY_AEO_*_MODEL` overrides. An engine without a key is reported as not connected, never as not naming you |
 | Google | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_MAPS_API_KEY` |
 | Email | `RESEND_API_KEY`, `EMAIL_FROM` |
 | SMS | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, plus a Messaging Service SID or From number |

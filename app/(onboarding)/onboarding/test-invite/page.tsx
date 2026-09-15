@@ -31,7 +31,7 @@ export default async function TestInvitePage() {
 
   return (
     <Step
-      current={6}
+      current={7}
       title="Try your review page"
       subtitle="See exactly what your customers get before you send a real invite."
       continueHref="/onboarding/team"

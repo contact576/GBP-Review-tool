@@ -45,8 +45,8 @@ function allStrings(industry: Industry): string[] {
 }
 
 describe("industry catalog", () => {
-  it("contains exactly 36 industries", () => {
-    expect(INDUSTRIES).toHaveLength(36);
+  it("contains exactly 37 industries", () => {
+    expect(INDUSTRIES).toHaveLength(37);
   });
 
   it("has unique keys", () => {
@@ -152,7 +152,7 @@ describe("industryForGoogleCategory", () => {
 });
 
 describe("industriesByGroup", () => {
-  it("buckets all 36 industries into known groups", () => {
+  it("buckets all 37 industries into known groups", () => {
     const grouped = industriesByGroup();
     let total = 0;
     for (const [group, industries] of grouped) {
@@ -160,7 +160,7 @@ describe("industriesByGroup", () => {
       expect(industries.length).toBeGreaterThan(0);
       total += industries.length;
     }
-    expect(total).toBe(36);
+    expect(total).toBe(37);
   });
 });
 

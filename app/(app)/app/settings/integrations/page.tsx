@@ -1,6 +1,7 @@
 import { getData } from "@/lib/data";
 import { Badge } from "@/components/ds/misc";
 import { Icon, type IconName } from "@/components/icons";
+import { BrandLogo, type BrandName } from "@/components/icons/brands";
 import { formatRelative } from "@/lib/utils/format";
 import type { Integration } from "@/lib/data/types";
 import { SettingsShell } from "../SettingsShell";
@@ -8,16 +9,26 @@ import { Callout, SettingsSection } from "../SettingsUI";
 import { ReconnectButton } from "./ReconnectButton";
 import { SyncGoogleButton } from "@/components/app/SyncGoogleButton";
 
-const PROVIDER_ICON: Record<Integration["provider"], IconName> = {
+/** The provider's own mark where it has one; the website has none, so it keeps a line icon. */
+const PROVIDER_BRAND: Record<Integration["provider"], BrandName | null> = {
   google: "google",
-  google_places: "map-pin",
-  website: "external",
-  search_console: "search",
-  instagram: "camera",
-  twilio: "message",
-  resend: "mail",
-  stripe: "credit-card",
+  google_places: "google-maps",
+  website: null,
+  search_console: "search-console",
+  instagram: "instagram",
+  twilio: "twilio",
+  resend: "resend",
+  stripe: "stripe",
 };
+
+function ProviderMark({ provider }: { provider: Integration["provider"] }) {
+  const brand = PROVIDER_BRAND[provider];
+  return (
+    <div className="grid size-10 shrink-0 place-items-center rounded-btn border border-hairline bg-card text-primary">
+      {brand ? <BrandLogo name={brand} size={22} title="" /> : <Icon name="external" size={20} />}
+    </div>
+  );
+}
 
 // The honest consequence if this integration is NOT fully working.
 const CONSEQUENCE: Record<Integration["provider"], string> = {
@@ -77,9 +88,7 @@ export default async function IntegrationsSettingsPage() {
                 className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="flex items-start gap-3">
-                  <div className="grid size-10 shrink-0 place-items-center rounded-btn bg-primary-wash text-primary">
-                    <Icon name={PROVIDER_ICON[int.provider]} size={20} />
-                  </div>
+                  <ProviderMark provider={int.provider} />
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-[15px] font-bold text-ink">{int.label}</span>
