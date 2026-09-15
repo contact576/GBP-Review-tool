@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Wordmark } from "@/components/app/AppShell";
 import { MICROCOPY } from "@/lib/compliance/microcopy";
 import { SiteNav } from "./_components/SiteNav";
+import { Wallpaper } from "@/components/app/desktop/Wallpaper";
 
 const FOOTER: { title: string; links: { label: string; href: string }[] }[] = [
   {
@@ -45,11 +46,14 @@ const FOOTER: { title: string; links: { label: string; href: string }[] }[] = [
 
 export default function MarketingLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-dvh flex-col bg-paper">
+    <div className="flex min-h-dvh flex-col">
+      {/* Same drifting wallpaper the app sits on — the glass has something to
+          refract, and the public site and the product read as one product. */}
+      <Wallpaper />
       <SiteNav />
       <main id="main" className="flex-1">{children}</main>
 
-      <footer className="border-t border-hairline bg-card">
+      <footer className="mk-veil mt-8">
         <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
           <div className="grid grid-cols-2 gap-8 md:grid-cols-5">
             <div className="col-span-2 md:col-span-1">
@@ -74,7 +78,7 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
             ))}
           </div>
 
-          <div className="mt-10 flex flex-col gap-3 border-t border-hairline pt-6 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mt-10 flex flex-col gap-3 border-t border-soft pt-6 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-[13px] font-semibold text-ink">{MICROCOPY.poweredByFoundly}</p>
             <p className="text-[12px] text-faint">
               © {new Date().getFullYear()} Foundly · {MICROCOPY.actionsNotCustomers}

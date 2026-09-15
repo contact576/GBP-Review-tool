@@ -110,7 +110,7 @@ export function PricingBoard() {
       </div>
 
       {/* Teams & agencies band */}
-      <div className="rounded-card border border-hairline bg-card p-6 shadow-sm sm:p-8">
+      <div className="glass mk-card p-6 sm:p-8">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <Kicker>Teams &amp; agencies</Kicker>
@@ -171,10 +171,10 @@ function TierCard({ tier, symbol, annual }: { tier: Tier; symbol: string; annual
   return (
     <div
       className={cn(
-        "flex flex-col rounded-card p-6",
+        "flex flex-col rounded-card p-6 mk-card-lift",
         featured
-          ? "bg-hero on-hero text-white shadow-halo ring-1 ring-primary/30"
-          : "border border-hairline bg-card shadow-sm",
+          ? "glass-dark on-hero text-white ring-1 ring-white/15"
+          : "glass",
       )}
     >
       <div className={cn("kicker", featured ? "text-white/70" : "text-faint")}>{tier.name}</div>
@@ -225,7 +225,7 @@ function Segmented<T extends string>({
   onChange: (k: T) => void;
 }) {
   return (
-    <div className="inline-flex rounded-chip border border-hairline bg-card p-1">
+    <div className="inline-flex rounded-chip glass p-1">
       {options.map((o) => (
         <button
           key={o.key}
@@ -251,7 +251,7 @@ function BandCard({
   features: string[]; cta: string; href: string; highlight?: boolean;
 }) {
   return (
-    <div className={cn("flex flex-col rounded-card border bg-paper p-5", highlight ? "border-primary/40" : "border-hairline")}>
+    <div className={cn("flex flex-col rounded-card glass p-5", highlight && "ring-1 ring-primary/30")}>
       <div className="flex items-center justify-between">
         <div className="text-[15px] font-bold text-ink">{title}</div>
         {highlight ? <Badge tone="primary" icon="building">Resell it</Badge> : null}

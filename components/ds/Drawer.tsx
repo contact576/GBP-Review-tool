@@ -4,6 +4,9 @@ import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils/cn";
 import { Icon } from "@/components/icons";
 
+const FOCUSABLE =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 /**
  * Right-side drawer on desktop, full-screen sheet on mobile.
  * Focus-managed dialog; Esc closes. Focus is trapped while open and
@@ -18,24 +21,33 @@ export function Drawer({
   const panelRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
 
+  // Callers pass `onClose` as an inline arrow, so its identity changes on every
+  // parent render. Read it through a ref: the focus effect below must run only
+  // when the drawer actually opens or closes — re-running it mid-typing would
+  // yank the caret out of whatever field is being filled in.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+
   useEffect(() => {
     if (!open) return;
     // Remember what had focus so we can restore it when the drawer closes.
     openerRef.current = (document.activeElement as HTMLElement | null) ?? null;
 
     const panel = panelRef.current;
-    const focusableSelector =
-      'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
     const getFocusable = () =>
-      panel ? Array.from(panel.querySelectorAll<HTMLElement>(focusableSelector)) : [];
+      panel ? Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)) : [];
 
-    // Move focus to the first focusable element inside the drawer on open.
-    const initial = getFocusable();
-    (initial[0] ?? panel)?.focus();
+    // Move focus into the drawer on open — but never steal it from a control
+    // that already has it (React may commit children after this effect runs).
+    if (!panel?.contains(document.activeElement)) {
+      (getFocusable()[0] ?? panel)?.focus();
+    }
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== "Tab") return;
@@ -62,14 +74,16 @@ export function Drawer({
     };
 
     document.addEventListener("keydown", onKey);
+    const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    const opener = openerRef.current;
     return () => {
       document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
+      document.body.style.overflow = previousOverflow;
       // Restore focus to the element that opened the drawer.
-      openerRef.current?.focus?.();
+      opener?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

@@ -55,7 +55,7 @@ export function ReviewFlowPreview() {
                     className={
                       service === "Check-up & clean"
                         ? "inline-flex items-center gap-1 rounded-chip border border-primary bg-primary-tint px-2 py-1 text-[11px] font-medium text-primary-dark"
-                        : "inline-flex items-center rounded-chip border border-hairline bg-card px-2 py-1 text-[11px] font-medium text-sub"
+                        : "inline-flex items-center rounded-chip glass px-2 py-1 text-[11px] font-medium text-sub"
                     }
                   >
                     {service === "Check-up & clean" ? <Icon name="check" size={11} /> : null}

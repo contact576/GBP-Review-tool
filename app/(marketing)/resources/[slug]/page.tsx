@@ -36,7 +36,7 @@ export default async function ArticlePage({ params }: { params: Promise<{ slug: 
         <article className="mt-6">
           <header>
             <Eyebrow>{article.category}</Eyebrow>
-            <h1 className="mt-3 text-[30px] font-extrabold leading-[1.1] tracking-tight text-ink sm:text-[40px]">
+            <h1 className="mt-3 mk-display text-[34px] text-ink sm:text-[48px]">
               {article.title}
             </h1>
             <p className="mt-4 text-[17px] leading-relaxed text-sub">{article.dek}</p>
@@ -48,7 +48,7 @@ export default async function ArticlePage({ params }: { params: Promise<{ slug: 
           </header>
 
           {/* Takeaways */}
-          <div className="mt-8 rounded-card border border-hairline bg-card p-5 sm:p-6">
+          <div className="mt-8 glass mk-card p-5 sm:p-6">
             <div className="kicker mb-3">Key takeaways</div>
             <ul className="space-y-2.5">
               {article.takeaways.map((t) => (
@@ -90,7 +90,7 @@ export default async function ArticlePage({ params }: { params: Promise<{ slug: 
                 <Link
                   key={a.slug}
                   href={`/resources/${a.slug}`}
-                  className="flex flex-col rounded-card border border-hairline bg-card p-5 transition-colors hover:border-primary/40"
+                  className="flex flex-col glass mk-card p-5 mk-card-lift"
                 >
                   <Badge tone="primary">{a.category}</Badge>
                   <h3 className="mt-2.5 text-[16px] font-bold leading-snug text-ink">{a.title}</h3>

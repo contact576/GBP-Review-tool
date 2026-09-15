@@ -645,7 +645,7 @@ export function ScoreTool() {
                 </form>
 
                 {competitor ? (
-                  <div className={reduceMotion ? "mt-6 border-t border-hairline pt-6" : "mt-6 border-t border-hairline pt-6 animate-fade-in"}>
+                  <div className={reduceMotion ? "mt-6 border-t border-soft pt-6" : "mt-6 border-t border-soft pt-6 animate-fade-in"}>
                     {competitor.kind === "scored" ? (
                       <>
                         <div className="flex items-center justify-center gap-6 sm:gap-10">
@@ -698,7 +698,7 @@ export function ScoreTool() {
               </div>
               <Kicker>Authentic reviews, safely requested</Kicker>
             </div>
-            <div className="mt-4 rounded-card border border-hairline bg-card p-5">
+            <div className="mt-4 glass mk-card p-5">
               <ul className="space-y-3 text-[13px] leading-relaxed text-sub">
                 <li className="flex items-start gap-2"><Icon name="check-circle" size={16} className="mt-0.5 shrink-0 text-primary" />The same Google review option appears for every rating.</li>
                 <li className="flex items-start gap-2"><Icon name="check-circle" size={16} className="mt-0.5 shrink-0 text-primary" />Customers write about their genuine experience in their own words.</li>
@@ -828,7 +828,7 @@ function VerifiedCard({ place, signals }: { place: PlaceFacts; signals: ProfileS
         />
       </div>
 
-      <div className="mt-4 rounded-card border border-hairline bg-paper p-4">
+      <div className="mt-4 glass mk-card p-4">
         <div className="flex items-center justify-between gap-3">
           <span className="text-[13px] font-semibold text-ink">Profile completeness</span>
           <span className="data-chip text-primary-dark">{signals.profileCompleteness} / 100</span>
@@ -861,7 +861,7 @@ function Fact({
   icon: "star" | "chat" | "clock" | "camera"; label: string; value: string; note: string;
 }) {
   return (
-    <div className="rounded-card border border-hairline bg-paper p-4">
+    <div className="glass mk-card p-4">
       <div className="flex items-center gap-2">
         <Icon name={icon} size={15} className="shrink-0 text-primary" />
         <span className="text-[12px] font-semibold text-sub">{label}</span>

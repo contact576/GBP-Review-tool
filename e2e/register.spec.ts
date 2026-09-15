@@ -37,7 +37,12 @@ test("register → skip onboarding → truthful empty dashboard → sign out/in 
   await expect(gettingStarted.getByText(/\d+\/8 set up/)).toBeVisible();
 
   // The dashboard belongs to the registered business…
-  await expect(page.getByRole("heading", { name: "Good morning, Taylor" })).toBeVisible();
+  // <Greeting> picks the salutation from the *browser's* clock, so pinning one
+  // greeting made this pass only before noon local. Assert the name and that a
+  // real time-of-day greeting resolved — which is what the heading promises.
+  await expect(
+    page.getByRole("heading", { name: /^Good (morning|afternoon|evening), Taylor$/ }),
+  ).toBeVisible();
   await expect(page.getByText(business, { exact: true }).first()).toBeVisible();
   const growthCard = page.locator('section[aria-labelledby="growth-title"]');
   // …with a truthful unavailable score and nothing waiting for a reply…

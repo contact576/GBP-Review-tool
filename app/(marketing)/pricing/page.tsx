@@ -36,7 +36,7 @@ export default function PricingPage() {
         <Container>
           <div className="mx-auto max-w-2xl text-center">
             <Eyebrow className="justify-center">Pricing</Eyebrow>
-            <h1 className="mt-3 text-[32px] font-extrabold leading-tight tracking-tight text-ink sm:text-[44px]">
+            <h1 className="mt-3 mk-display text-[36px] text-ink sm:text-[54px]">
               Pricing that grows with you
             </h1>
             <p className="mx-auto mt-4 max-w-lg text-[16px] leading-relaxed text-sub">
@@ -55,7 +55,7 @@ export default function PricingPage() {
       <Band tone="white">
         <Container size="sm">
           <SectionHead eyebrow="FAQ" title="Questions, answered plainly" align="center" />
-          <dl className="mt-8 divide-y divide-hairline rounded-card border border-hairline bg-paper">
+          <dl className="mt-8 divide-y divide-soft glass mk-card">
             {FAQ.map((item) => (
               <div key={item.q} className="p-5 sm:p-6">
                 <dt className="text-[15px] font-bold text-ink">{item.q}</dt>

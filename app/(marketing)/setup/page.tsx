@@ -54,7 +54,7 @@ export default async function SetupPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-10">
-      <h1 className="text-[26px] font-extrabold text-ink lg:text-[30px]">Setup checklist</h1>
+      <h1 className="mk-h2 text-[28px] text-ink lg:text-[34px]">Setup checklist</h1>
       <p className="mt-1 text-[15px] text-sub">
         Live status of this deployment. Add keys in Vercel → your project → Settings →
         Environment Variables, then <strong>redeploy</strong> — this page updates on refresh.
@@ -196,7 +196,7 @@ function Item({
   const text = state === "ok" ? okText : state === "warn" ? (warnText ?? missingText) : missingText;
 
   return (
-    <div className="rounded-card border border-hairline bg-card p-4 shadow-sm">
+    <div className="glass mk-card p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
           <Icon name={icon} size={20} className={`mt-0.5 shrink-0 ${color}`} />

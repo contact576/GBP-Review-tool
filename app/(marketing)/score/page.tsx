@@ -33,7 +33,7 @@ export default function ScorePage() {
         <Container className="grid items-start gap-10 lg:grid-cols-[1.15fr_0.85fr] lg:gap-14">
           <div>
             <Eyebrow>Free · no account needed</Eyebrow>
-            <h1 className="mt-4 text-[34px] font-extrabold leading-[1.06] tracking-tight text-ink sm:text-[44px]">
+            <h1 className="mt-4 mk-display text-[38px] text-ink sm:text-[56px]">
               Your free Local Growth Score
             </h1>
             <p className="mt-4 max-w-xl text-[16px] leading-relaxed text-sub">
@@ -65,7 +65,7 @@ export default function ScorePage() {
           />
           <div className="mt-10 grid gap-5 sm:grid-cols-3">
             {PILLARS.map((p, i) => (
-              <div key={p.title} className="rounded-card border border-hairline bg-paper p-6">
+              <div key={p.title} className="glass mk-card p-6">
                 <div className="data-chip text-faint">{String(i + 1).padStart(2, "0")}</div>
                 <div className="mt-2 text-[16px] font-bold text-ink">{p.title}</div>
                 <p className="mt-2 text-[13px] leading-relaxed text-sub">{p.body}</p>
